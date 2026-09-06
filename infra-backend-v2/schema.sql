@@ -4,15 +4,15 @@ USE deanery_infra;
 -- 1. USERS TABLE
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    firebase_uid VARCHAR(128) UNIQUE NOT NULL, -- Security: Replaces passwords/payload spoofing[cite: 2]
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL, -- Security: Bcrypt hashed passwords
     role ENUM('APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN', 'CLERICAL') NOT NULL,
     department ENUM('Civil', 'Electrical', 'Horticulture', 'Administration', 'General') NOT NULL,
     phone VARCHAR(20),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- Efficiency: Index for the Auto-Assignment engine to instantly find JEs by department
+    -- Efficiency: Instantly find available JEs by department[cite: 2]
     INDEX idx_role_dept (role, department) 
 );
 
@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (applicant_id) REFERENCES users(id),
     FOREIGN KEY (assigned_je_id) REFERENCES users(id),
-    -- Efficiency: Composite index for Authority Dashboards (AE, SE, Dean) querying by status and department
-    INDEX idx_status_dept (status, department),
+    -- Efficiency: Composite index for Authority Dashboards querying by status and department[cite: 2]
+    INDEX idx_status_dept_date (status, department, created_at),
     INDEX idx_assigned_je (assigned_je_id)
 );
 
@@ -69,5 +69,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id),
+    -- Crucial for generating the history timeline that the Director sees instantly[cite: 3]
     INDEX idx_ticket_timeline (ticket_id, created_at)
 );
