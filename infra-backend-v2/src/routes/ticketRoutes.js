@@ -5,7 +5,9 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 
 // Import your actual controllers!
-import { createTicket, getQueue, updateTenderStatus } from '../controllers/ticketController.js';
+import {
+  createTicket, getQueue, submitReport, updateTenderStatus,
+} from '../controllers/ticketController.js';
 
 const router = express.Router();
 
@@ -31,10 +33,13 @@ router.post('/', requireRole(['APPLICANT', 'JE']), upload.array('files', 5), cre
 // 2. Authority Dashboard Queue (Pagination enabled)
 router.get('/queue', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), getQueue);
 
-// 3. JE Manual Tendering Milestone Update
+// 3. JE Site report + estimate
+router.post('/:ticket_id/report', requireRole(['JE']), submitReport);
+
+// 4. JE Manual Tendering Milestone Update
 router.post('/:ticket_id/tender', requireRole(['JE']), updateTenderStatus);
 
-// 4. JE Dashboard (Securely uses token ID, no payload spoofing)
+// 5. JE Dashboard (Securely uses token ID, no payload spoofing)
 router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
   const je_id = req.user.id;
   try {
@@ -50,7 +55,7 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
   }
 });
 
-// 5. Get Full Ticket Details (Enforces visibility rules)
+// 6. Get Full Ticket Details (Enforces visibility rules)
 router.get('/:ticket_id/details', async (req, res) => {
   const { ticket_id } = req.params;
   const userRole = req.user.role;

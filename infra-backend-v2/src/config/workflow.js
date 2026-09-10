@@ -129,8 +129,10 @@ export function resolveTransition({ currentStatus, role, action, estimate }) {
         throw new WorkflowError('A report must include an estimated amount.',
           { code: 'ESTIMATE_REQUIRED', status: 400 });
       }
-      if (Number(estimate) < 0) {
-        throw new WorkflowError('Estimated amount cannot be negative.',
+      if (Number(estimate) <= 0) {
+        throw new WorkflowError(
+          'Estimated amount must be greater than zero. If no work is required, ' +
+          'the ticket should be closed instead of approved.',
           { code: 'ESTIMATE_INVALID', status: 400 });
       }
       return { status: STATUS.PENDING_AE_APPROVAL, logAction: 'SUBMITTED' };
