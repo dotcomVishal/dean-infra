@@ -105,7 +105,6 @@ export default function TicketDetails() {
           {allStages.map((stage, index) => {
             const isCompleted = currentStageIndex > index || ticket.status === 'CLOSED';
             const isActive = currentStageIndex === index;
-            const isFuture = index > currentStageIndex && !isRejected;
 
             return (
               <React.Fragment key={stage.key}>

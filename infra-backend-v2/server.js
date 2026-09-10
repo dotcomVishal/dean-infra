@@ -1,3 +1,5 @@
+import 'dotenv/config';   // MUST be first: loads .env before anything reads process.env
+
 import app from './src/app.js';
 import './src/config/db.js'; // This triggers the database connection confirmation
 import './src/cron/emailReminders.js'; // This boots up the background escalation timers

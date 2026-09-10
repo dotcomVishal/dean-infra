@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Search, ChevronLeft, ChevronRight, Filter, ArrowUpDown } from 'lucide-react';
@@ -39,7 +39,7 @@ export default function MyTickets() {
   }, [user]);
 
   // --- FILTER & SORT LOGIC ---
-  let processedTickets = tickets.filter(t => {
+  const processedTickets = tickets.filter(t => {
     const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase()) || 
                           t.id.toString().includes(search);
     const matchesDept = deptFilter === 'All' || t.department === deptFilter;
