@@ -1,5 +1,6 @@
 import pool from '../config/db.js';
 import { sendEmail } from '../utils/mailer.js';
+import { resolveTenderUpdate, WorkflowError } from '../config/workflow.js';
 
 export const createTicket = async (req, res) => {
   const applicant_id = req.user.id; 
@@ -90,17 +91,93 @@ export const getQueue = async (req, res) => {
 };
 
 // TENDERING & CLOSURE: Manual milestones updated by the JE
-export const updateTenderStatus = async (req, res) => {
-  const { ticket_id } = req.params;
-  const { milestone } = req.body; 
+//
+// Split in two on purpose:
+//   applyTenderUpdate  = the logic. Takes a connection, throws WorkflowError.
+//                        No req, no res -> testable with a mock connection.
+//   updateTenderStatus = the HTTP wrapper. Parses, opens a transaction, maps
+//                        errors to status codes. Nothing clever lives here.
 
-  try {
-    await pool.query(
-      `UPDATE tickets SET status = ? WHERE id = ? AND assigned_je_id = ?`,
-      [milestone, ticket_id, req.user.id]
+export async function applyTenderUpdate(connection, { ticketId, jeId, milestone, remarks }) {
+  // 1. Read the CURRENT status and lock the row. FOR UPDATE means a second
+  //    concurrent request blocks here until this transaction commits, so it
+  //    reads the NEW status rather than validating against a stale one.
+  //    Ownership is enforced in the SELECT, not left to the UPDATE's WHERE.
+  const [rows] = await connection.query(
+    `SELECT id, status FROM tickets WHERE id = ? AND assigned_je_id = ? FOR UPDATE`,
+    [ticketId, jeId]
+  );
+
+  // 2. The old code never checked this. It relied on the UPDATE's WHERE clause
+  //    and then ignored affectedRows, so a JE posting to someone else's ticket
+  //    got `{ success: true }` for a write that never happened.
+  if (rows.length === 0) {
+    throw new WorkflowError(
+      `Ticket ${ticketId} not found, or it is not assigned to you.`,
+      { code: 'NOT_FOUND', status: 404 }
     );
-    res.json({ success: true, message: `Ticket updated to ${milestone}` });
+  }
+  const currentStatus = rows[0].status;
+
+  // 3. Let the state machine decide. THIS is the S1 fix: `milestone` is no
+  //    longer written to the database on the caller's say-so.
+  const { status: nextStatus, logAction } = resolveTenderUpdate({ currentStatus, milestone });
+
+  // 4. Compare-and-swap. The WHERE repeats the exact status we validated
+  //    against, so if anything changed it underneath us, affectedRows is 0.
+  const [result] = await connection.query(
+    `UPDATE tickets SET status = ? WHERE id = ? AND status = ?`,
+    [nextStatus, ticketId, currentStatus]
+  );
+  if (result.affectedRows !== 1) {
+    throw new WorkflowError(
+      'This ticket changed while you were working on it. Reload and try again.',
+      { code: 'CONFLICT', status: 409 }
+    );
+  }
+
+  // 5. Every state change gets an audit row. The old code wrote none, which
+  //    for a public-money workflow is a compliance gap, not just a nicety.
+  await connection.query(
+    `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
+    [ticketId, jeId, logAction, remarks || `Milestone set to ${nextStatus}`]
+  );
+
+  return nextStatus;
+}
+
+export const updateTenderStatus = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({
+      success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.',
+    });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const nextStatus = await applyTenderUpdate(connection, {
+      ticketId,
+      jeId: req.user.id,
+      milestone: req.body.milestone,
+      remarks: req.body.remarks,
+    });
+    await connection.commit();
+    res.json({ success: true, status: nextStatus, message: `Ticket updated to ${nextStatus}` });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    await connection.rollback();
+    // Known rule violation -> the status code the workflow module chose.
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({
+        success: false, code: error.code, message: error.message,
+      });
+    }
+    // Anything else is a real bug. Log it, and do NOT leak internals to the
+    // client -- the old code returned error.message raw, which can expose SQL.
+    console.error('updateTenderStatus failed:', error);
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
+  } finally {
+    connection.release();
   }
 };
