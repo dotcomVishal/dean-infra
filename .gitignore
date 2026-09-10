@@ -1,0 +1,43 @@
+# ============================================================
+#  Deanery Infra — root .gitignore
+#  One file here covers all three sub-projects.
+# ============================================================
+
+# ---- Dependencies. package-lock.json is the source of truth, not these. ----
+node_modules/
+
+# ---- SECRETS. Committing any of these = full system compromise. ----
+.env
+.env.*
+!.env.example
+serviceAccountKey.json
+firebase-adminsdk*.json
+*.pem
+*.key
+
+# ---- User-uploaded content: keep the folder, drop the contents ----
+# The **/ prefix is REQUIRED. Plain "uploads/*" is anchored to the repo
+# root and would silently match nothing (verified with git check-ignore).
+**/uploads/*
+!**/uploads/.gitkeep
+
+# ---- Build output ----
+dist/
+build/
+*.tsbuildinfo
+
+# ---- Logs ----
+logs/
+*.log
+npm-debug.log*
+
+# ---- Editor / OS noise ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# ---- Test coverage ----
+coverage/
