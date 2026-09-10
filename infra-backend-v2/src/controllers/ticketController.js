@@ -2,20 +2,17 @@ import pool from '../config/db.js';
 import { sendEmail } from '../utils/mailer.js';
 
 export const createTicket = async (req, res) => {
-  // User identity is securely extracted from the token, not the payload
   const applicant_id = req.user.id; 
   const { department, description, location, type = 'recurring' } = req.body;
 
-  // Logic: Only JEs can raise non-recurring tickets
   if (type === 'non-recurring' && req.user.role !== 'JE') {
-    return res.status(403).json({ success: false, message: 'Only Junior Engineers can initiate non-recurring work.' });
+    return res.status(403).json({ success: false, message: 'Only JEs can initiate non-recurring work.' });
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    // FAIR ASSIGNMENT ENGINE: Find JE in department with the LOWEST active workload
     const [jes] = await connection.query(`
       SELECT u.id, u.email, COUNT(t.id) as active_tickets
       FROM users u
@@ -29,23 +26,36 @@ export const createTicket = async (req, res) => {
     if (jes.length === 0) throw new Error(`No JE available for the ${department} department`);
     const assigned_je = jes[0];
 
-    // Insert ticket
     const [ticketResult] = await connection.query(
       `INSERT INTO tickets (applicant_id, assigned_je_id, department, type, description, location, status) 
        VALUES (?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
       [applicant_id, assigned_je.id, department, type, description, location]
     );
+    
+    const ticket_id = ticketResult.insertId;
+
+    // --- FIX: SAVE THE ATTACHMENTS TO THE DATABASE ---
+    if (req.files && req.files.length > 0) {
+      const attachmentQueries = req.files.map(file => {
+        const fileUrl = `/uploads/${file.filename}`;
+        return connection.query(
+          'INSERT INTO attachments (ticket_id, file_url, uploaded_by) VALUES (?, ?, ?)',
+          [ticket_id, fileUrl, applicant_id]
+        );
+      });
+      await Promise.all(attachmentQueries);
+    }
+    // -------------------------------------------------
 
     await connection.commit();
 
-    // Send Instant Assignment Email to the JE
     sendEmail(
       assigned_je.email, 
       'New Ticket Assigned', 
-      `You have been assigned Ticket #${ticketResult.insertId}. Please log into the portal to review the location.`
+      `You have been assigned Ticket #${ticket_id}. Please log into the portal to review the location.`
     );
 
-    res.json({ success: true, ticket_id: ticketResult.insertId, assigned_je_id: assigned_je.id });
+    res.json({ success: true, ticket_id, assigned_je_id: assigned_je.id });
   } catch (error) {
     await connection.rollback();
     res.status(500).json({ success: false, message: error.message });
@@ -53,6 +63,7 @@ export const createTicket = async (req, res) => {
     connection.release();
   }
 };
+
 
 // PAGINATION: Get Authority Queue
 export const getQueue = async (req, res) => {

@@ -24,8 +24,7 @@ app.use(helmet({
 
 // 4. Serve the Public folder (where your test.html lives)
 app.use(express.static(path.join(__dirname, '../public')));
-
-// 5. Parsers & CORS
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use(express.json());
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173', 
