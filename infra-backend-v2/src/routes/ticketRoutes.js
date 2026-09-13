@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 
 // Import your actual controllers!
-import { createTicket, getQueue, updateTenderStatus } from '../controllers/ticketController.js';
+import { createTicket, getQueue, updateTenderStatus, submitJeReport, uploadClerkDocs, uploadBudgetDocs } from '../controllers/ticketController.js';
 
 const router = express.Router();
 
@@ -91,5 +91,25 @@ router.get('/:ticket_id/details', async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+router.post('/:ticket_id/report', 
+  requireRole(['JE']), 
+  upload.fields([{ name: 'site_photos', maxCount: 10 }, { name: 'estimate_docs', maxCount: 5 }]), 
+  submitJeReport
+);
+
+// 2. CLERK: Uploads CPP/GEM Tendering Files
+router.post('/:ticket_id/tenders/upload', 
+  requireRole(['CLERICAL']), 
+  upload.array('files', 10), 
+  uploadClerkDocs
+);
+
+// 3. ACCOUNTANT: Uploads Budget/Sanction Files
+router.post('/:ticket_id/budget/upload', 
+  requireRole(['ACCOUNTANT']), 
+  upload.array('files', 5), 
+  uploadBudgetDocs
+);
 
 export default router;

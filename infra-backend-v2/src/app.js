@@ -24,7 +24,12 @@ app.use(helmet({
 
 // 4. Serve the Public folder (where your test.html lives)
 app.use(express.static(path.join(__dirname, '../public')));
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+  setHeaders: (res, path, stat) => {
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('Access-Control-Allow-Origin', '*');
+  }
+}));
 app.use(express.json());
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173', 

@@ -6,27 +6,34 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Point to the uploads directory in the root folder (two levels up from this file)
-const uploadDir = path.join(__dirname, '../../uploads');
-
-// Ensure the uploads folder exists before trying to save to it
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+// All files go to a staging area first. NEVER straight to permanent storage.
+const tempDir = path.join(__dirname, '../../uploads/temp');
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
 }
 
+// Security: Whitelist only safe MIME types
+const fileFilter = (req, file, cb) => {
+  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+  if (allowedMimeTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only JPEG, PNG, and PDF are allowed.'), false);
+  }
+};
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
+  destination: (req, file, cb) => cb(null, tempDir),
   filename: (req, file, cb) => {
-    // Create a unique, URL-safe filename
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const sanitizedOriginal = file.originalname.replace(/\s+/g, '_');
+    // Generate an unguessable, URL-safe filename
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const sanitizedOriginal = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');
     cb(null, `${uniqueSuffix}-${sanitizedOriginal}`);
   }
 });
 
 export const upload = multer({
   storage,
-  limits: { fileSize: 30 * 1024 * 1024 } // 30MB limit per file[cite: 2]
+  fileFilter,
+  limits: { fileSize: 30 * 1024 * 1024 } // 30MB limit
 });
