@@ -245,14 +245,14 @@ export default function TicketDetails() {
                 {ticket.attachments.map((file: any, i: number) => (
                 <a 
                     key={i} 
-                    href={`http://localhost:5000${file.file_url}`} 
+                    href={file.file_url}
                     target="_blank" 
                     rel="noopener noreferrer" 
                     className="block relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:opacity-80 transition-opacity bg-slate-50 dark:bg-slate-900 group shadow-sm"
                 >
                     {/* PREPEND THE BACKEND URL HERE */}
                     <img 
-                    src={`http://localhost:5000${file.file_url}`} 
+                    src={file.file_url}
                     alt="Site Evidence" 
                     className="w-full h-full object-cover" 
                     />

@@ -2,7 +2,7 @@ import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 
 export const api = axios.create({
-  baseURL: 'http://localhost:5000/api', // Pointing to your Node backend
+  baseURL: '/api', // Pointing to your Node backend
 });
 
 // Automatically attach the JWT to every request

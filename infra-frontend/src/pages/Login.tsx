@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import { api } from '../services/api';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
@@ -28,8 +28,8 @@ export default function Login() {
       const jwtToken = await result.user.getIdToken();
 
       // 2. Sync with the MySQL Backend
-      const response = await axios.post(
-        'http://localhost:5000/api/auth/sync',
+      const response = await api.post(
+        '/auth/sync',
         {},
         {
           headers: {
