@@ -42,6 +42,7 @@ app.use('/api/', apiLimiter);
 // 7. API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.get('/api/health', (_req, res) => res.status(200).json({ success: true, status: 'ok' }));
 
 // 8. Global Error Handler
 app.use((err, req, res, next) => {
