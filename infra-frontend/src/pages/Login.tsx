@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
+import { api } from '../services/api';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -28,15 +28,11 @@ export default function Login() {
       const jwtToken = await result.user.getIdToken();
 
       // 2. Sync with the MySQL Backend
-      const response = await axios.post(
-        'http://localhost:5000/api/auth/sync',
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${jwtToken}`
-          }
-        }
-      );
+      const response = await api.post('/auth/sync', {}, {
+        headers: {
+          Authorization: 'Bearer ' + jwtToken,
+        },
+      });
 
       // 3. Update global state (this instantly triggers the router redirect)
       if (response.data.success) {
