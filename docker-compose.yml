@@ -82,11 +82,9 @@ services:
     image: nginx:alpine
     container_name: dean-proxy
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:8085:80"
     volumes:
       - ./nginx-proxy.conf:/etc/nginx/nginx.conf:ro
-      - ./certs:/etc/nginx/certs:ro
     depends_on:
       - frontend
       - backend
