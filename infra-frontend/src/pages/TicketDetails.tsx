@@ -125,7 +125,7 @@ export default function TicketDetails() {
                     isActive ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/30' : 
                     isCompleted ? 'bg-green-500 border-green-500 text-white' : 
                     isRejected && index === 0 ? 'bg-red-500 border-red-500 text-white' :
-                    'bg-slate-50 dark:bg-slate-900 border-dashed border-slate-300 dark:border-slate-600 text-slate-400' // Hollow future node
+                    'bg-slate-50 dark:bg-slate-900 border-dashed border-slate-300 dark:border-slate-600 text-slate-400'
                   }`}>
                     {isCompleted ? <CheckCircle size={16} /> : isRejected && index === 0 ? <XCircle size={16} /> : <span className="text-xs font-bold">{index + 1}</span>}
                   </div>
@@ -161,7 +161,9 @@ export default function TicketDetails() {
           
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 md:p-8 shadow-sm border border-slate-200 dark:border-slate-700">
             <h2 className="text-xs font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase mb-4 flex items-center gap-2"><FileText size={16}/> Issue Description</h2>
-            <p className="text-slate-900 dark:text-slate-100 whitespace-pre-wrap leading-relaxed text-sm md:text-base">{ticket.description}</p>
+            
+            {/* ADDED break-all AND break-words HERE TO FIX THE LONG TEXT GLITCH */}
+            <p className="text-slate-900 dark:text-slate-100 whitespace-pre-wrap break-words break-all leading-relaxed text-sm md:text-base">{ticket.description}</p>
             
             <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700/50 grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
@@ -177,7 +179,6 @@ export default function TicketDetails() {
                     <MapPin size={16} className="text-red-500 mt-0.5 shrink-0" /> 
                     <span className="leading-snug">{ticket.location}</span>
                   </div>
-                  {/* Google Maps Redirect with Extracted Coordinates */}
                   <a 
                     href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`}
                     target="_blank" rel="noopener noreferrer"
@@ -259,7 +260,6 @@ export default function TicketDetails() {
                     rel="noopener noreferrer" 
                     className="block relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:opacity-80 transition-opacity bg-slate-50 dark:bg-slate-900 group shadow-sm"
                 >
-                    {/* PREPEND THE BACKEND URL HERE */}
                     <img 
                     src={toUploadUrl(file.file_url)} 
                     alt="Site Evidence" 
