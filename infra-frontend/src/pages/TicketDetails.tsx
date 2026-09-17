@@ -68,6 +68,16 @@ export default function TicketDetails() {
     mapQuery = `${coordsMatch[1]},${coordsMatch[2]}`; // Extracts pure coords if available
   }
 
+  const apiBaseUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+  const uploadBaseUrl = apiBaseUrl.endsWith('/api') ? apiBaseUrl.slice(0, -4) : apiBaseUrl;
+  const toUploadUrl = (fileUrl: string) => {
+    if (!fileUrl) return fileUrl;
+    if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
+
+    const normalized = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+    return normalized.startsWith('/uploads/') ? `${uploadBaseUrl}${normalized}` : normalized;
+  };
+
   // --- FULL TIMELINE LOGIC ---
   const allStages = [
     { key: 'ASSIGNED_TO_JE', authLabel: 'JE Desk', appLabel: 'Processing Initiated' },
@@ -244,14 +254,14 @@ export default function TicketDetails() {
                 {ticket.attachments.map((file: any, i: number) => (
                 <a 
                     key={i} 
-                    href={`http://localhost:5000${file.file_url}`} 
+                    href={toUploadUrl(file.file_url)} 
                     target="_blank" 
                     rel="noopener noreferrer" 
                     className="block relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:opacity-80 transition-opacity bg-slate-50 dark:bg-slate-900 group shadow-sm"
                 >
                     {/* PREPEND THE BACKEND URL HERE */}
                     <img 
-                    src={`http://localhost:5000${file.file_url}`} 
+                    src={toUploadUrl(file.file_url)} 
                     alt="Site Evidence" 
                     className="w-full h-full object-cover" 
                     />

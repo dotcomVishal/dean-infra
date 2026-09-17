@@ -1,0 +1,16 @@
+FROM node:18-alpine
+
+WORKDIR /app/backend
+
+COPY infra-backend-v2/ /app/backend/
+
+RUN npm install --production && apk add --no-cache curl
+
+EXPOSE 5000
+
+VOLUME ["/app/backend/uploads", "/app/backend/.env", "/app/certs/serviceAccountKey.json"]
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:5000/api/health || exit 1
+
+CMD ["node", "server.js"]
