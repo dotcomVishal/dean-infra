@@ -1,12 +1,14 @@
 import pool from '../config/db.js';
 import { sendEmail } from '../utils/mailer.js';
 import { resolveTransition, resolveTenderUpdate, WorkflowError, ROLE } from '../config/workflow.js';
+import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
 
 export const createTicket = async (req, res) => {
   const applicant_id = req.user.id; 
   const { department, description, location, type = 'recurring' } = req.body;
 
   if (type === 'non-recurring' && req.user.role !== 'JE') {
+    cleanupTempFiles(req.files);
     return res.status(403).json({ success: false, message: 'Only JEs can initiate non-recurring work.' });
   }
 
@@ -35,18 +37,17 @@ export const createTicket = async (req, res) => {
     
     const ticket_id = ticketResult.insertId;
 
-    // --- FIX: SAVE THE ATTACHMENTS TO THE DATABASE ---
     if (req.files && req.files.length > 0) {
-      const attachmentQueries = req.files.map(file => {
-        const fileUrl = `/uploads/${file.filename}`;
-        return connection.query(
-          'INSERT INTO attachments (ticket_id, file_url, uploaded_by) VALUES (?, ?, ?)',
-          [ticket_id, fileUrl, applicant_id]
-        );
-      });
+      const fileUrls = await Promise.all(
+        req.files.map((file) => moveFile(file, ticket_id, 'applicant_evidence'))
+      );
+
+      const attachmentQueries = fileUrls.map((fileUrl) => connection.query(
+        'INSERT INTO attachments (ticket_id, file_url, uploaded_by) VALUES (?, ?, ?)',
+        [ticket_id, fileUrl, applicant_id]
+      ));
       await Promise.all(attachmentQueries);
     }
-    // -------------------------------------------------
 
     await connection.commit();
 
@@ -59,6 +60,7 @@ export const createTicket = async (req, res) => {
     res.json({ success: true, ticket_id, assigned_je_id: assigned_je.id });
   } catch (error) {
     await connection.rollback();
+    cleanupTempFiles(req.files);
     res.status(500).json({ success: false, message: error.message });
   } finally {
     connection.release();
