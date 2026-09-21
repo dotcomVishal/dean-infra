@@ -6,7 +6,7 @@ import { requireRole } from '../middleware/rbac.js';
 
 // Import your actual controllers!
 import {
-  createTicket, getQueue, submitReport, updateTenderStatus,
+  createTicket, getQueue, submitReport, updateTenderStatus, reviewTicket,
 } from '../controllers/ticketController.js';
 
 const router = express.Router();
@@ -33,20 +33,39 @@ router.post('/', requireRole(['APPLICANT', 'JE']), upload.array('files', 5), cre
 // 2. Authority Dashboard Queue (Pagination enabled)
 router.get('/queue', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), getQueue);
 
-// 3. JE Site report + estimate
-router.post('/:ticket_id/report', requireRole(['JE']), submitReport);
+// 3. JE Site report + estimate (Supports dual file uploads: site_photos and estimate_docs)
+router.post(
+  '/:ticket_id/report',
+  requireRole(['JE']),
+  upload.fields([
+    { name: 'site_photos', maxCount: 10 },
+    { name: 'estimate_docs', maxCount: 10 },
+  ]),
+  submitReport
+);
 
 // 4. JE Manual Tendering Milestone Update
 router.post('/:ticket_id/tender', requireRole(['JE']), updateTenderStatus);
+
+// 4.5 Authority Hierarchical Review (AE, SE, Dean, Director)
+router.post('/:ticket_id/review', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), reviewTicket);
 
 // 5. JE Dashboard (Securely uses token ID, no payload spoofing)
 router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
   const je_id = req.user.id;
   try {
     const [tickets] = await pool.query(
-      `SELECT t.*, u.name as applicant_name, u.phone as applicant_phone 
-       FROM tickets t JOIN users u ON t.applicant_id = u.id 
-       WHERE t.assigned_je_id = ? ORDER BY t.created_at DESC`,
+      `SELECT t.*, u.name as applicant_name, u.phone as applicant_phone, u.email as applicant_email,
+              r.estimated_amount, r.nature_of_work
+       FROM tickets t 
+       JOIN users u ON t.applicant_id = u.id 
+       LEFT JOIN (
+         SELECT r1.* FROM reports r1
+         JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r2
+         ON r1.id = r2.max_id
+       ) r ON t.id = r.ticket_id
+       WHERE t.assigned_je_id = ? 
+       ORDER BY t.created_at DESC`,
       [je_id]
     );
     res.json({ success: true, tickets });
@@ -61,17 +80,20 @@ router.get('/:ticket_id/details', async (req, res) => {
   const userRole = req.user.role;
 
   try {
-    // 1. Fetch Ticket & Applicant Info (Now includes email)
+    // 1. Fetch Ticket & Applicant Info (Now includes email and phone)
     const [tickets] = await pool.query(
-      `SELECT t.*, u.name as applicant_name, u.email as applicant_email 
+      `SELECT t.*, u.name as applicant_name, u.email as applicant_email, u.phone as applicant_phone 
        FROM tickets t JOIN users u ON t.applicant_id = u.id WHERE t.id = ?`, [ticket_id]
     );
     if (tickets.length === 0) return res.status(404).json({ success: false, message: 'Ticket not found' });
     
     const ticketData = tickets[0];
 
-    // 2. Fetch Attachments
-    const [attachments] = await pool.query('SELECT file_url, uploaded_by, created_at FROM attachments WHERE ticket_id = ?', [ticket_id]);
+    // 2. Fetch Attachments (Includes document_category)
+    const [attachments] = await pool.query(
+      'SELECT id, file_url, uploaded_by, created_at, document_category FROM attachments WHERE ticket_id = ? ORDER BY created_at ASC',
+      [ticket_id]
+    );
     ticketData.attachments = attachments;
 
     // 3. Fetch JE Report

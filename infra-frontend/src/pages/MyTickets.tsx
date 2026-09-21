@@ -40,7 +40,9 @@ export default function MyTickets() {
 
   // --- FILTER & SORT LOGIC ---
   const processedTickets = tickets.filter(t => {
-    const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase()) || 
+    const searchLower = search.toLowerCase();
+    const matchesSearch = (t.title && t.title.toLowerCase().includes(searchLower)) ||
+                          t.description.toLowerCase().includes(searchLower) || 
                           t.id.toString().includes(search);
     const matchesDept = deptFilter === 'All' || t.department === deptFilter;
     return matchesSearch && matchesDept;
@@ -138,15 +140,18 @@ export default function MyTickets() {
                 className="p-4 md:p-5 hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors cursor-pointer group"
               >
                 {/* Mobile View */}
-                <div className="md:hidden flex flex-col gap-3">
+                <div className="md:hidden flex flex-col gap-2">
                   <div className="flex justify-between items-start">
                     <span className="text-blue-600 dark:text-blue-400 font-mono text-sm font-bold">#TKT-{ticket.id.toString().padStart(4, '0')}</span>
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border ${getStatusStyle(ticket.status)}`}>
                       {ticket.status.replace(/_/g, ' ')}
                     </span>
                   </div>
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2">{ticket.description}</h3>
-                  <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-1">{ticket.title || ticket.description}</h3>
+                    {ticket.title && <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">{ticket.description}</p>}
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 font-medium pt-1">
                     <span>{ticket.department} Dept.</span>
                     <span>{format(new Date(ticket.created_at), 'MMM dd, yyyy')}</span>
                   </div>
@@ -157,8 +162,9 @@ export default function MyTickets() {
                   <div className="col-span-2 text-blue-600 dark:text-blue-400 font-mono text-sm font-bold group-hover:underline">
                     #TKT-{ticket.id.toString().padStart(4, '0')}
                   </div>
-                  <div className="col-span-4 text-sm font-semibold text-slate-900 dark:text-white truncate pr-4">
-                    {ticket.description}
+                  <div className="col-span-4 pr-4">
+                    <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{ticket.title || ticket.description}</div>
+                    {ticket.title && <div className="text-xs text-slate-400 truncate">{ticket.description}</div>}
                   </div>
                   <div className="col-span-2 text-sm text-slate-600 dark:text-slate-400 font-medium">
                     {ticket.department}

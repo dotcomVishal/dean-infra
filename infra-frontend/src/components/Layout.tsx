@@ -4,7 +4,8 @@ import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { 
   LayoutDashboard, PlusCircle, ClipboardList, 
-  CheckSquare, ShieldAlert, Menu, Sun, Moon, X, LogOut
+  CheckSquare, ShieldAlert, Menu, Sun, Moon, X, LogOut,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -27,18 +28,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     
     if (role === 'APPLICANT') {
       base.push(
-        { name: 'My Tickets', path: '/tickets', icon: ClipboardList }, // Added!
+        { name: 'My Tickets', path: '/tickets', icon: ClipboardList },
         { name: 'Raise Ticket', path: '/raise', icon: PlusCircle }
       );
     } else if (role === 'JE') {
       base.push(
         { name: 'Ticket Directory', path: '/tickets', icon: ClipboardList },
-        { name: 'Raise Ticket', path: '/raise', icon: PlusCircle }
+        { name: 'Raise Proposal', path: '/je/raise', icon: PlusCircle },
+        { name: 'Tender Control', path: '/je/tender', icon: FileSpreadsheet }
       );
     } else if (['AE', 'SE', 'DEAN'].includes(role)) {
       base.push({ name: 'Approvals Queue', path: '/tickets', icon: CheckSquare });
     } else if (role === 'DIRECTOR') {
       base.push({ name: 'Global Overview', path: '/tickets', icon: ShieldAlert });
+    } else if (role === 'SYSADMIN') {
+      base.push(
+        { name: 'Master Console', path: '/admin', icon: ShieldAlert },
+        { name: 'Ticket Directory', path: '/tickets', icon: ClipboardList }
+      );
     }
     return base;
   };

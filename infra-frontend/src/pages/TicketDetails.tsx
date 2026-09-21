@@ -98,12 +98,17 @@ export default function TicketDetails() {
           <ArrowLeft size={20} />
         </button>
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-3">
-            #TKT-{ticket.id.toString().padStart(4, '0')}
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
+              {ticket.title || `#TKT-${ticket.id.toString().padStart(4, '0')}`}
+            </h1>
+            <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400">
+              #TKT-{ticket.id.toString().padStart(4, '0')}
+            </span>
             <span className={`text-[11px] font-bold px-2.5 py-1 rounded-md border tracking-wide uppercase ${isRejected ? 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800' : 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>
               {ticket.status.replace(/_/g, ' ')}
             </span>
-          </h1>
+          </div>
           <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">Reported on {format(new Date(ticket.created_at), 'PPP at p')}</p>
         </div>
       </div>

@@ -22,12 +22,14 @@ CREATE TABLE IF NOT EXISTS tickets (
     applicant_id INT NOT NULL,
     assigned_je_id INT,
     department ENUM('Civil', 'Electrical', 'Horticulture') NOT NULL,
+    title VARCHAR(255) NULL,
     type ENUM('recurring', 'non-recurring') DEFAULT 'recurring',
     description TEXT NOT NULL,
     location VARCHAR(255),
     status ENUM(
         'ASSIGNED_TO_JE','PENDING_AE_APPROVAL','PENDING_SE_APPROVAL',
         'PENDING_DEAN_APPROVAL','PENDING_DIRECTOR_APPROVAL','APPROVED_FOR_TENDERING',
+        'TENDER_PUBLISHED','WORK_IN_PROGRESS',
         'RETURNED_TO_JE','DENIED','CLOSED'
     ) NOT NULL DEFAULT 'ASSIGNED_TO_JE',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -58,6 +60,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     file_url VARCHAR(255) NOT NULL,
     uploaded_by INT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    document_category ENUM('APPLICANT_EVIDENCE','JE_SITE_PHOTO','JE_ESTIMATE_DOC','CLERK_TENDER_DOC','FINANCE_SANCTION','AUTHORITY_REMARKS') NOT NULL DEFAULT 'APPLICANT_EVIDENCE',
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
     FOREIGN KEY (uploaded_by) REFERENCES users(id),
     INDEX idx_ticket (ticket_id)

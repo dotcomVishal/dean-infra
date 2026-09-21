@@ -32,6 +32,7 @@ export default function RaiseTicket() {
   const [files, setFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [department, setDepartment] = useState('Civil');
+  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [landmark, setLandmark] = useState('');
   
@@ -79,6 +80,7 @@ export default function RaiseTicket() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!title.trim()) return setError('Please provide a descriptive title for the ticket.');
     if (!description.trim()) return setError('Please provide a description of the issue.');
     setIsSubmitting(true);
 
@@ -87,6 +89,7 @@ export default function RaiseTicket() {
       : `Landmark: ${landmark}`;
 
     const formData = new FormData();
+    formData.append('title', title.trim());
     formData.append('department', department);
     formData.append('description', description);
     formData.append('location', locationString);
@@ -167,6 +170,19 @@ export default function RaiseTicket() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* 2.5 Title */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Ticket Title</label>
+          <input 
+            type="text" 
+            required
+            placeholder="Brief summary of the issue (e.g., Water leakage in Lab B2-104)"
+            className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
         </div>
 
         {/* 3. Description */}

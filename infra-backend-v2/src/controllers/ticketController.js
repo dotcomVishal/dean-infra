@@ -5,59 +5,114 @@ import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
 
 export const createTicket = async (req, res) => {
   const applicant_id = req.user.id; 
-  const { department, description, location, type = 'recurring' } = req.body;
+  const { title, department, description, location, type = 'recurring' } = req.body;
 
   if (type === 'non-recurring' && req.user.role !== 'JE') {
     cleanupTempFiles(req.files);
     return res.status(403).json({ success: false, message: 'Only JEs can initiate non-recurring work.' });
   }
 
+  const finalTitle = title?.trim() || (description ? description.trim().split('\n')[0].substring(0, 90) : 'Campus Infrastructure Request');
+
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const [jes] = await connection.query(`
-      SELECT u.id, u.email, COUNT(t.id) as active_tickets
-      FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED')
-      WHERE u.role = 'JE' AND u.department = ?
-      GROUP BY u.id
-      ORDER BY active_tickets ASC
-      LIMIT 1
-    `, [department]);
+    let assigned_je_id;
+    let assigned_je_email;
+    let assigned_je_name = 'Engineer';
 
-    if (jes.length === 0) throw new Error(`No JE available for the ${department} department`);
-    const assigned_je = jes[0];
+    // If JE is proposing work in their own department, assign to themselves; otherwise assign to least busy JE
+    if (req.user.role === 'JE' && req.user.department === department) {
+      assigned_je_id = req.user.id;
+      assigned_je_email = req.user.email;
+      assigned_je_name = req.user.name;
+    } else {
+      const [jes] = await connection.query(`
+        SELECT u.id, u.name, u.email, COUNT(t.id) as active_tickets
+        FROM users u
+        LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED')
+        WHERE u.role = 'JE' AND u.department = ?
+        GROUP BY u.id
+        ORDER BY active_tickets ASC
+        LIMIT 1
+      `, [department]);
+
+      if (jes.length === 0) throw new Error(`No JE available for the ${department} department`);
+      assigned_je_id = jes[0].id;
+      assigned_je_email = jes[0].email;
+      assigned_je_name = jes[0].name;
+    }
 
     const [ticketResult] = await connection.query(
-      `INSERT INTO tickets (applicant_id, assigned_je_id, department, type, description, location, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
-      [applicant_id, assigned_je.id, department, type, description, location]
+      `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
+      [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
     );
     
     const ticket_id = ticketResult.insertId;
 
     if (req.files && req.files.length > 0) {
+      const fileList = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
       const fileUrls = await Promise.all(
-        req.files.map((file) => moveFile(file, ticket_id, 'applicant_evidence'))
+        fileList.map((file) => moveFile(file, ticket_id, 'applicant_evidence'))
       );
 
       const attachmentQueries = fileUrls.map((fileUrl) => connection.query(
-        'INSERT INTO attachments (ticket_id, file_url, uploaded_by) VALUES (?, ?, ?)',
-        [ticket_id, fileUrl, applicant_id]
+        'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+        [ticket_id, fileUrl, applicant_id, 'APPLICANT_EVIDENCE']
       ));
       await Promise.all(attachmentQueries);
     }
 
-    await connection.commit();
-
-    sendEmail(
-      assigned_je.email, 
-      'New Ticket Assigned', 
-      `You have been assigned Ticket #${ticket_id}. Please log into the portal to review the location.`
+    // Insert creation audit logs
+    await connection.query(
+      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
+      [ticket_id, applicant_id, 'CREATED', `Ticket raised: "${finalTitle}" (${type})`]
+    );
+    await connection.query(
+      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
+      [ticket_id, assigned_je_id, 'ASSIGNED', `Auto-assigned to ${assigned_je_name} (${assigned_je_email})`]
     );
 
-    res.json({ success: true, ticket_id, assigned_je_id: assigned_je.id });
+    await connection.commit();
+
+    // Send rich, descriptive email notification to the assigned JE
+    const portalUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const emailSubject = `[Deanery of Infrastructure] New Ticket #${ticket_id} Assigned: ${finalTitle}`;
+    const emailText = `Dear ${assigned_je_name},
+
+A new infrastructure maintenance/work ticket has been assigned to your desk for site inspection.
+
+======================================================================
+TICKET INFORMATION
+======================================================================
+• Ticket ID:      #TKT-${String(ticket_id).padStart(4, '0')}
+• Title:          ${finalTitle}
+• Department:     ${department} Engineering
+• Work Type:      ${type === 'non-recurring' ? 'Non-Recurring Proposal' : 'Recurring Maintenance'}
+• Reported By:    ${req.user.name} (${req.user.email}${req.user.phone ? `, Phone: ${req.user.phone}` : ''})
+• Location / Map: ${location || 'Campus Landmark not specified'}
+• Date & Time:    ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+
+======================================================================
+ISSUE DESCRIPTION
+======================================================================
+${description}
+
+======================================================================
+ACTION REQUIRED
+======================================================================
+Please inspect the physical site, evaluate technical requirements, and file your inspection report with the estimated financial sanction on the Deanery portal:
+
+🔗 Review & File Report: ${portalUrl}/je/ticket/${ticket_id}
+
+Deanery of Infrastructure, IIT Mandi
+This is an automated operational notification.`;
+
+    sendEmail(assigned_je_email, emailSubject, emailText);
+
+    res.json({ success: true, ticket_id, title: finalTitle, assigned_je_id });
   } catch (error) {
     await connection.rollback();
     cleanupTempFiles(req.files);
@@ -68,21 +123,42 @@ export const createTicket = async (req, res) => {
 };
 
 
-// PAGINATION: Get Authority Queue
+// PAGINATION: Get Authority Queue for AE, SE, DEAN, DIRECTOR
 export const getQueue = async (req, res) => {
   const { role, department } = req.user;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 20;
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 20;
   const offset = (page - 1) * limit;
 
   let query = '';
   let queryParams = [];
 
-  if (role === 'DIRECTOR') {
-    query = `SELECT * FROM tickets ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  const baseSelect = `
+    SELECT t.*, u.name as applicant_name, u.email as applicant_email, r.estimated_amount, r.nature_of_work
+    FROM tickets t
+    JOIN users u ON t.applicant_id = u.id
+    LEFT JOIN (
+      SELECT r1.* FROM reports r1
+      JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r2
+      ON r1.id = r2.max_id
+    ) r ON t.id = r.ticket_id
+  `;
+
+  if (role === 'AE') {
+    query = `${baseSelect} WHERE t.status = 'PENDING_AE_APPROVAL' AND t.department = ? ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+    queryParams = [department, limit, offset];
+  } else if (role === 'SE') {
+    query = `${baseSelect} WHERE t.status = 'PENDING_SE_APPROVAL' AND t.department = ? ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+    queryParams = [department, limit, offset];
+  } else if (role === 'DEAN') {
+    query = `${baseSelect} WHERE t.status = 'PENDING_DEAN_APPROVAL' ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
     queryParams = [limit, offset];
-  } 
-  // ... (You can expand AE/SE/DEAN queries here later)
+  } else if (role === 'DIRECTOR') {
+    query = `${baseSelect} ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+    queryParams = [limit, offset];
+  } else {
+    return res.status(403).json({ success: false, message: 'Unauthorized role for authority queue.' });
+  }
   
   try {
     const [tickets] = await pool.query(query, queryParams);
@@ -180,6 +256,7 @@ export async function applyReportSubmission(
 export const submitReport = async (req, res) => {
   const ticketId = Number.parseInt(req.params.ticket_id, 10);
   if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    cleanupTempFiles(req.files);
     return res.status(400).json({
       success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
   }
@@ -195,6 +272,37 @@ export const submitReport = async (req, res) => {
       estimate: req.body.estimated_amount,
       remarks: req.body.remarks,
     });
+
+    // Handle uploaded files (site_photos and estimate_docs)
+    if (req.files) {
+      let sitePhotos = [];
+      let estimateDocs = [];
+
+      if (Array.isArray(req.files)) {
+        sitePhotos = req.files.filter(f => f.fieldname === 'site_photos');
+        estimateDocs = req.files.filter(f => f.fieldname === 'estimate_docs');
+      } else if (typeof req.files === 'object') {
+        sitePhotos = req.files.site_photos || [];
+        estimateDocs = req.files.estimate_docs || [];
+      }
+
+      for (const photo of sitePhotos) {
+        const fileUrl = await moveFile(photo, ticketId, 'je_reports/site_photos');
+        await connection.query(
+          'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+          [ticketId, fileUrl, req.user.id, 'JE_SITE_PHOTO']
+        );
+      }
+
+      for (const doc of estimateDocs) {
+        const fileUrl = await moveFile(doc, ticketId, 'je_reports/estimate_docs');
+        await connection.query(
+          'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+          [ticketId, fileUrl, req.user.id, 'JE_ESTIMATE_DOC']
+        );
+      }
+    }
+
     await connection.commit();
     res.json({
       success: true, status: out.nextStatus, report_id: out.reportId,
@@ -202,6 +310,7 @@ export const submitReport = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+    cleanupTempFiles(req.files);
     if (error instanceof WorkflowError) {
       return res.status(error.status).json({
         success: false, code: error.code, message: error.message });
@@ -300,6 +409,77 @@ export const updateTenderStatus = async (req, res) => {
     // Anything else is a real bug. Log it, and do NOT leak internals to the
     // client -- the old code returned error.message raw, which can expose SQL.
     console.error('updateTenderStatus failed:', error);
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
+  } finally {
+    connection.release();
+  }
+};
+
+// REVIEW TICKET: Zero-trust review for AE, SE, DEAN, DIRECTOR
+export const reviewTicket = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({
+      success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.',
+    });
+  }
+
+  const { action, remarks } = req.body;
+  const { id: userId, role } = req.user; // Zero trust: identity verified from token & DB
+
+  if (!action || !['APPROVE', 'RETURN', 'DENY'].includes(action)) {
+    return res.status(400).json({ success: false, message: 'Valid action (APPROVE, RETURN, DENY) is required.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query(
+      `SELECT id, status FROM tickets WHERE id = ? FOR UPDATE`,
+      [ticketId]
+    );
+    if (rows.length === 0) {
+      throw new WorkflowError(`Ticket ${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
+    }
+
+    const currentStatus = rows[0].status;
+
+    // Fetch latest estimate from reports
+    const [reports] = await connection.query(
+      `SELECT estimated_amount FROM reports WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1`,
+      [ticketId]
+    );
+    const estimate = reports.length > 0 ? parseFloat(reports[0].estimated_amount) : null;
+
+    const { status: nextStatus, logAction } = resolveTransition({
+      currentStatus,
+      role,
+      action,
+      estimate,
+    });
+
+    const [result] = await connection.query(
+      `UPDATE tickets SET status = ? WHERE id = ? AND status = ?`,
+      [nextStatus, ticketId, currentStatus]
+    );
+    if (result.affectedRows !== 1) {
+      throw new WorkflowError('This ticket changed while you were reviewing it. Reload and try again.', { code: 'CONFLICT', status: 409 });
+    }
+
+    await connection.query(
+      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
+      [ticketId, userId, logAction, remarks || `${action} by ${role}`]
+    );
+
+    await connection.commit();
+    res.json({ success: true, status: nextStatus, message: `Ticket updated to ${nextStatus}` });
+  } catch (error) {
+    await connection.rollback();
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
+    console.error('reviewTicket failed:', error);
     res.status(500).json({ success: false, message: 'Internal Server Error' });
   } finally {
     connection.release();

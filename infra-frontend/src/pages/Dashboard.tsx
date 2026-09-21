@@ -131,7 +131,8 @@ export default function Dashboard() {
                 <tr key={ticket.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors cursor-pointer" onClick={() => navigate(`/ticket/${ticket.id}`)}>
                   <td className="px-5 py-4">
                     <div className="text-blue-600 dark:text-blue-400 font-mono text-xs mb-1">#TKT-{ticket.id.toString().padStart(4, '0')}</div>
-                    <div className="truncate max-w-[250px]">{ticket.description}</div>
+                    <div className="font-semibold text-slate-900 dark:text-white truncate max-w-[280px]">{ticket.title || ticket.description}</div>
+                    {ticket.title && <div className="text-xs text-slate-400 truncate max-w-[280px] mt-0.5">{ticket.description}</div>}
                   </td>
                   <td className="px-5 py-4">
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border whitespace-nowrap inline-block ${getStatusStyle(ticket.status)}`}>

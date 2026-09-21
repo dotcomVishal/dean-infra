@@ -11,6 +11,8 @@ export const STATUS = Object.freeze({
   PENDING_DEAN_APPROVAL:     'PENDING_DEAN_APPROVAL',
   PENDING_DIRECTOR_APPROVAL: 'PENDING_DIRECTOR_APPROVAL',
   APPROVED_FOR_TENDERING:    'APPROVED_FOR_TENDERING',
+  TENDER_PUBLISHED:          'TENDER_PUBLISHED',
+  WORK_IN_PROGRESS:          'WORK_IN_PROGRESS',
   RETURNED_TO_JE:            'RETURNED_TO_JE',
   DENIED:                    'DENIED',
   CLOSED:                    'CLOSED',
@@ -40,9 +42,10 @@ const PENDING_STATUS_FOR = {
   DIRECTOR: STATUS.PENDING_DIRECTOR_APPROVAL,
 };
 
-// LATER add real tender stages here once you know them, e.g.
-// 'TENDER_PUBLISHED', 'WORK_ORDER_ISSUED', 'WORK_IN_PROGRESS', 'COMPLETED'.
+// Tender milestones updated by JE post-approval
 export const TENDER_MILESTONES = Object.freeze([
+  STATUS.TENDER_PUBLISHED,
+  STATUS.WORK_IN_PROGRESS,
   STATUS.CLOSED,
 ]);
 // --- end config -------------------------------------------------------------
@@ -53,7 +56,7 @@ export const TENDER_MILESTONES = Object.freeze([
 export const LOG_ACTION = Object.freeze({
   CREATED:   'CREATED',    // ticket raised
   ASSIGNED:  'ASSIGNED',   // auto-assigned to a JE
-  SUBMITTED: 'SUBMITTED',  // JE files report + estimate   <-- MISSING from the DB
+  SUBMITTED: 'SUBMITTED',  // JE files report + estimate
   PASSED:    'PASSED',     // escalated to the next desk
   APPROVED:  'APPROVED',   // sanctioned within this desk's ceiling
   RETURNED:  'RETURNED',   // sent back for revision
@@ -77,7 +80,9 @@ export function actorForStatus(status) {
   // driving tender milestones.
   if (status === STATUS.ASSIGNED_TO_JE ||
       status === STATUS.RETURNED_TO_JE ||
-      status === STATUS.APPROVED_FOR_TENDERING) return ROLE.JE;
+      status === STATUS.APPROVED_FOR_TENDERING ||
+      status === STATUS.TENDER_PUBLISHED ||
+      status === STATUS.WORK_IN_PROGRESS) return ROLE.JE;
   return Object.keys(PENDING_STATUS_FOR).find(r => PENDING_STATUS_FOR[r] === status) ?? null;
 }
 
@@ -199,10 +204,13 @@ export function resolveTransition({ currentStatus, role, action, estimate }) {
 
 /** Guard for the JE's tender endpoint — this is the S1 fix. */
 export function resolveTenderUpdate({ currentStatus, milestone }) {
-  // Stage check FIRST. If the ticket isn't approved, no milestone value would
-  // work — so reporting "invalid milestone" would wrongly imply that a
-  // different value would have succeeded.
-  if (currentStatus !== STATUS.APPROVED_FOR_TENDERING && currentStatus !== STATUS.CLOSED) {
+  const allowedCurrent = [
+    STATUS.APPROVED_FOR_TENDERING,
+    STATUS.TENDER_PUBLISHED,
+    STATUS.WORK_IN_PROGRESS,
+    STATUS.CLOSED,
+  ];
+  if (!allowedCurrent.includes(currentStatus)) {
     throw new WorkflowError(
       `Tender milestones can only be set after approval (ticket is at ${currentStatus}).`,
       { code: 'NOT_APPROVED_YET', status: 403 }
