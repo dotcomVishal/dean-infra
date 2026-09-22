@@ -31,6 +31,7 @@ router.post('/tickets/:ticket_id/override', overrideTicketStatus);
 router.get('/users', getAllUsers);
 router.post('/users', createUser);
 router.patch('/users/:id', updateUser);
+router.put('/users/:id', updateUser);
 
 // Global audit trail
 router.get('/audit-logs', getMasterAuditLogs);

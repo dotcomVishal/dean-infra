@@ -367,6 +367,13 @@ export const createUser = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Name, email, role, and department are required.' });
   }
 
+  if (role === 'JE' && !['Civil', 'Electrical', 'Horticulture'].includes(department)) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Junior Engineers (JE) must belong to an engineering wing: Civil, Electrical, or Horticulture.' 
+    });
+  }
+
   const generatedUid = firebase_uid || `campus_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   try {
@@ -391,6 +398,24 @@ export const updateUser = async (req, res) => {
   const { email, role, department, phone, is_active } = req.body;
 
   try {
+    // Validate role & department consistency
+    if (role === 'JE' && department && !['Civil', 'Electrical', 'Horticulture'].includes(department)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Junior Engineers (JE) must belong to an engineering wing: Civil, Electrical, or Horticulture.' 
+      });
+    }
+
+    if (role === 'JE' && !department) {
+      const [existing] = await pool.query('SELECT department FROM users WHERE id = ?', [id]);
+      if (existing.length > 0 && !['Civil', 'Electrical', 'Horticulture'].includes(existing[0].department)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Junior Engineers (JE) must belong to an engineering wing: Civil, Electrical, or Horticulture. Please specify a valid engineering department.' 
+        });
+      }
+    }
+
     const updates = [];
     const params = [];
 

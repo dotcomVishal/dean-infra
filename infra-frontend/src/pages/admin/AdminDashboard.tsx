@@ -88,8 +88,31 @@ const ALL_STATUSES = [
 ];
 
 const TICKET_DEPARTMENTS = ['Civil', 'Electrical', 'Horticulture'];
-const USER_DEPARTMENTS = ['Civil', 'Electrical', 'Horticulture', 'Administration', 'General'];
+const ALL_USER_DEPARTMENTS = ['Civil', 'Electrical', 'Horticulture', 'Stores & Purchase', 'Finance & Accounts', 'Computer Center', 'Administration', 'General'];
 const ROLES = ['APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN', 'CLERICAL', 'ACCOUNTANT'];
+
+export const getDepartmentsForRole = (role: string): string[] => {
+  switch (role) {
+    case 'JE':
+      // A JE strictly belongs to one of the 3 engineering wings
+      return ['Civil', 'Electrical', 'Horticulture'];
+    case 'AE':
+      return ['Civil', 'Electrical', 'Horticulture'];
+    case 'SE':
+    case 'DEAN':
+    case 'DIRECTOR':
+      return ['General', 'Administration', 'Civil', 'Electrical'];
+    case 'CLERICAL':
+      return ['Stores & Purchase', 'Administration', 'General'];
+    case 'ACCOUNTANT':
+      return ['Finance & Accounts', 'Administration', 'General'];
+    case 'SYSADMIN':
+      return ['Computer Center', 'Administration', 'General'];
+    case 'APPLICANT':
+    default:
+      return ['General', 'Civil', 'Electrical', 'Horticulture', 'Administration'];
+  }
+};
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'tickets' | 'users' | 'audit'>('overview');
@@ -131,17 +154,15 @@ export default function AdminDashboard() {
 
   const [newUserData, setNewUserData] = useState({
     email: '',
-    password: '',
     full_name: '',
     role: 'APPLICANT',
-    department: 'Civil'
+    department: 'General'
   });
   const [editUserData, setEditUserData] = useState({
     full_name: '',
     role: '',
     department: '',
-    is_active: true,
-    password: ''
+    is_active: true
   });
   const [isSavingUser, setIsSavingUser] = useState(false);
 
@@ -313,29 +334,52 @@ export default function AdminDashboard() {
     }
   };
 
+  // Handlers for dependent role-department mapping
+  const handleRoleChangeForNewUser = (newRole: string) => {
+    const validDepts = getDepartmentsForRole(newRole);
+    const isCurrentValid = validDepts.includes(newUserData.department);
+    setNewUserData({
+      ...newUserData,
+      role: newRole,
+      department: isCurrentValid ? newUserData.department : validDepts[0]
+    });
+  };
+
+  const handleRoleChangeForEditUser = (newRole: string) => {
+    const validDepts = getDepartmentsForRole(newRole);
+    const isCurrentValid = validDepts.includes(editUserData.department);
+    setEditUserData({
+      ...editUserData,
+      role: newRole,
+      department: isCurrentValid ? editUserData.department : validDepts[0]
+    });
+  };
+
   // Create User
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserData.email || !newUserData.password || !newUserData.full_name) {
-      alert('Please fill out all required fields.');
+    if (!newUserData.email || !newUserData.full_name) {
+      alert('Please fill out email and full name.');
       return;
     }
 
     setIsSavingUser(true);
     try {
       const res = await api.post('/admin/users', {
-        ...newUserData,
-        name: newUserData.full_name
+        email: newUserData.email.trim(),
+        name: newUserData.full_name.trim(),
+        full_name: newUserData.full_name.trim(),
+        role: newUserData.role,
+        department: newUserData.department
       });
       if (res.data.success) {
         alert('User account created successfully.');
         setCreateUserModalOpen(false);
         setNewUserData({
           email: '',
-          password: '',
           full_name: '',
           role: 'APPLICANT',
-          department: 'Civil'
+          department: 'General'
         });
         fetchUsers();
         fetchMetrics();
@@ -351,12 +395,13 @@ export default function AdminDashboard() {
   // Open Edit User
   const handleOpenEditUser = (u: UserItem) => {
     setSelectedUser(u);
+    const validDepts = getDepartmentsForRole(u.role);
+    const isCurrentValid = validDepts.includes(u.department);
     setEditUserData({
       full_name: u.name || u.full_name || '',
       role: u.role,
-      department: u.department,
-      is_active: Boolean(u.is_active),
-      password: ''
+      department: isCurrentValid ? u.department : validDepts[0],
+      is_active: Boolean(u.is_active)
     });
     setEditUserModalOpen(true);
   };
@@ -369,15 +414,12 @@ export default function AdminDashboard() {
     setIsSavingUser(true);
     try {
       const payload: any = {
-        name: editUserData.full_name,
-        full_name: editUserData.full_name,
+        name: editUserData.full_name.trim(),
+        full_name: editUserData.full_name.trim(),
         role: editUserData.role,
         department: editUserData.department,
         is_active: editUserData.is_active
       };
-      if (editUserData.password.trim()) {
-        payload.password = editUserData.password.trim();
-      }
 
       const res = await api.put(`/admin/users/${selectedUser.id}`, payload);
       if (res.data.success) {
@@ -851,7 +893,7 @@ export default function AdminDashboard() {
                 className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 focus:outline-none"
               >
                 <option value="">All Departments</option>
-                {USER_DEPARTMENTS.map((d) => (
+                {ALL_USER_DEPARTMENTS.map((d) => (
                   <option key={d} value={d}>{d}</option>
                 ))}
               </select>
@@ -1294,25 +1336,12 @@ export default function AdminDashboard() {
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">Password</label>
-                <input
-                  type="password"
-                  value={newUserData.password}
-                  onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
-                  placeholder="Minimum 6 characters"
-                  required
-                  minLength={6}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">Assigned Role</label>
                   <select
                     value={newUserData.role}
-                    onChange={(e) => setNewUserData({ ...newUserData, role: e.target.value })}
+                    onChange={(e) => handleRoleChangeForNewUser(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     {ROLES.map((r) => (
@@ -1322,13 +1351,15 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">Department</label>
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                    Department {newUserData.role === 'JE' && <span className="text-[10px] text-amber-500 font-semibold">(Engineering Wing)</span>}
+                  </label>
                   <select
                     value={newUserData.department}
                     onChange={(e) => setNewUserData({ ...newUserData, department: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    {USER_DEPARTMENTS.map((d) => (
+                    {getDepartmentsForRole(newUserData.role).map((d) => (
                       <option key={d} value={d}>{d}</option>
                     ))}
                   </select>
@@ -1394,7 +1425,7 @@ export default function AdminDashboard() {
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">Role</label>
                   <select
                     value={editUserData.role}
-                    onChange={(e) => setEditUserData({ ...editUserData, role: e.target.value })}
+                    onChange={(e) => handleRoleChangeForEditUser(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     {ROLES.map((r) => (
@@ -1404,30 +1435,19 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">Department</label>
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                    Department {editUserData.role === 'JE' && <span className="text-[10px] text-amber-500 font-semibold">(Engineering Wing)</span>}
+                  </label>
                   <select
                     value={editUserData.department}
                     onChange={(e) => setEditUserData({ ...editUserData, department: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {USER_DEPARTMENTS.map((d) => (
+                    {getDepartmentsForRole(editUserData.role).map((d) => (
                       <option key={d} value={d}>{d}</option>
                     ))}
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                  Reset Password <span className="text-slate-400 font-normal">(leave blank to keep current)</span>
-                </label>
-                <input
-                  type="password"
-                  value={editUserData.password}
-                  onChange={(e) => setEditUserData({ ...editUserData, password: e.target.value })}
-                  placeholder="New password (optional)"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
               </div>
 
               <div className="pt-2">
