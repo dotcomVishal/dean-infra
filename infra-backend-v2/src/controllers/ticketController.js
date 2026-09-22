@@ -44,11 +44,35 @@ export const createTicket = async (req, res) => {
       assigned_je_name = jes[0].name;
     }
 
-    const [ticketResult] = await connection.query(
-      `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
-      [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
-    );
+    let ticketResult;
+    try {
+      [ticketResult] = await connection.query(
+        `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
+        [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
+      );
+    } catch (insertErr) {
+      if (insertErr.code === 'ER_BAD_FIELD_ERROR' && insertErr.message?.includes('title')) {
+        console.warn('⚠️ tickets table missing "title" column. Self-healing database schema...');
+        try {
+          await connection.query(`ALTER TABLE tickets ADD COLUMN title VARCHAR(255) NULL AFTER department`);
+          [ticketResult] = await connection.query(
+            `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
+            [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
+          );
+        } catch (alterErr) {
+          console.warn('⚠️ ALTER failed, falling back to description prefix so ticket is not lost:', alterErr.message);
+          [ticketResult] = await connection.query(
+            `INSERT INTO tickets (applicant_id, assigned_je_id, department, type, description, location, status) 
+             VALUES (?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
+            [applicant_id, assigned_je_id, department, type, `${finalTitle}\n\n${description}`, location]
+          );
+        }
+      } else {
+        throw insertErr;
+      }
+    }
     
     const ticket_id = ticketResult.insertId;
 

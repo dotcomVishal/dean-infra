@@ -59,9 +59,13 @@ ok('v1 DENY bug: AE denying -> clean 403, not a 500', () =>
   throws(() => resolveTransition({ currentStatus: STATUS.PENDING_AE_APPROVAL, role: ROLE.AE,
          action: 'DENY', estimate: 5000 }), 'DENY_NOT_ALLOWED'));
 
-ok('RETURN sends it back to the JE', () =>
+ok('RETURN from AE sends it back to the JE', () =>
+  eq(resolveTransition({ currentStatus: STATUS.PENDING_AE_APPROVAL, role: ROLE.AE,
+       action: 'RETURN', estimate: 20000 }).status, STATUS.RETURNED_TO_JE, 'status'));
+
+ok('RETURN from DEAN sends it back to SE in ladder', () =>
   eq(resolveTransition({ currentStatus: STATUS.PENDING_DEAN_APPROVAL, role: ROLE.DEAN,
-       action: 'RETURN', estimate: 900000 }).status, STATUS.RETURNED_TO_JE, 'status'));
+       action: 'RETURN', estimate: 900000 }).status, STATUS.PENDING_SE_APPROVAL, 'status'));
 
 ok('B6: a returned ticket can be re-filed (no more dead end)', () =>
   eq(resolveTransition({ currentStatus: STATUS.RETURNED_TO_JE, role: ROLE.JE,

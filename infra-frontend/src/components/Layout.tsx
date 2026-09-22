@@ -19,8 +19,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (isDark) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
+    const metaTheme = document.getElementById('theme-color-meta');
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      if (metaTheme) metaTheme.setAttribute('content', '#0f172a');
+    } else {
+      document.documentElement.classList.remove('dark');
+      if (metaTheme) metaTheme.setAttribute('content', '#ffffff');
+    }
   }, [isDark]);
 
   const getNavLinks = () => {

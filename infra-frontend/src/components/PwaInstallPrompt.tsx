@@ -83,7 +83,7 @@ export default function PwaInstallPrompt() {
       {showPrompt && deferredPrompt && (
         <div className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 max-w-sm w-[calc(100vw-2rem)] bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-2xl border border-slate-200 dark:border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
+            <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center shrink-0 shadow-md">
               <Download size={20} />
             </div>
             
@@ -92,13 +92,13 @@ export default function PwaInstallPrompt() {
                 Install Deanery Portal
               </h4>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-normal">
-                Install as a standalone native-feeling app for instant offline access and faster inspections.
+                Install as a standalone native app for instant offline access and faster inspections.
               </p>
 
               <div className="flex items-center gap-2 mt-3">
                 <button
                   onClick={handleInstallClick}
-                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-sm"
+                  className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 text-white text-xs font-bold rounded-lg transition shadow-sm"
                 >
                   Install App
                 </button>

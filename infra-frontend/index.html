@@ -10,13 +10,32 @@
     <!-- PWA Web App Manifest -->
     <link rel="manifest" href="/manifest.webmanifest" />
 
-    <!-- Mobile & PWA Platform Settings -->
-    <meta name="theme-color" content="#1e3a8a" />
+    <!-- Mobile & PWA Platform Settings (Clean notch & status bar matching app) -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
+    <meta name="theme-color" content="#ffffff" id="theme-color-meta" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Dean Infra" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('theme-storage');
+          var isDark = saved ? JSON.parse(saved)?.state?.isDark : false;
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            var meta = document.getElementById('theme-color-meta');
+            if (meta) meta.setAttribute('content', '#0f172a');
+          } else {
+            var meta = document.getElementById('theme-color-meta');
+            if (meta) meta.setAttribute('content', '#ffffff');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
