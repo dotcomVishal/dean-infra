@@ -30,6 +30,42 @@ export async function runAutoMigrations() {
       console.log('✅ Added "title" column to tickets table.');
     }
 
+    // 1b. Verify and add 'type' column to tickets table if missing
+    const [typeCol] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM information_schema.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'tickets' 
+        AND COLUMN_NAME = 'type'
+    `);
+
+    if (typeCol.length === 0) {
+      console.log('📦 Migrating: Adding missing "type" column to tickets table...');
+      await connection.query(`
+        ALTER TABLE tickets 
+        ADD COLUMN type ENUM('recurring', 'non-recurring') DEFAULT 'recurring' AFTER title
+      `);
+      console.log('✅ Added "type" column to tickets table.');
+    }
+
+    // 1c. Verify and add 'location' column to tickets table if missing
+    const [locCol] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM information_schema.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'tickets' 
+        AND COLUMN_NAME = 'location'
+    `);
+
+    if (locCol.length === 0) {
+      console.log('📦 Migrating: Adding missing "location" column to tickets table...');
+      await connection.query(`
+        ALTER TABLE tickets 
+        ADD COLUMN location VARCHAR(255) NULL AFTER description
+      `);
+      console.log('✅ Added "location" column to tickets table.');
+    }
+
     // 2. Verify tickets.status column includes modern workflow statuses
     const [statusCol] = await connection.query(`
       SELECT COLUMN_TYPE 
@@ -54,6 +90,24 @@ export async function runAutoMigrations() {
         `);
         console.log('✅ Updated tickets.status ENUM.');
       }
+    }
+
+    // 2b. Verify and add 'document_category' column to attachments table
+    const [docCatCol] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM information_schema.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'attachments' 
+        AND COLUMN_NAME = 'document_category'
+    `);
+
+    if (docCatCol.length === 0) {
+      console.log('📦 Migrating: Adding missing "document_category" column to attachments table...');
+      await connection.query(`
+        ALTER TABLE attachments 
+        ADD COLUMN document_category ENUM('APPLICANT_EVIDENCE','JE_SITE_PHOTO','JE_ESTIMATE_DOC','CLERK_TENDER_DOC','FINANCE_SANCTION','AUTHORITY_REMARKS') NOT NULL DEFAULT 'APPLICANT_EVIDENCE'
+      `);
+      console.log('✅ Added "document_category" column to attachments table.');
     }
 
     // 3. Verify users.role column includes 'ACCOUNTANT', 'CLERICAL', 'SYSADMIN'

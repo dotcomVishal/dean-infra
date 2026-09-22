@@ -19,14 +19,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const metaTheme = document.getElementById('theme-color-meta');
+    const color = isDark ? '#0f172a' : '#ffffff';
     if (isDark) {
       document.documentElement.classList.add('dark');
-      if (metaTheme) metaTheme.setAttribute('content', '#0f172a');
     } else {
       document.documentElement.classList.remove('dark');
-      if (metaTheme) metaTheme.setAttribute('content', '#ffffff');
     }
+    const metas = document.querySelectorAll('meta[name="theme-color"]');
+    metas.forEach((m) => m.setAttribute('content', color));
   }, [isDark]);
 
   const getNavLinks = () => {
@@ -88,7 +88,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-900 flex flex-col font-sans transition-colors duration-200">
       
       {/* TOP NAVBAR */}
-      <header className="h-16 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 sticky top-0 z-50 transition-colors">
+      <header className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 sticky top-0 z-50 transition-colors pt-[env(safe-area-inset-top,0px)] h-[calc(4rem+env(safe-area-inset-top,0px))]">
         <div className="flex items-center gap-3">
           <button 
             onClick={() => window.innerWidth < 768 ? setIsMobileMenuOpen(true) : setIsDesktopCollapsed(!isDesktopCollapsed)}

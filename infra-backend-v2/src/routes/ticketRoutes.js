@@ -187,11 +187,25 @@ router.get('/:ticket_id/details', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
     }
 
-    // 2. Fetch Attachments
-    const [attachments] = await pool.query(
-      'SELECT id, file_url, uploaded_by, created_at, document_category FROM attachments WHERE ticket_id = ? ORDER BY created_at ASC',
-      [ticket_id]
-    );
+    // 2. Fetch Attachments (Safe with/without document_category)
+    let attachments = [];
+    try {
+      const [attRows] = await pool.query(
+        'SELECT id, file_url, uploaded_by, created_at, document_category FROM attachments WHERE ticket_id = ? ORDER BY created_at ASC',
+        [ticket_id]
+      );
+      attachments = attRows;
+    } catch (attErr) {
+      if (attErr.code === 'ER_BAD_FIELD_ERROR') {
+        const [rawRows] = await pool.query(
+          'SELECT id, file_url, uploaded_by, created_at FROM attachments WHERE ticket_id = ? ORDER BY created_at ASC',
+          [ticket_id]
+        );
+        attachments = rawRows.map(r => ({ ...r, document_category: 'APPLICANT_EVIDENCE' }));
+      } else {
+        throw attErr;
+      }
+    }
 
     // 3. Fetch JE Reports
     const [reports] = await pool.query(
@@ -200,16 +214,24 @@ router.get('/:ticket_id/details', async (req, res) => {
     );
 
     // 4. Fetch Tenders
-    const [tenders] = await pool.query(
-      'SELECT * FROM tenders WHERE ticket_id = ? ORDER BY created_at DESC',
-      [ticket_id]
-    );
+    let tenders = [];
+    try {
+      const [tRows] = await pool.query('SELECT * FROM tenders WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
+      tenders = tRows;
+    } catch (err) {
+      if (err.code === 'ER_NO_SUCH_TABLE') tenders = [];
+      else throw err;
+    }
 
     // 5. Fetch Bills
-    const [bills] = await pool.query(
-      'SELECT * FROM bills WHERE ticket_id = ? ORDER BY created_at DESC',
-      [ticket_id]
-    );
+    let bills = [];
+    try {
+      const [bRows] = await pool.query('SELECT * FROM bills WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
+      bills = bRows;
+    } catch (err) {
+      if (err.code === 'ER_NO_SUCH_TABLE') bills = [];
+      else throw err;
+    }
 
     // 6. Fetch Audit Logs
     const [auditLogs] = await pool.query(

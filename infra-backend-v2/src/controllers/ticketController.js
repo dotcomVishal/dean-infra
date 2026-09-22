@@ -3,6 +3,35 @@ import { sendEmail } from '../utils/mailer.js';
 import { resolveTransition, resolveTenderUpdate, WorkflowError, ROLE } from '../config/workflow.js';
 import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
 
+export async function safeInsertAttachment(conn, ticketId, fileUrl, userId, category = 'APPLICANT_EVIDENCE') {
+  try {
+    await conn.query(
+      'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+      [ticketId, fileUrl, userId, category]
+    );
+  } catch (attErr) {
+    if (attErr.code === 'ER_BAD_FIELD_ERROR' && attErr.message?.includes('document_category')) {
+      console.warn('⚠️ attachments table missing "document_category" column. Self-healing...');
+      try {
+        await conn.query(
+          "ALTER TABLE attachments ADD COLUMN document_category ENUM('APPLICANT_EVIDENCE','JE_SITE_PHOTO','JE_ESTIMATE_DOC','CLERK_TENDER_DOC','FINANCE_SANCTION','AUTHORITY_REMARKS') NOT NULL DEFAULT 'APPLICANT_EVIDENCE'"
+        );
+        await conn.query(
+          'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+          [ticketId, fileUrl, userId, category]
+        );
+      } catch (alterErr) {
+        await conn.query(
+          'INSERT INTO attachments (ticket_id, file_url, uploaded_by) VALUES (?, ?, ?)',
+          [ticketId, fileUrl, userId]
+        );
+      }
+    } else {
+      throw attErr;
+    }
+  }
+}
+
 export const createTicket = async (req, res) => {
   const applicant_id = req.user.id; 
   const { title, department, description, location, type = 'recurring' } = req.body;
@@ -82,11 +111,9 @@ export const createTicket = async (req, res) => {
         fileList.map((file) => moveFile(file, ticket_id, 'applicant_evidence'))
       );
 
-      const attachmentQueries = fileUrls.map((fileUrl) => connection.query(
-        'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
-        [ticket_id, fileUrl, applicant_id, 'APPLICANT_EVIDENCE']
-      ));
-      await Promise.all(attachmentQueries);
+      for (const fileUrl of fileUrls) {
+        await safeInsertAttachment(connection, ticket_id, fileUrl, applicant_id, 'APPLICANT_EVIDENCE');
+      }
     }
 
     // Insert creation audit logs
@@ -372,18 +399,12 @@ export const submitReport = async (req, res) => {
 
       for (const photo of sitePhotos) {
         const fileUrl = await moveFile(photo, ticketId, 'je_reports/site_photos');
-        await connection.query(
-          'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
-          [ticketId, fileUrl, req.user.id, 'JE_SITE_PHOTO']
-        );
+        await safeInsertAttachment(connection, ticketId, fileUrl, req.user.id, 'JE_SITE_PHOTO');
       }
 
       for (const doc of estimateDocs) {
         const fileUrl = await moveFile(doc, ticketId, 'je_reports/estimate_docs');
-        await connection.query(
-          'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
-          [ticketId, fileUrl, req.user.id, 'JE_ESTIMATE_DOC']
-        );
+        await safeInsertAttachment(connection, ticketId, fileUrl, req.user.id, 'JE_ESTIMATE_DOC');
       }
     }
 

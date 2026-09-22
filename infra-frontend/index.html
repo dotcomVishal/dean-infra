@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
     <title>Deanery Of Infrastructure - IIT Mandi</title>
     <meta name="description" content="IIT Mandi Deanery of Infrastructure Operations & Ticketing Portal" />
 
@@ -24,14 +24,16 @@
       (function() {
         try {
           var saved = localStorage.getItem('theme-storage');
-          var isDark = saved ? JSON.parse(saved)?.state?.isDark : false;
+          var isDark = saved ? JSON.parse(saved)?.state?.isDark : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var color = isDark ? '#0f172a' : '#ffffff';
           if (isDark) {
             document.documentElement.classList.add('dark');
-            var meta = document.getElementById('theme-color-meta');
-            if (meta) meta.setAttribute('content', '#0f172a');
           } else {
-            var meta = document.getElementById('theme-color-meta');
-            if (meta) meta.setAttribute('content', '#ffffff');
+            document.documentElement.classList.remove('dark');
+          }
+          var metas = document.querySelectorAll('meta[name="theme-color"]');
+          for (var i = 0; i < metas.length; i++) {
+            metas[i].setAttribute('content', color);
           }
         } catch (e) {}
       })();

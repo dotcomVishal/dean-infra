@@ -1,5 +1,5 @@
 // IIT Mandi Deanery of Infrastructure Service Worker
-const CACHE_NAME = 'dean-infra-v1.0.1';
+const CACHE_NAME = 'dean-infra-v2.0.1';
 
 const CORE_ASSETS = [
   '/',
