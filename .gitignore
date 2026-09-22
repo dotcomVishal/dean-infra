@@ -5,6 +5,7 @@
 
 # ---- Dependencies. package-lock.json is the source of truth, not these. ----
 node_modules/
+.venv/
 
 # ---- SECRETS. Committing any of these = full system compromise. ----
 .env
