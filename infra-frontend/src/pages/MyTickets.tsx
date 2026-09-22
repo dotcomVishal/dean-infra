@@ -21,10 +21,15 @@ export default function MyTickets() {
   const itemsPerPage = 10;
 
   useEffect(() => {
+    if (user?.role === 'SYSADMIN') {
+      navigate('/admin/tickets', { replace: true });
+      return;
+    }
+
     const fetchTickets = async () => {
       try {
         let endpoint = '/tickets/applicant'; 
-        if (['AE', 'SE', 'DEAN', 'DIRECTOR'].includes(user?.role || '')) endpoint = '/tickets/queue';
+        if (['AE', 'SE', 'DEAN', 'DIRECTOR', 'CLERICAL', 'ACCOUNTANT'].includes(user?.role || '')) endpoint = '/tickets/queue';
         else if (user?.role === 'JE') endpoint = '/tickets/je/dashboard';
 
         const response = await api.get(endpoint);
@@ -36,7 +41,7 @@ export default function MyTickets() {
       }
     };
     fetchTickets();
-  }, [user]);
+  }, [user, navigate]);
 
   // --- FILTER & SORT LOGIC ---
   const processedTickets = tickets.filter(t => {

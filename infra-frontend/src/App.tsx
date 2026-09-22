@@ -15,8 +15,12 @@ import JeDashboard from './pages/je/JeDashboard';
 import JeRaiseTicket from './pages/je/JeRaiseTicket';
 import JeTicketDetails from './pages/je/JeTicketDetails';
 import JeTenderControl from './pages/je/JeTenderControl';
-// Master System Admin Micro-Frontend Page
+// Master System Admin Micro-Frontend Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminTickets from './pages/admin/AdminTickets';
+import AdminTicketDetails from './pages/admin/AdminTicketDetails';
+import AdminUsers from './pages/admin/AdminUsers';
+import AdminAuditLogs from './pages/admin/AdminAuditLogs';
 // Authority, Clerical, and Finance Micro-Frontends
 import AuthorityDashboard from './pages/authority/AuthorityDashboard';
 import ClericalDashboard from './pages/clerical/ClericalDashboard';
@@ -78,17 +82,17 @@ export default function App() {
             path="/tickets" 
             element={
               <Layout>
-                <MyTickets />
+                {isSysAdmin ? <AdminTickets /> : <MyTickets />}
               </Layout>
             } 
           />
 
-          {/* Ticket Details: JE inspection & timeline for JE role, standard authority/applicant view otherwise */}
+          {/* Ticket Details: JE inspection for JE, Admin master details for SYSADMIN, standard authority/applicant view otherwise */}
           <Route 
             path="/ticket/:id" 
             element={
               <Layout>
-                {isJe ? <JeTicketDetails /> : <TicketDetails />}
+                {isJe ? <JeTicketDetails /> : isSysAdmin ? <AdminTicketDetails /> : <TicketDetails />}
               </Layout>
             } 
           />
@@ -145,9 +149,37 @@ export default function App() {
           <Route element={<ProtectedRoute allowedRoles={['SYSADMIN']} />}>
             <Route 
               path="/admin" 
+              element={<Navigate to="/" replace />} 
+            />
+            <Route 
+              path="/admin/tickets" 
               element={
                 <Layout>
-                  <AdminDashboard />
+                  <AdminTickets />
+                </Layout>
+              } 
+            />
+            <Route 
+              path="/admin/ticket/:id" 
+              element={
+                <Layout>
+                  <AdminTicketDetails />
+                </Layout>
+              } 
+            />
+            <Route 
+              path="/admin/users" 
+              element={
+                <Layout>
+                  <AdminUsers />
+                </Layout>
+              } 
+            />
+            <Route 
+              path="/admin/audit" 
+              element={
+                <Layout>
+                  <AdminAuditLogs />
                 </Layout>
               } 
             />

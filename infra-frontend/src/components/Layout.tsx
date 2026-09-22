@@ -5,7 +5,7 @@ import { useThemeStore } from '../store/themeStore';
 import { 
   LayoutDashboard, PlusCircle, ClipboardList, 
   CheckSquare, ShieldAlert, Menu, Sun, Moon, X, LogOut,
-  FileSpreadsheet, IndianRupee
+  FileSpreadsheet, IndianRupee, Users, History
 } from 'lucide-react';
 import PwaInstallPrompt from './PwaInstallPrompt';
 
@@ -71,8 +71,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       );
     } else if (role === 'SYSADMIN') {
       base.push(
-        { name: 'Master Console', path: '/admin', icon: ShieldAlert },
-        { name: 'Ticket Directory', path: '/tickets', icon: ClipboardList }
+        { name: 'Master Tickets', path: '/admin/tickets', icon: ClipboardList },
+        { name: 'User Directory', path: '/admin/users', icon: Users },
+        { name: 'System Audit', path: '/admin/audit', icon: History }
       );
     }
     return base;

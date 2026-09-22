@@ -24,7 +24,7 @@ const router = express.Router();
 router.use(requireAuth);
 
 // 1.5 Applicant Dashboard (Fetch tickets created by this specific user)
-router.get('/applicant', requireRole(['APPLICANT']), async (req, res) => {
+router.get('/applicant', requireRole(['APPLICANT', 'STUDENT', 'FACULTY', 'STAFF', 'SYSADMIN']), async (req, res) => {
   try {
     const [tickets] = await pool.query(
       `SELECT * FROM tickets WHERE applicant_id = ? ORDER BY created_at DESC`,
@@ -37,7 +37,7 @@ router.get('/applicant', requireRole(['APPLICANT']), async (req, res) => {
 });
 
 // 1. Raise a Ticket (Hooks up to the actual Auto-Assignment & Email logic)
-router.post('/', requireRole(['APPLICANT', 'JE']), upload.array('files', 5), createTicket);
+router.post('/', requireRole(['APPLICANT', 'JE', 'SYSADMIN']), upload.array('files', 5), createTicket);
 
 // 2. Role Dashboard Queue (Supports AE, SE, DEAN, DIRECTOR, CLERICAL, ACCOUNTANT, SYSADMIN)
 router.get(
@@ -60,8 +60,8 @@ router.post(
 // 4. JE Manual Tendering Milestone Update
 router.post('/:ticket_id/tender', requireRole(['JE']), updateTenderStatus);
 
-// 4.5 Authority Hierarchical Review (AE, SE, Dean, Director)
-router.post('/:ticket_id/review', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), reviewTicket);
+// 4.5 Authority Hierarchical Review (AE, SE, Dean, Director, SYSADMIN)
+router.post('/:ticket_id/review', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN']), reviewTicket);
 
 // 5. JE Dashboard (Securely uses token ID, no payload spoofing)
 router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
