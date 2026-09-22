@@ -32,6 +32,5 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Force the account chooser — on a shared lab machine you do not want it
-// silently signing in as whoever used this browser last.
-googleProvider.setCustomParameters({ prompt: 'select_account', hd: 'iitmandi.ac.in' });
+// Force the account chooser so any Google account can be selected
+googleProvider.setCustomParameters({ prompt: 'select_account' });

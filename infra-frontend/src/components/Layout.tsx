@@ -7,6 +7,7 @@ import {
   CheckSquare, ShieldAlert, Menu, Sun, Moon, X, LogOut,
   FileSpreadsheet, IndianRupee
 } from 'lucide-react';
+import PwaInstallPrompt from './PwaInstallPrompt';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -186,6 +187,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           );
         })}
       </nav>
+
+      {/* PWA Install Banner & Offline Monitor */}
+      <PwaInstallPrompt />
     </div>
   );
 }

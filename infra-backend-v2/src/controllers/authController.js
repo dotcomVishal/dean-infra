@@ -12,30 +12,61 @@ export const syncUser = async (req, res) => {
 
   try {
     const decodedToken = await auth.verifyIdToken(token);
-
     const { uid, email, name } = decodedToken;
 
-    const [users] = await pool.query('SELECT * FROM users WHERE firebase_uid = ?', [uid]);
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Google account has no verified email address.' });
+    }
+
+    // 1. Look up user by firebase_uid
+    const [existingByUid] = await pool.query('SELECT * FROM users WHERE firebase_uid = ?', [uid]);
 
     let user;
 
-    if (users.length === 0) {
-      const [result] = await pool.query(
-        `INSERT INTO users (firebase_uid, name, email, role, department) 
-         VALUES (?, ?, ?, 'APPLICANT', 'General')`,
-        [uid, name || email.split('@')[0], email]
-      );
-      
-      const [newUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
-      user = newUsers[0];
+    if (existingByUid.length > 0) {
+      user = existingByUid[0];
+      // Keep name up to date if available
+      if (name && user.name !== name) {
+        await pool.query('UPDATE users SET name = ? WHERE id = ?', [name, user.id]);
+        user.name = name;
+      }
     } else {
-      user = users[0];
+      // 2. Check if account already exists with this email (e.g. pre-seeded admin/officer/engineer)
+      const [existingByEmail] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+
+      if (existingByEmail.length > 0) {
+        // Link firebase_uid to the existing account
+        await pool.query(
+          'UPDATE users SET firebase_uid = ?, name = COALESCE(?, name) WHERE id = ?',
+          [uid, name || null, existingByEmail[0].id]
+        );
+        const [updatedUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [existingByEmail[0].id]);
+        user = updatedUsers[0];
+      } else {
+        // 3. Any Google account: auto-provision as APPLICANT (any domain allowed)
+        const displayName = name || email.split('@')[0];
+        const [result] = await pool.query(
+          `INSERT INTO users (firebase_uid, name, email, role, department, is_active) 
+           VALUES (?, ?, ?, 'APPLICANT', 'General', TRUE)`,
+          [uid, displayName, email]
+        );
+        
+        const [newUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
+        user = newUsers[0];
+      }
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Your account has been deactivated. Please contact the administrator.' 
+      });
     }
 
     res.json({ success: true, user });
 
   } catch (error) {
     console.error('Auth Sync Error:', error.message);
-    res.status(403).json({ success: false, message: 'Invalid or expired token.' });
+    res.status(403).json({ success: false, message: error.message || 'Invalid or expired token.' });
   }
 };
