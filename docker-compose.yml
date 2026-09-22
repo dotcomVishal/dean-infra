@@ -1,0 +1,106 @@
+version: '3.9'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dean-mysql
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: ${DB_NAME:-deanery_infra}
+      MYSQL_USER: ${DB_USER:-deanery_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-deanery_pass}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infra-backend-v2/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    networks:
+      - infra-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: dean-backend
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 5000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-deanery_user}
+      DB_PASSWORD: ${DB_PASSWORD:-deanery_pass}
+      DB_NAME: ${DB_NAME:-deanery_infra}
+      FRONTEND_URL: ${FRONTEND_URL:-http://frontend:5173}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+    volumes:
+      - ./infra-backend-v2/uploads:/app/backend/uploads
+      - ./.env:/app/backend/.env:ro
+      - ./serviceAccountKey.json:/app/certs/serviceAccountKey.json:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - infra-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://backend:5000/api}
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID}
+    container_name: dean-frontend
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - infra-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:5173/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  proxy:
+    image: nginx:alpine
+    container_name: dean-proxy
+    ports:
+      - "127.0.0.1:8085:80"
+    volumes:
+      - ./nginx-proxy.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - infra-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mysql_data:
+
+networks:
+  infra-network:
+    driver: bridge
