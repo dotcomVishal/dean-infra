@@ -25,7 +25,13 @@ export const getAdminMetrics = async (req, res) => {
       FROM users GROUP BY role
     `);
 
-    // Total financial estimate sum for sanctioned/in-progress tickets
+    // Financial estimates sum: all estimates vs approved
+    const [allEstimates] = await pool.query(`
+      SELECT COALESCE(SUM(r.estimated_amount), 0) as total_estimated_amount
+      FROM reports r
+      JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
+    `);
+
     const [financeSum] = await pool.query(`
       SELECT COALESCE(SUM(r.estimated_amount), 0) as total_sanctioned_amount
       FROM reports r
@@ -36,24 +42,57 @@ export const getAdminMetrics = async (req, res) => {
 
     // JE Workloads
     const [jeWorkloads] = await pool.query(`
-      SELECT u.id, u.name, u.email, u.department, COUNT(t.id) as active_tickets
+      SELECT u.id, u.name as full_name, u.email, u.department, COUNT(t.id) as active_tickets_count
       FROM users u
       LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED')
       WHERE u.role = 'JE' AND u.is_active = TRUE
       GROUP BY u.id, u.name, u.email, u.department
-      ORDER BY active_tickets DESC
+      ORDER BY active_tickets_count DESC
     `);
 
     // Total ticket count
     const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM tickets`);
     const [totalUsersRow] = await pool.query(`SELECT COUNT(*) as total FROM users`);
 
+    // Calculate stage groups
+    let pendingInspection = 0;
+    let awaitingApproval = 0;
+    let inTendering = 0;
+    let closed = 0;
+
+    for (const row of statusCounts) {
+      const s = row.status || '';
+      const c = Number(row.count) || 0;
+      if (s === 'ASSIGNED_TO_JE' || s === 'RETURNED_TO_JE') {
+        pendingInspection += c;
+      } else if (s.startsWith('PENDING_')) {
+        awaitingApproval += c;
+      } else if (s === 'APPROVED_FOR_TENDERING' || s === 'TENDER_PUBLISHED' || s === 'WORK_IN_PROGRESS') {
+        inTendering += c;
+      } else if (s === 'CLOSED') {
+        closed += c;
+      }
+    }
+
+    const byDepartment = deptCounts.map(d => ({ department: d.department, count: Number(d.count) }));
+    const byStatus = statusCounts.map(s => ({ status: s.status, count: Number(s.count) }));
+
     res.json({
       success: true,
       metrics: {
-        totalTickets: totalTicketsRow[0].total,
-        totalUsers: totalUsersRow[0].total,
-        totalSanctionedAmount: parseFloat(financeSum[0].total_sanctioned_amount || 0),
+        totalTickets: totalTicketsRow[0]?.total || 0,
+        totalUsers: totalUsersRow[0]?.total || 0,
+        usersCount: totalUsersRow[0]?.total || 0,
+        totalSanctionedAmount: parseFloat(financeSum[0]?.total_sanctioned_amount || 0),
+        totalApprovedAmount: parseFloat(financeSum[0]?.total_sanctioned_amount || 0),
+        totalEstimatedAmount: parseFloat(allEstimates[0]?.total_estimated_amount || 0),
+        pendingInspection,
+        awaitingApproval,
+        inTendering,
+        closed,
+        byDepartment,
+        byStatus,
+        activeJes: jeWorkloads,
         statusCounts,
         deptCounts,
         typeCounts,

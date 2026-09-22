@@ -17,11 +17,18 @@ import JeTicketDetails from './pages/je/JeTicketDetails';
 import JeTenderControl from './pages/je/JeTenderControl';
 // Master System Admin Micro-Frontend Page
 import AdminDashboard from './pages/admin/AdminDashboard';
+// Authority, Clerical, and Finance Micro-Frontends
+import AuthorityDashboard from './pages/authority/AuthorityDashboard';
+import ClericalDashboard from './pages/clerical/ClericalDashboard';
+import AccountantDashboard from './pages/finance/AccountantDashboard';
 
 export default function App() {
   const { isAuthenticated, user } = useAuthStore();
   const isJe = user?.role === 'JE';
   const isSysAdmin = user?.role === 'SYSADMIN';
+  const isClerical = user?.role === 'CLERICAL';
+  const isAccountant = user?.role === 'ACCOUNTANT';
+  const isAuthority = ['AE', 'SE', 'DEAN', 'DIRECTOR'].includes(user?.role || '');
 
   return (
     <BrowserRouter>
@@ -44,6 +51,12 @@ export default function App() {
                   <AdminDashboard />
                 ) : isJe ? (
                   <JeDashboard />
+                ) : isClerical ? (
+                  <ClericalDashboard />
+                ) : isAccountant ? (
+                  <AccountantDashboard />
+                ) : isAuthority ? (
+                  <AuthorityDashboard />
                 ) : (
                   <Dashboard />
                 )}
@@ -135,6 +148,42 @@ export default function App() {
               element={
                 <Layout>
                   <AdminDashboard />
+                </Layout>
+              } 
+            />
+          </Route>
+
+          {/* 6. AUTHORITY APPROVAL DESK (AE, SE, DEAN, DIRECTOR) */}
+          <Route element={<ProtectedRoute allowedRoles={['AE', 'SE', 'DEAN', 'DIRECTOR']} />}>
+            <Route 
+              path="/approvals" 
+              element={
+                <Layout>
+                  <AuthorityDashboard />
+                </Layout>
+              } 
+            />
+          </Route>
+
+          {/* 7. CLERICAL TENDER DESK (GeM/CPP NIT & Award Management) */}
+          <Route element={<ProtectedRoute allowedRoles={['CLERICAL', 'SYSADMIN']} />}>
+            <Route 
+              path="/clerical" 
+              element={
+                <Layout>
+                  <ClericalDashboard />
+                </Layout>
+              } 
+            />
+          </Route>
+
+          {/* 8. ACCOUNTANT CAPEX AUDIT DESK (Bills & PFMS Disbursements) */}
+          <Route element={<ProtectedRoute allowedRoles={['ACCOUNTANT', 'SYSADMIN', 'DEAN', 'DIRECTOR']} />}>
+            <Route 
+              path="/finance" 
+              element={
+                <Layout>
+                  <AccountantDashboard />
                 </Layout>
               } 
             />

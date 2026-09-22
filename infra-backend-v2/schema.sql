@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     firebase_uid VARCHAR(128) UNIQUE NOT NULL, -- Security: Replaces passwords/payload spoofing[cite: 2]
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
-    role ENUM('APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN', 'CLERICAL') NOT NULL,
+    role ENUM('APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN', 'CLERICAL', 'ACCOUNTANT') NOT NULL,
     department ENUM('Civil', 'Electrical', 'Horticulture', 'Administration', 'General') NOT NULL,
     phone VARCHAR(20),
     is_active BOOLEAN DEFAULT TRUE,
@@ -78,6 +78,47 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     FOREIGN KEY (user_id) REFERENCES users(id),
     -- Crucial for generating the history timeline that the Director sees instantly[cite: 3]
     INDEX idx_ticket_timeline (ticket_id, created_at)
+);
+
+-- 6. TENDERS TABLE (Clerical Tender Management)
+CREATE TABLE IF NOT EXISTS tenders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT NOT NULL,
+    nit_number VARCHAR(100) NOT NULL,
+    portal_type ENUM('GeM', 'CPP Portal', 'State Tender') NOT NULL DEFAULT 'GeM',
+    published_date DATE,
+    bid_opening_date DATE,
+    awarded_agency VARCHAR(255),
+    work_order_value DECIMAL(10, 2),
+    status ENUM('PUBLISHED', 'EVALUATION', 'AWARDED', 'CANCELLED') DEFAULT 'PUBLISHED',
+    remarks TEXT,
+    created_by INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_ticket (ticket_id)
+);
+
+-- 7. BILLS & FINANCIAL DISBURSEMENTS TABLE (Accounts & Finance)
+CREATE TABLE IF NOT EXISTS bills (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT NOT NULL,
+    bill_number VARCHAR(100) NOT NULL,
+    voucher_number VARCHAR(100),
+    agency_name VARCHAR(255) NOT NULL,
+    bill_type ENUM('RA_BILL', 'FINAL_BILL', 'ADVANCE', 'SECURITY_REFUND') NOT NULL DEFAULT 'RA_BILL',
+    gross_amount DECIMAL(10, 2) NOT NULL,
+    deductions DECIMAL(10, 2) DEFAULT 0.00,
+    net_amount DECIMAL(10, 2) NOT NULL,
+    payment_status ENUM('PENDING', 'VERIFIED', 'DISBURSED', 'REJECTED') DEFAULT 'PENDING',
+    payment_date DATE,
+    payment_mode VARCHAR(50) DEFAULT 'PFMS',
+    remarks TEXT,
+    processed_by INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    FOREIGN KEY (processed_by) REFERENCES users(id),
+    INDEX idx_ticket (ticket_id)
 );
 
 INSERT INTO users (firebase_uid, name, email, role, department, phone) VALUES

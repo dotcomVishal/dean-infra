@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
-  Loader2, ArrowLeft, MapPin, User, Building2, 
+  Loader2, ArrowLeft, ArrowRight, MapPin, User, Building2, 
   CheckCircle, XCircle, FileText, IndianRupee, 
   History, ExternalLink, Mail, Image as ImageIcon 
 } from 'lucide-react';
@@ -197,35 +197,171 @@ export default function TicketDetails() {
           </div>
 
           {ticket.report && !isApplicant && (
-            <div className="bg-slate-900 dark:bg-slate-900/80 text-white rounded-2xl p-6 md:p-8 shadow-sm border border-slate-800 dark:border-slate-700">
-              <div className="flex justify-between items-start mb-6">
-                <h2 className="text-xs font-bold text-slate-400 tracking-wider uppercase flex items-center gap-2"><CheckCircle size={16}/> Site Inspection Report</h2>
-                <div className="bg-blue-600/20 border border-blue-500/30 text-blue-300 px-3 py-1.5 rounded-lg flex items-center gap-1.5 font-mono text-sm font-bold">
+            <div className="bg-slate-900 dark:bg-slate-900/80 text-white rounded-2xl p-6 md:p-8 shadow-sm border border-slate-800 dark:border-slate-700 space-y-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-slate-400 block">Engineering Sanction Proposal</span>
+                  <h2 className="text-xs font-bold text-slate-300 tracking-wider uppercase flex items-center gap-2 mt-0.5">
+                    <CheckCircle size={16} className="text-emerald-400" /> JE Site Inspection & Estimate
+                  </h2>
+                </div>
+                <div className="bg-blue-600/20 border border-blue-500/30 text-blue-300 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 font-mono text-sm font-bold">
                   <IndianRupee size={16}/> {parseFloat(ticket.report.estimated_amount).toLocaleString('en-IN')}
                 </div>
               </div>
-              <p className="text-slate-300 whitespace-pre-wrap text-sm leading-relaxed">{ticket.report.nature_of_work}</p>
+              <p className="text-slate-300 whitespace-pre-wrap text-sm leading-relaxed bg-slate-800/60 p-4 rounded-xl border border-slate-700/60">
+                {ticket.report.nature_of_work}
+              </p>
+
+              {/* Estimate Calculation Docs Download */}
+              {ticket.attachments && ticket.attachments.filter((a: any) => a.document_category === 'JE_ESTIMATE_DOC').length > 0 && (
+                <div className="pt-2 border-t border-slate-800">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Technical Estimate Documents</span>
+                  <div className="flex flex-wrap gap-2">
+                    {ticket.attachments.filter((a: any) => a.document_category === 'JE_ESTIMATE_DOC').map((doc: any, idx: number) => (
+                      <a
+                        key={idx}
+                        href={toUploadUrl(doc.file_url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
+                      >
+                        <FileText size={14} className="text-emerald-400" />
+                        Download Estimate Sheet {idx + 1}
+                        <ExternalLink size={12} className="text-slate-400" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
+          {/* Tenders & Procurement Card */}
+          {ticket.tenders && ticket.tenders.length > 0 && !isApplicant && (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase flex items-center gap-2">
+                  <FileText size={15} className="text-cyan-600 dark:text-cyan-400" /> Tendering & Contract Award
+                </h2>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-500/20">
+                  {ticket.tenders[0]?.status || 'In Procurement'}
+                </span>
+              </div>
+
+              {ticket.tenders.map((tn: any) => (
+                <div key={tn.id} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 text-xs space-y-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">NIT: {tn.nit_number}</span>
+                    <span className="text-[10px] text-slate-500">Portal: {tn.portal_type}</span>
+                  </div>
+                  {tn.awarded_agency && (
+                    <div className="pt-1 flex flex-wrap justify-between items-center text-slate-700 dark:text-slate-300">
+                      <span>Agency: <strong>{tn.awarded_agency}</strong></span>
+                      {tn.work_order_value && (
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          WO Value: ₹{parseFloat(String(tn.work_order_value)).toLocaleString('en-IN')}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {tn.remarks && <p className="text-slate-500 italic pt-1">{tn.remarks}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Finance & Bill Disbursements Card */}
+          {ticket.bills && ticket.bills.length > 0 && !isApplicant && (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase flex items-center gap-2">
+                  <IndianRupee size={15} className="text-emerald-600" /> Financial Billing & Payments
+                </h2>
+                <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                  Total Disbursed: ₹{ticket.bills.reduce((acc: number, b: any) => b.payment_status === 'DISBURSED' ? acc + parseFloat(b.net_amount) : acc, 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {ticket.bills.map((b: any) => (
+                  <div key={b.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 text-xs flex justify-between items-center">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">{b.bill_number}</span>
+                        <span className="text-[10px] text-slate-400">({b.bill_type})</span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full ${
+                          b.payment_status === 'DISBURSED' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
+                        }`}>
+                          {b.payment_status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Agency: {b.agency_name} {b.voucher_number && `· Voucher: ${b.voucher_number}`}
+                      </p>
+                    </div>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      ₹{parseFloat(String(b.net_amount)).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Authority Review Action Card */}
           {canApprove && !isApplicant && (
-            <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 rounded-2xl p-6 md:p-8">
-              <h2 className="text-xs font-bold text-blue-800 dark:text-blue-400 tracking-wider uppercase mb-4">Authority Action Required</h2>
+            <div className="bg-white dark:bg-slate-800 border-2 border-blue-500/20 rounded-2xl p-6 md:p-8 shadow-sm space-y-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
+                    Engineering Hierarchy Review
+                  </span>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
+                    Action Required by {user?.role} Desk
+                  </h2>
+                </div>
+                {ticket.report && (
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Work Estimate</span>
+                    <span className="font-mono font-black text-sm text-slate-900 dark:text-white">
+                      ₹{parseFloat(ticket.report.estimated_amount).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Hierarchy advisory */}
+              {ticket.report && (
+                <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50 text-xs text-slate-700 dark:text-slate-300">
+                  {parseFloat(ticket.report.estimated_amount) <= (user?.role === 'AE' ? 25000 : user?.role === 'SE' ? 50000 : user?.role === 'DEAN' ? 500000 : Infinity) ? (
+                    <span className="text-emerald-700 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
+                      <CheckCircle size={14} /> Within your desk sanction ceiling. Approving will sanction work for GeM / CPP tender publication.
+                    </span>
+                  ) : (
+                    <span className="text-indigo-700 dark:text-indigo-400 font-semibold flex items-center gap-1.5">
+                      <ArrowRight size={14} /> Exceeds your ceiling. Approving will endorse and escalate to next authority desk.
+                    </span>
+                  )}
+                </div>
+              )}
+
               <textarea 
                 value={actionRemarks} onChange={(e) => setActionRemarks(e.target.value)}
-                placeholder="Enter remarks (Required for Return/Deny)..."
-                className="w-full p-4 bg-white dark:bg-slate-800 border border-blue-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 mb-4 text-slate-900 dark:text-white" rows={3}
+                placeholder="Enter authority remarks (Mandatory for Return/Deny; optional for Approve)..."
+                className="w-full p-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+                rows={3}
               />
-              <div className="flex flex-col sm:flex-row gap-3">
-                <button onClick={() => handleAction('APPROVE')} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 text-sm">
-                  {isProcessing ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle size={18}/>} Approve
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button onClick={() => handleAction('APPROVE')} disabled={isProcessing} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 text-xs">
+                  {isProcessing ? <Loader2 className="animate-spin" size={16}/> : <CheckCircle size={16}/>} Approve Sanction
                 </button>
-                <button onClick={() => handleAction('RETURN')} disabled={isProcessing} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 text-sm">
-                  {isProcessing ? <Loader2 className="animate-spin" size={18}/> : <ArrowLeft size={18}/>} Return
+                <button onClick={() => handleAction('RETURN')} disabled={isProcessing} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 text-xs">
+                  {isProcessing ? <Loader2 className="animate-spin" size={16}/> : <ArrowLeft size={16}/>} Return for Revision
                 </button>
                 {user?.role === 'DIRECTOR' && (
-                  <button onClick={() => handleAction('DENY')} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 text-sm">
-                    {isProcessing ? <Loader2 className="animate-spin" size={18}/> : <XCircle size={18}/>} Reject
+                  <button onClick={() => handleAction('DENY')} disabled={isProcessing} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 text-xs">
+                    {isProcessing ? <Loader2 className="animate-spin" size={16}/> : <XCircle size={16}/>} Deny / Reject
                   </button>
                 )}
               </div>

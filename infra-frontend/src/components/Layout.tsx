@@ -5,7 +5,7 @@ import { useThemeStore } from '../store/themeStore';
 import { 
   LayoutDashboard, PlusCircle, ClipboardList, 
   CheckSquare, ShieldAlert, Menu, Sun, Moon, X, LogOut,
-  FileSpreadsheet
+  FileSpreadsheet, IndianRupee
 } from 'lucide-react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -37,10 +37,31 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         { name: 'Raise Proposal', path: '/je/raise', icon: PlusCircle },
         { name: 'Tender Control', path: '/je/tender', icon: FileSpreadsheet }
       );
-    } else if (['AE', 'SE', 'DEAN'].includes(role)) {
-      base.push({ name: 'Approvals Queue', path: '/tickets', icon: CheckSquare });
+    } else if (['AE', 'SE'].includes(role)) {
+      base.push(
+        { name: 'Engineering Reviews', path: '/approvals', icon: CheckSquare },
+        { name: 'Department Works', path: '/tickets', icon: ClipboardList }
+      );
+    } else if (role === 'DEAN') {
+      base.push(
+        { name: 'Deanery Sanctions', path: '/approvals', icon: CheckSquare },
+        { name: 'All Campus Works', path: '/tickets', icon: ClipboardList }
+      );
     } else if (role === 'DIRECTOR') {
-      base.push({ name: 'Global Overview', path: '/tickets', icon: ShieldAlert });
+      base.push(
+        { name: 'Director Sanctions', path: '/approvals', icon: CheckSquare },
+        { name: 'Global CapEx Overview', path: '/tickets', icon: ShieldAlert }
+      );
+    } else if (role === 'CLERICAL') {
+      base.push(
+        { name: 'Tender Desk', path: '/clerical', icon: FileSpreadsheet },
+        { name: 'Sanctioned Directory', path: '/tickets', icon: ClipboardList }
+      );
+    } else if (role === 'ACCOUNTANT') {
+      base.push(
+        { name: 'Finance & Bills', path: '/finance', icon: IndianRupee },
+        { name: 'Sanctioned Ledger', path: '/tickets', icon: ClipboardList }
+      );
     } else if (role === 'SYSADMIN') {
       base.push(
         { name: 'Master Console', path: '/admin', icon: ShieldAlert },
