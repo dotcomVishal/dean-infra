@@ -3,33 +3,14 @@ import { sendEmail } from '../utils/mailer.js';
 import { resolveTransition, resolveTenderUpdate, WorkflowError, ROLE } from '../config/workflow.js';
 import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
 
+// D2: no runtime DDL. Schema is owned by migrations only -- ALTER TABLE inside
+// a request transaction used to cause an implicit MySQL commit, silently
+// committing a half-finished transaction that the later rollback could not undo.
 export async function safeInsertAttachment(conn, ticketId, fileUrl, userId, category = 'APPLICANT_EVIDENCE') {
-  try {
-    await conn.query(
-      'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
-      [ticketId, fileUrl, userId, category]
-    );
-  } catch (attErr) {
-    if (attErr.code === 'ER_BAD_FIELD_ERROR' && attErr.message?.includes('document_category')) {
-      console.warn('⚠️ attachments table missing "document_category" column. Self-healing...');
-      try {
-        await conn.query(
-          "ALTER TABLE attachments ADD COLUMN document_category ENUM('APPLICANT_EVIDENCE','JE_SITE_PHOTO','JE_ESTIMATE_DOC','CLERK_TENDER_DOC','FINANCE_SANCTION','AUTHORITY_REMARKS') NOT NULL DEFAULT 'APPLICANT_EVIDENCE'"
-        );
-        await conn.query(
-          'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
-          [ticketId, fileUrl, userId, category]
-        );
-      } catch (alterErr) {
-        await conn.query(
-          'INSERT INTO attachments (ticket_id, file_url, uploaded_by) VALUES (?, ?, ?)',
-          [ticketId, fileUrl, userId]
-        );
-      }
-    } else {
-      throw attErr;
-    }
-  }
+  await conn.query(
+    'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+    [ticketId, fileUrl, userId, category]
+  );
 }
 
 export const createTicket = async (req, res) => {
@@ -73,36 +54,13 @@ export const createTicket = async (req, res) => {
       assigned_je_name = jes[0].name;
     }
 
-    let ticketResult;
-    try {
-      [ticketResult] = await connection.query(
-        `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
-        [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
-      );
-    } catch (insertErr) {
-      if (insertErr.code === 'ER_BAD_FIELD_ERROR' && insertErr.message?.includes('title')) {
-        console.warn('⚠️ tickets table missing "title" column. Self-healing database schema...');
-        try {
-          await connection.query(`ALTER TABLE tickets ADD COLUMN title VARCHAR(255) NULL AFTER department`);
-          [ticketResult] = await connection.query(
-            `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
-            [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
-          );
-        } catch (alterErr) {
-          console.warn('⚠️ ALTER failed, falling back to description prefix so ticket is not lost:', alterErr.message);
-          [ticketResult] = await connection.query(
-            `INSERT INTO tickets (applicant_id, assigned_je_id, department, type, description, location, status) 
-             VALUES (?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
-            [applicant_id, assigned_je_id, department, type, `${finalTitle}\n\n${description}`, location]
-          );
-        }
-      } else {
-        throw insertErr;
-      }
-    }
-    
+    // D2: no runtime DDL -- schema is owned by migrations only.
+    const [ticketResult] = await connection.query(
+      `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
+      [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
+    );
+
     const ticket_id = ticketResult.insertId;
 
     if (req.files && req.files.length > 0) {
@@ -541,7 +499,7 @@ export const reviewTicket = async (req, res) => {
     await connection.beginTransaction();
 
     const [rows] = await connection.query(
-      `SELECT id, status FROM tickets WHERE id = ? FOR UPDATE`,
+      `SELECT id, status, department FROM tickets WHERE id = ? FOR UPDATE`,
       [ticketId]
     );
     if (rows.length === 0) {
@@ -549,6 +507,17 @@ export const reviewTicket = async (req, res) => {
     }
 
     const currentStatus = rows[0].status;
+
+    // S7: the reviewer must own this ticket's desk. Without this, the
+    // Electrical AE could act on a Civil ticket at PENDING_AE_APPROVAL, since
+    // only the role was checked, never the department. Dean/Director/SYSADMIN
+    // act institute-wide, so they are not scoped here.
+    if ((role === 'AE' || role === 'SE') && rows[0].department !== req.user.department) {
+      throw new WorkflowError(
+        `Ticket ${ticketId} belongs to the ${rows[0].department} department, not your desk.`,
+        { code: 'WRONG_DEPARTMENT', status: 403 }
+      );
+    }
 
     // Fetch latest estimate from reports
     const [reports] = await connection.query(
@@ -615,6 +584,17 @@ export const publishTender = async (req, res) => {
       throw new Error(`Ticket #${ticket_id} not found.`);
     }
 
+    // S1: a tender can only be published once the ticket has cleared the full
+    // approval chain. Without this, any Clerical (or, previously, any JE)
+    // request could jump a ticket at ASSIGNED_TO_JE / PENDING_* straight to
+    // TENDER_PUBLISHED, bypassing AE/SE/Dean/Director sign-off entirely.
+    if (ticketRows[0].status !== 'APPROVED_FOR_TENDERING') {
+      throw new WorkflowError(
+        `Ticket #${ticket_id} is at ${ticketRows[0].status}; a tender can only be published from APPROVED_FOR_TENDERING.`,
+        { code: 'NOT_APPROVED_YET', status: 409 }
+      );
+    }
+
     // Insert tender row
     const [tenderResult] = await connection.query(
       `INSERT INTO tenders (ticket_id, nit_number, portal_type, published_date, bid_opening_date, status, remarks, created_by)
@@ -630,11 +610,18 @@ export const publishTender = async (req, res) => {
       ]
     );
 
-    // Update ticket status
-    await connection.query(
-      "UPDATE tickets SET status = 'TENDER_PUBLISHED' WHERE id = ?",
+    // Compare-and-swap: the WHERE repeats the exact status just validated, so
+    // a concurrent request that already moved the ticket loses the race here.
+    const [statusResult] = await connection.query(
+      "UPDATE tickets SET status = 'TENDER_PUBLISHED' WHERE id = ? AND status = 'APPROVED_FOR_TENDERING'",
       [ticket_id]
     );
+    if (statusResult.affectedRows !== 1) {
+      throw new WorkflowError(
+        'This ticket changed while the tender was being recorded. Reload and try again.',
+        { code: 'CONFLICT', status: 409 }
+      );
+    }
 
     // Write audit log
     await connection.query(
@@ -655,8 +642,11 @@ export const publishTender = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
     console.error('publishTender error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
   } finally {
     connection.release();
   }
@@ -683,6 +673,17 @@ export const awardTender = async (req, res) => {
       throw new Error(`Ticket #${ticket_id} not found.`);
     }
 
+    // S1: award is valid either after a tender was published, or as a direct
+    // award straight from approval. Any other status (still with a JE/AE/SE/
+    // Dean/Director, or already WORK_IN_PROGRESS/CLOSED) is refused.
+    const currentStatus = ticketRows[0].status;
+    if (!['APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED'].includes(currentStatus)) {
+      throw new WorkflowError(
+        `Ticket #${ticket_id} is at ${currentStatus}; work can only be awarded from APPROVED_FOR_TENDERING or TENDER_PUBLISHED.`,
+        { code: 'NOT_APPROVED_YET', status: 409 }
+      );
+    }
+
     // Update or insert tender row
     const [existingTender] = await connection.query(
       'SELECT id FROM tenders WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1',
@@ -706,11 +707,17 @@ export const awardTender = async (req, res) => {
       );
     }
 
-    // Update ticket status to WORK_IN_PROGRESS
-    await connection.query(
-      "UPDATE tickets SET status = 'WORK_IN_PROGRESS' WHERE id = ?",
-      [ticket_id]
+    // Compare-and-swap on the same status set just validated above.
+    const [statusResult] = await connection.query(
+      "UPDATE tickets SET status = 'WORK_IN_PROGRESS' WHERE id = ? AND status = ?",
+      [ticket_id, currentStatus]
     );
+    if (statusResult.affectedRows !== 1) {
+      throw new WorkflowError(
+        'This ticket changed while the award was being recorded. Reload and try again.',
+        { code: 'CONFLICT', status: 409 }
+      );
+    }
 
     // Audit log
     await connection.query(
@@ -730,8 +737,11 @@ export const awardTender = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
     console.error('awardTender error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
   } finally {
     connection.release();
   }

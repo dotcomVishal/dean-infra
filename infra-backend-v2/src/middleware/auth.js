@@ -16,6 +16,18 @@ export const requireAuth = async (req, res, next) => {
   try {
     // 1. Verify the token using Firebase Admin SDK
     const decodedToken = await auth.verifyIdToken(token);
+
+    // S4: a Firebase account used to be linked to a pre-seeded account by
+    // email alone, with no check on how that email was proven. If any
+    // non-Google provider (e.g. email/password) is ever enabled in Firebase,
+    // anyone could claim "director@..." and become the Director.
+    if (decodedToken.email_verified !== true || decodedToken.firebase?.sign_in_provider !== 'google.com') {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: sign in with a verified Google account.',
+      });
+    }
+
     const firebase_uid = decodedToken.uid;
 
     // 2. Look up the user in our MySQL database using their unique Firebase UID
@@ -60,6 +72,9 @@ export const requireAuth = async (req, res, next) => {
     
   } catch (error) {
     console.error('Firebase Auth Error:', error.message);
-    return res.status(403).json({ success: false, message: 'Unauthorized: Invalid or expired token' });
+    // F1: an expired token used to come back as 403, which the frontend
+    // interceptor did not treat as a logout signal, so every session silently
+    // broke one hour after login instead of prompting a re-login.
+    return res.status(401).json({ success: false, message: 'Unauthorized: Invalid or expired token' });
   }
 };

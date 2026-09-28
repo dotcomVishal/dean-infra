@@ -14,6 +14,13 @@ export const syncUser = async (req, res) => {
     const decodedToken = await auth.verifyIdToken(token);
     const { uid, email, name } = decodedToken;
 
+    // S4: this is the exact point where a Firebase identity gets linked to a
+    // pre-seeded account by email. Require Google, and a verified email, so
+    // the link can never be claimed by any other provider.
+    if (decodedToken.email_verified !== true || decodedToken.firebase?.sign_in_provider !== 'google.com') {
+      return res.status(403).json({ success: false, message: 'Sign in with a verified Google account.' });
+    }
+
     if (!email) {
       return res.status(400).json({ success: false, message: 'Google account has no verified email address.' });
     }

@@ -24,7 +24,9 @@ const router = express.Router();
 router.use(requireAuth);
 
 // 1.5 Applicant Dashboard (Fetch tickets created by this specific user)
-router.get('/applicant', requireRole(['APPLICANT', 'STUDENT', 'FACULTY', 'STAFF', 'SYSADMIN']), async (req, res) => {
+// W15: "My tickets" is open to every authenticated, active role -- being the
+// applicant is a relation (tickets.applicant_id), not a role restriction.
+router.get('/applicant', async (req, res) => {
   try {
     const [tickets] = await pool.query(
       `SELECT * FROM tickets WHERE applicant_id = ? ORDER BY created_at DESC`,
@@ -37,7 +39,10 @@ router.get('/applicant', requireRole(['APPLICANT', 'STUDENT', 'FACULTY', 'STAFF'
 });
 
 // 1. Raise a Ticket (Hooks up to the actual Auto-Assignment & Email logic)
-router.post('/', requireRole(['APPLICANT', 'JE', 'SYSADMIN']), upload.array('files', 5), createTicket);
+// W15: any active, authenticated user may raise a ticket -- students, faculty,
+// staff and every internal role (AE/SE/Clerical/Accountant/Dean/Director), not
+// just APPLICANT/JE/SYSADMIN.
+router.post('/', upload.array('files', 5), createTicket);
 
 // 2. Role Dashboard Queue (Supports AE, SE, DEAN, DIRECTOR, CLERICAL, ACCOUNTANT, SYSADMIN)
 router.get(
@@ -90,34 +95,62 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
 // -------------------------------------------------------------
 // 6. CLERICAL TENDER ROUTES
 // -------------------------------------------------------------
+// S1: tendering/award belong to Clerical only. A JE (any JE, not just the
+// assigned one) used to be able to call these directly and skip the whole
+// approval chain -- the status guard in the controller closes that, but the
+// route no longer even offers JE the button.
 router.post(
   '/:ticket_id/tenders',
-  requireRole(['CLERICAL', 'JE', 'SYSADMIN']),
+  requireRole(['CLERICAL', 'SYSADMIN']),
   publishTender
 );
 
 router.post(
   '/:ticket_id/tenders/award',
-  requireRole(['CLERICAL', 'JE', 'SYSADMIN']),
+  requireRole(['CLERICAL', 'SYSADMIN']),
   awardTender
 );
 
-router.get('/:ticket_id/tenders', async (req, res) => {
-  const { ticket_id } = req.params;
-  try {
-    const [tenders] = await pool.query(
-      `SELECT tn.*, u.name as publisher_name, u.role as publisher_role 
-       FROM tenders tn 
-       JOIN users u ON tn.created_by = u.id 
-       WHERE tn.ticket_id = ? 
-       ORDER BY tn.created_at DESC`,
-      [ticket_id]
-    );
-    res.json({ success: true, tenders });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+// S6: previously unauthenticated-in-effect -- no role or scope check meant an
+// APPLICANT could read tender data for any ticket id.
+router.get(
+  '/:ticket_id/tenders',
+  requireRole(['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'CLERICAL', 'ACCOUNTANT', 'SYSADMIN']),
+  async (req, res) => {
+    const { ticket_id } = req.params;
+    const { role, department, id: userId } = req.user;
+    try {
+      const [ticketRows] = await pool.query(
+        'SELECT department, assigned_je_id FROM tickets WHERE id = ?',
+        [ticket_id]
+      );
+      if (ticketRows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Ticket not found' });
+      }
+      const ticket = ticketRows[0];
+
+      if (role === 'JE' && ticket.assigned_je_id !== userId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+      }
+      if ((role === 'AE' || role === 'SE') && ticket.department !== department) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+      }
+
+      const [tenders] = await pool.query(
+        `SELECT tn.*, u.name as publisher_name, u.role as publisher_role
+         FROM tenders tn
+         JOIN users u ON tn.created_by = u.id
+         WHERE tn.ticket_id = ?
+         ORDER BY tn.created_at DESC`,
+        [ticket_id]
+      );
+      res.json({ success: true, tenders });
+    } catch (error) {
+      console.error('getTenders error:', error);
+      res.status(500).json({ success: false, message: 'Internal Server Error' });
+    }
   }
-});
+);
 
 // -------------------------------------------------------------
 // 7. ACCOUNTANT & FINANCE BILLING ROUTES
@@ -182,8 +215,22 @@ router.get('/:ticket_id/details', async (req, res) => {
 
     const ticketData = tickets[0];
 
-    // Ownership check: If applicant, verify this ticket belongs to them
+    // S5: scope checks. Ownership only used to be enforced for APPLICANT,
+    // which let any JE read any ticket and any AE/SE read tickets outside
+    // their own department.
     if (userRole === 'APPLICANT' && ticketData.applicant_id !== userId) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+    }
+    if (userRole === 'JE' && ticketData.assigned_je_id !== userId) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+    }
+    if ((userRole === 'AE' || userRole === 'SE') && ticketData.department !== req.user.department) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+    }
+    if (
+      (userRole === 'CLERICAL' || userRole === 'ACCOUNTANT') &&
+      !['APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED'].includes(ticketData.status)
+    ) {
       return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
     }
 
@@ -261,11 +308,15 @@ router.get('/:ticket_id/details', async (req, res) => {
       ticketData.report = reports.length > 0 ? reports[0] : null;
       ticketData.tenders = tenders;
       ticketData.bills = bills;
+      // W3: a RETURNED entry IS the reason the JE's report was sent back --
+      // redacting it left the JE asked to fix a report without being told
+      // what was wrong with it.
       ticketData.audit_logs = auditLogs.map((log) => ({
         action: log.action,
         created_at: log.created_at,
         actor_role: log.actor_role,
-        remarks: log.actor_role === 'JE' || log.action === 'SUBMITTED' || log.action === 'CREATED' || log.action === 'ASSIGNED'
+        remarks: log.actor_role === 'JE'
+          || ['SUBMITTED', 'CREATED', 'ASSIGNED', 'RETURNED'].includes(log.action)
           ? log.remarks
           : '[Internal Authority Decision Recorded]',
       }));

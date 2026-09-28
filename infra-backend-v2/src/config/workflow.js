@@ -202,17 +202,22 @@ export function resolveTransition({ currentStatus, role, action, estimate }) {
   throw new WorkflowError(`Unknown action '${action}'.`, { code: 'UNKNOWN_ACTION', status: 400 });
 }
 
+// W6: the post-approval ladder is forward-only. CLOSED is terminal -- it is
+// deliberately absent from here, so a closed ticket can never accept another
+// milestone (the old code kept CLOSED in `allowedCurrent`, which reopened it).
+const TENDER_LADDER = [
+  STATUS.APPROVED_FOR_TENDERING,
+  STATUS.TENDER_PUBLISHED,
+  STATUS.WORK_IN_PROGRESS,
+  STATUS.CLOSED,
+];
+
 /** Guard for the JE's tender endpoint — this is the S1 fix. */
 export function resolveTenderUpdate({ currentStatus, milestone }) {
-  const allowedCurrent = [
-    STATUS.APPROVED_FOR_TENDERING,
-    STATUS.TENDER_PUBLISHED,
-    STATUS.WORK_IN_PROGRESS,
-    STATUS.CLOSED,
-  ];
-  if (!allowedCurrent.includes(currentStatus)) {
+  const currentIdx = TENDER_LADDER.indexOf(currentStatus);
+  if (currentIdx === -1 || currentStatus === STATUS.CLOSED) {
     throw new WorkflowError(
-      `Tender milestones can only be set after approval (ticket is at ${currentStatus}).`,
+      `Tender milestones can only be set after approval and before closure (ticket is at ${currentStatus}).`,
       { code: 'NOT_APPROVED_YET', status: 403 }
     );
   }
@@ -220,6 +225,15 @@ export function resolveTenderUpdate({ currentStatus, milestone }) {
     throw new WorkflowError(
       `'${milestone}' is not a valid milestone. Allowed: ${TENDER_MILESTONES.join(', ')}.`,
       { code: 'INVALID_MILESTONE', status: 400 }
+    );
+  }
+  // W6: milestone must be strictly ahead of the current position on the
+  // ladder, so the JE can never move a ticket backwards.
+  const milestoneIdx = TENDER_LADDER.indexOf(milestone);
+  if (milestoneIdx <= currentIdx) {
+    throw new WorkflowError(
+      `Cannot move ticket from ${currentStatus} to ${milestone}. The tender ladder is forward-only.`,
+      { code: 'BACKWARD_TRANSITION', status: 409 }
     );
   }
   return { status: milestone, logAction: 'PASSED' };

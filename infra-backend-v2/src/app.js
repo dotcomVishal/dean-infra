@@ -17,6 +17,10 @@ const __dirname = path.dirname(__filename);
 // 2. INITIALIZE APP (This must happen before any app.use calls)
 const app = express();
 
+// S8: behind nginx, every request otherwise arrives with the proxy's IP, so
+// the rate limiter's 100 requests / 15 min is shared by the whole institute.
+app.set('trust proxy', 1);
+
 // 3. Enable CORS for all incoming requests (API and static files)
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173', 
