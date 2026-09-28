@@ -43,6 +43,11 @@ export default function JeRaiseTicket() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [landmark, setLandmark] = useState('');
+  const [campus, setCampus] = useState<'NORTH' | 'SOUTH'>('NORTH');
+  const [building, setBuilding] = useState('');
+  const [category, setCategory] = useState('');
+  const [priority, setPriority] = useState<'LOW' | 'NORMAL' | 'URGENT'>('NORMAL');
+  const [contactPhone, setContactPhone] = useState('');
 
   const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const [showMap, setShowMap] = useState(false);
@@ -98,19 +103,30 @@ export default function JeRaiseTicket() {
     if (!landmark.trim()) {
       return setError('Please specify a landmark or precise campus location.');
     }
+    if (!category.trim()) {
+      return setError('Please specify a category for this proposal (e.g. structural, electrical fault).');
+    }
+    if (!contactPhone.trim()) {
+      return setError('Please provide a contact phone number.');
+    }
 
     setIsSubmitting(true);
-
-    const locationString = coordinates
-      ? `Lat: ${coordinates.lat.toFixed(5)}, Lng: ${coordinates.lng.toFixed(5)} | Landmark: ${landmark.trim()}`
-      : `Landmark: ${landmark.trim()}`;
 
     const formData = new FormData();
     formData.append('title', title.trim());
     formData.append('department', department);
     formData.append('description', description.trim());
-    formData.append('location', locationString);
     formData.append('type', 'non-recurring'); // Enforced strictly for JE non-recurring proposal
+    formData.append('campus', campus);
+    formData.append('building', building.trim());
+    formData.append('landmark', landmark.trim());
+    formData.append('category', category.trim());
+    formData.append('priority', priority);
+    formData.append('contact_phone', contactPhone.trim());
+    if (coordinates) {
+      formData.append('lat', String(coordinates.lat));
+      formData.append('lng', String(coordinates.lng));
+    }
 
     files.forEach((file) => formData.append('files', file));
 
@@ -123,7 +139,11 @@ export default function JeRaiseTicket() {
       }
     } catch (err: any) {
       console.error('Submission error:', err);
-      setError(err.response?.data?.message || 'Failed to submit the non-recurring proposal.');
+      const validationErrors = err.response?.data?.errors as { path: string; message: string }[] | undefined;
+      const message = validationErrors?.length
+        ? validationErrors.map((issue) => issue.message).join(' ')
+        : err.response?.data?.message || 'Failed to submit the non-recurring proposal.';
+      setError(message);
       setIsSubmitting(false);
     }
   };
@@ -183,6 +203,67 @@ export default function JeRaiseTicket() {
                 {dept}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* 1b. Campus */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
+            Campus
+          </label>
+          <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
+            {(['NORTH', 'SOUTH'] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCampus(c)}
+                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all ${
+                  campus === c
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 1c. Category & Priority */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
+              Category
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g., structural, electrical fault"
+              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
+              Priority
+            </label>
+            <div className="grid grid-cols-3 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
+              {(['LOW', 'NORMAL', 'URGENT'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriority(p)}
+                  className={`py-2.5 text-xs font-semibold rounded-lg transition-all ${
+                    priority === p
+                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -298,11 +379,26 @@ export default function JeRaiseTicket() {
 
             <input
               type="text"
+              placeholder="Building (optional, e.g., Hostel B3)"
+              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+              value={building}
+              onChange={(e) => setBuilding(e.target.value)}
+            />
+            <input
+              type="text"
               required
               placeholder="Exact building, wing, room number, or outdoor landmark"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
               value={landmark}
               onChange={(e) => setLandmark(e.target.value)}
+            />
+            <input
+              type="tel"
+              required
+              placeholder="Contact phone number *Required*"
+              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+              value={contactPhone}
+              onChange={(e) => setContactPhone(e.target.value)}
             />
           </div>
         </div>

@@ -2,17 +2,20 @@ import 'dotenv/config';   // MUST be first: loads .env before anything reads pro
 
 import app from './src/app.js';
 import pool from './src/config/db.js'; // This triggers the database connection confirmation
-import { runAutoMigrations } from './src/config/autoMigrate.js';
+import { runMigrations } from './src/config/migrate.js';
 import './src/cron/emailReminders.js'; // This boots up the background escalation timers
 
 const PORT = process.env.PORT || 5000;
 
-// Execute auto-migrations, then start accepting requests
+// Run migrations/*.sql (schema_migrations tracks what's applied), then start
+// accepting requests. Schema is owned by migrations only (D1, D2) — nothing
+// here patches the schema at request time.
 (async () => {
   try {
-    await runAutoMigrations();
+    await runMigrations();
   } catch (err) {
-    console.error('Migration startup warning:', err.message);
+    console.error('Migration startup failed:', err.message);
+    process.exit(1);
   }
   
   app.listen(PORT, () => {

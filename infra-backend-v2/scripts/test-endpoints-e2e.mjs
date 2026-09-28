@@ -2,7 +2,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import pool from '../src/config/db.js';
-import { runAutoMigrations } from '../src/config/autoMigrate.js';
+import { runMigrations } from '../src/config/migrate.js';
 import { moveFile } from '../src/utils/fileManager.js';
 import { resolveTransition, resolveTenderUpdate, STATUS, ROLE } from '../src/config/workflow.js';
 
@@ -33,8 +33,8 @@ async function runTests() {
     // ----------------------------------------------------
     // TEST 1: Automatic Database Migration & Schema Sync
     // ----------------------------------------------------
-    console.log('\n--- 1. Testing Schema Integrity & Auto-Migrations ---');
-    await runAutoMigrations();
+    console.log('\n--- 1. Testing Schema Integrity & Migrations ---');
+    await runMigrations();
 
     const [titleCheck] = await connection.query(`
       SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH 

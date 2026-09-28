@@ -2,6 +2,8 @@ import pool from '../config/db.js';
 import { sendEmail } from '../utils/mailer.js';
 import { resolveTransition, resolveTenderUpdate, WorkflowError, ROLE } from '../config/workflow.js';
 import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
+import { createTicketSchema, formatZodIssues } from '../validation/ticketValidation.js';
+import { assignTicket } from '../services/assignment.js';
 
 // D2: no runtime DDL. Schema is owned by migrations only -- ALTER TABLE inside
 // a request transaction used to cause an implicit MySQL commit, silently
@@ -14,51 +16,69 @@ export async function safeInsertAttachment(conn, ticketId, fileUrl, userId, cate
 }
 
 export const createTicket = async (req, res) => {
-  const applicant_id = req.user.id; 
-  const { title, department, description, location, type = 'recurring' } = req.body;
+  const applicant_id = req.user.id;
+
+  // Zod validation runs BEFORE any database transaction begins (plan.md §4
+  // Phase 3 item 4) -- an invalid raise-ticket submission never even opens a
+  // connection, let alone writes a row.
+  const parsed = createTicketSchema.safeParse(req.body);
+  if (!parsed.success) {
+    cleanupTempFiles(req.files);
+    return res.status(400).json({
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: 'Invalid ticket data.',
+      errors: formatZodIssues(parsed.error),
+    });
+  }
+  const {
+    title, department, description, type,
+    campus, building, landmark, lat, lng, category, priority, contact_phone,
+  } = parsed.data;
 
   if (type === 'non-recurring' && req.user.role !== 'JE') {
     cleanupTempFiles(req.files);
     return res.status(403).json({ success: false, message: 'Only JEs can initiate non-recurring work.' });
   }
 
-  const finalTitle = title?.trim() || (description ? description.trim().split('\n')[0].substring(0, 90) : 'Campus Infrastructure Request');
+  const finalTitle = title || description.split('\n')[0].substring(0, 90) || 'Campus Infrastructure Request';
+  // Kept for backward compatibility with every existing reader of
+  // tickets.location (queues, ticket details, emails); campus/building/
+  // landmark/lat/lng also land in their own columns below.
+  const locationLabel = [building, landmark].filter(Boolean).join(', ');
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    let assigned_je_id;
-    let assigned_je_email;
-    let assigned_je_name = 'Engineer';
-
-    // If JE is proposing work in their own department, assign to themselves; otherwise assign to least busy JE
+    let assignment;
+    // If a JE is proposing work in their own department, they inspect it
+    // themselves -- this is a distinct, pre-existing feature (JE-initiated
+    // non-recurring proposals), not part of the fair-assignment pool.
+    // Every other ticket goes through the fair auto-assignment engine.
     if (req.user.role === 'JE' && req.user.department === department) {
-      assigned_je_id = req.user.id;
-      assigned_je_email = req.user.email;
-      assigned_je_name = req.user.name;
+      assignment = {
+        status: 'ASSIGNED_TO_JE',
+        assignedJeId: req.user.id,
+        currentDeskUserId: req.user.id,
+        deskUser: { id: req.user.id, name: req.user.name, email: req.user.email },
+      };
     } else {
-      const [jes] = await connection.query(`
-        SELECT u.id, u.name, u.email, COUNT(t.id) as active_tickets
-        FROM users u
-        LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED')
-        WHERE u.role = 'JE' AND u.department = ?
-        GROUP BY u.id
-        ORDER BY active_tickets ASC
-        LIMIT 1
-      `, [department]);
-
-      if (jes.length === 0) throw new Error(`No JE available for the ${department} department`);
-      assigned_je_id = jes[0].id;
-      assigned_je_email = jes[0].email;
-      assigned_je_name = jes[0].name;
+      assignment = await assignTicket(connection, { department, campus });
     }
 
     // D2: no runtime DDL -- schema is owned by migrations only.
     const [ticketResult] = await connection.query(
-      `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNED_TO_JE')`,
-      [applicant_id, assigned_je_id, department, finalTitle, type, description, location]
+      `INSERT INTO tickets (
+         applicant_id, assigned_je_id, department, title, type, description, location,
+         campus, building, landmark, lat, lng, category, priority, contact_phone,
+         current_desk_user_id, status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        applicant_id, assignment.assignedJeId, department, finalTitle, type, description, locationLabel,
+        campus, building ?? null, landmark, lat ?? null, lng ?? null, category, priority, contact_phone,
+        assignment.currentDeskUserId, assignment.status,
+      ]
     );
 
     const ticket_id = ticketResult.insertId;
@@ -77,19 +97,30 @@ export const createTicket = async (req, res) => {
     // Insert creation audit logs
     await connection.query(
       `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
-      [ticket_id, applicant_id, 'CREATED', `Ticket raised: "${finalTitle}" (${type})`]
+      [ticket_id, applicant_id, 'CREATED', `Ticket raised: "${finalTitle}" (${type}, ${campus} campus)`]
     );
     await connection.query(
       `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
-      [ticket_id, assigned_je_id, 'ASSIGNED', `Auto-assigned to ${assigned_je_name} (${assigned_je_email})`]
+      [
+        ticket_id, assignment.currentDeskUserId, 'ASSIGNED',
+        assignment.status === 'ASSIGNED_TO_JE'
+          ? `Auto-assigned to ${assignment.deskUser.name} (${assignment.deskUser.email})`
+          : `UNASSIGNED: no available JE for ${department}/${campus} (pool exhausted or all on leave). ` +
+            `Routed to AE ${assignment.deskUser.name} (${assignment.deskUser.email}) for manual assignment.`,
+      ]
     );
 
     await connection.commit();
 
-    // Send rich, descriptive email notification to the assigned JE
+    // Notify the desk that now owns the ticket -- the assigned JE, or the AE
+    // if it's queued UNASSIGNED.
     const portalUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const emailSubject = `[Deanery of Infrastructure] New Ticket #${ticket_id} Assigned: ${finalTitle}`;
-    const emailText = `Dear ${assigned_je_name},
+    const reporterLine = `${req.user.name} (${req.user.email}${req.user.phone ? `, Phone: ${req.user.phone}` : ''})`;
+    const locationBlock = `${campus} campus${building ? `, ${building}` : ''} — ${landmark}`;
+
+    if (assignment.status === 'ASSIGNED_TO_JE') {
+      const emailSubject = `[Deanery of Infrastructure] New Ticket #${ticket_id} Assigned: ${finalTitle}`;
+      const emailText = `Dear ${assignment.deskUser.name},
 
 A new infrastructure maintenance/work ticket has been assigned to your desk for site inspection.
 
@@ -99,9 +130,12 @@ TICKET INFORMATION
 • Ticket ID:      #TKT-${String(ticket_id).padStart(4, '0')}
 • Title:          ${finalTitle}
 • Department:     ${department} Engineering
+• Category:       ${category}
+• Priority:       ${priority}
 • Work Type:      ${type === 'non-recurring' ? 'Non-Recurring Proposal' : 'Recurring Maintenance'}
-• Reported By:    ${req.user.name} (${req.user.email}${req.user.phone ? `, Phone: ${req.user.phone}` : ''})
-• Location / Map: ${location || 'Campus Landmark not specified'}
+• Reported By:    ${reporterLine}
+• Contact Phone:  ${contact_phone}
+• Location:       ${locationBlock}
 • Date & Time:    ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
 
 ======================================================================
@@ -118,10 +152,50 @@ Please inspect the physical site, evaluate technical requirements, and file your
 
 Deanery of Infrastructure, IIT Mandi
 This is an automated operational notification.`;
+      sendEmail(assignment.deskUser.email, emailSubject, emailText);
+    } else {
+      const emailSubject = `[Deanery of Infrastructure] Ticket #${ticket_id} UNASSIGNED — no JE available: ${finalTitle}`;
+      const emailText = `Dear ${assignment.deskUser.name},
 
-    sendEmail(assigned_je_email, emailSubject, emailText);
+No Junior Engineer is currently available for ${department} / ${campus} campus (the pool is exhausted or everyone is on leave). This ticket needs a JE chosen manually.
 
-    res.json({ success: true, ticket_id, title: finalTitle, assigned_je_id });
+======================================================================
+TICKET INFORMATION
+======================================================================
+• Ticket ID:      #TKT-${String(ticket_id).padStart(4, '0')}
+• Title:          ${finalTitle}
+• Department:     ${department} Engineering
+• Category:       ${category}
+• Priority:       ${priority}
+• Reported By:    ${reporterLine}
+• Contact Phone:  ${contact_phone}
+• Location:       ${locationBlock}
+• Date & Time:    ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+
+======================================================================
+ISSUE DESCRIPTION
+======================================================================
+${description}
+
+======================================================================
+ACTION REQUIRED
+======================================================================
+Review the ticket and choose a JE from the Deanery portal:
+
+🔗 Review: ${portalUrl}/approvals
+
+Deanery of Infrastructure, IIT Mandi
+This is an automated operational notification.`;
+      sendEmail(assignment.deskUser.email, emailSubject, emailText);
+    }
+
+    res.json({
+      success: true,
+      ticket_id,
+      title: finalTitle,
+      status: assignment.status,
+      assigned_je_id: assignment.assignedJeId,
+    });
   } catch (error) {
     await connection.rollback();
     cleanupTempFiles(req.files);
@@ -175,10 +249,19 @@ export const getQueue = async (req, res) => {
   }
 
   if (role === 'AE') {
+    // NOTE: still scoped by the AE's single users.department, so an AE whose
+    // extra coverage lives only in user_scopes (e.g. the Civil AE also
+    // carrying Horticulture for their campus) won't see those tickets here
+    // yet. Fixing that means every AE/SE scope check in this file reading
+    // from user_scopes -- deferred to Phase 4/6 (workflow + visibility
+    // rewrite) per plan.md, not part of this pass.
     whereClauses.push('t.department = ?');
     queryParams.push(department);
     if (tab === 'pending') {
-      whereClauses.push("t.status = 'PENDING_AE_APPROVAL'");
+      // UNASSIGNED tickets routed here by the fair-assignment engine
+      // (plan.md Q8) surface in the AE's pending tab alongside their normal
+      // approval queue.
+      whereClauses.push("t.status IN ('PENDING_AE_APPROVAL', 'UNASSIGNED')");
     } else if (tab === 'returned') {
       whereClauses.push("t.status = 'RETURNED_TO_JE'");
     }

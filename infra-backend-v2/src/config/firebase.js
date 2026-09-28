@@ -5,7 +5,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const keyPath = path.join(__dirname, '../../serviceAccountKey.json');
+// Docker sets GOOGLE_APPLICATION_CREDENTIALS to the mounted key path
+// (see docker-compose.yml); local/bare-metal runs fall back to the file
+// next to the backend root (S11).
+const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(__dirname, '../../serviceAccountKey.json');
 
 // Fail fast, fail loud, fail ACTIONABLE. A bare readFileSync here throws a raw
 // ENOENT stack trace that tells a new contributor nothing.

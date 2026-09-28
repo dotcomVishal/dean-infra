@@ -7,10 +7,10 @@ services:
     ports:
       - "127.0.0.1:3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root123}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env — no default, refusing to start with a guessable root password}
       MYSQL_DATABASE: ${DB_NAME:-deanery_infra}
       MYSQL_USER: ${DB_USER:-deanery_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-deanery_pass}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env — no default, refusing to start with a guessable DB password}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./infra-backend-v2/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
@@ -33,17 +33,18 @@ services:
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: ${DB_USER:-deanery_user}
-      DB_PASSWORD: ${DB_PASSWORD:-deanery_pass}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env — no default, refusing to start with a guessable DB password}
       DB_NAME: ${DB_NAME:-deanery_infra}
       FRONTEND_URL: ${FRONTEND_URL:-http://frontend:5173}
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/certs/serviceAccountKey.json
     volumes:
       - ./infra-backend-v2/uploads:/app/backend/uploads
       - ./.env:/app/backend/.env:ro
-      - ./serviceAccountKey.json:/app/certs/serviceAccountKey.json:ro
+      - ./infra-backend-v2/serviceAccountKey.json:/app/certs/serviceAccountKey.json:ro
     depends_on:
       mysql:
         condition: service_healthy

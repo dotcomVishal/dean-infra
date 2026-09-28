@@ -1,0 +1,37 @@
+# ============================================================
+#  Deanery Infra — root .dockerignore
+#  Build context for both Dockerfile.backend and Dockerfile.frontend is
+#  the repo root ("."), so this one file covers both COPY steps (S10).
+# ============================================================
+
+# ---- SECRETS. Never bake these into an image layer. ----
+**/serviceAccountKey.json
+firebase-adminsdk*.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+certs/
+
+# ---- Dependencies: installed fresh in the image, not copied in ----
+**/node_modules
+
+# ---- User-uploaded content: mounted as a volume at runtime, not baked in ----
+infra-backend-v2/uploads/*
+!infra-backend-v2/uploads/.gitkeep
+
+# ---- Build output not needed to build the image ----
+**/dist
+**/build
+**/*.tsbuildinfo
+
+# ---- VCS / editor / OS noise ----
+.git
+.github
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.log
+coverage

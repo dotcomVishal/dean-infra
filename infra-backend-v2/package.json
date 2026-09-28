@@ -5,8 +5,11 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "migrate": "node scripts/migrate.mjs",
+    "seed:staff": "node scripts/seed-staff.mjs",
     "test": "node scripts/test-endpoints-e2e.mjs",
-    "test:workflow": "node scripts/test-workflow.mjs"
+    "test:workflow": "node scripts/test-workflow.mjs",
+    "test:assignment": "node scripts/test-assignment.mjs"
   },
   "dependencies": {
     "cors": "^2.8.6",

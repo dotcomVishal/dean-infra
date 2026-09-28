@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './routes/authRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import availabilityRoutes from './routes/availabilityRoutes.js';
 
 // 1. Initialize __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -59,6 +60,7 @@ app.use('/api/', apiLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/availability', availabilityRoutes);
 app.get('/api/health', (_req, res) => res.status(200).json({ success: true, status: 'ok' }));
 
 // 8. Global Error Handler
