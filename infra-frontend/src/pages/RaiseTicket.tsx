@@ -50,10 +50,11 @@ export default function RaiseTicket() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files).slice(0, 5);
+      const selectedFiles = [...files, ...Array.from(e.target.files)].slice(0, 5);
       setFiles(selectedFiles);
-      setPreviewUrls(selectedFiles.map(file => URL.createObjectURL(file)));
+      setPreviewUrls(selectedFiles.map((file) => URL.createObjectURL(file)));
     }
+    e.target.value = ''; // allow re-picking the same file
   };
 
   const removeFile = (index: number) => {
@@ -119,7 +120,7 @@ export default function RaiseTicket() {
       const validationErrors = err.response?.data?.errors as { path: string; message: string }[] | undefined;
       const message = validationErrors?.length
         ? validationErrors.map((issue) => issue.message).join(' ')
-        : err.response?.data?.message || 'Failed to submit the ticket. Please try again.';
+        : (err.response?.status === 413 ? 'Files too large. Reduce photo size or count and retry.' : err.response?.data?.message) || 'Failed to submit the ticket. Please try again.';
       setError(message);
       setIsSubmitting(false);
     }
@@ -153,7 +154,7 @@ export default function RaiseTicket() {
               </div>
               <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Upload Photos</span>
               <span className="text-xs text-slate-400 dark:text-slate-500 mt-1">Tap to select up to 5 images</span>
-              <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
+              <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic" className="hidden" onChange={handleFileChange} />
             </label>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -168,7 +169,7 @@ export default function RaiseTicket() {
               {previewUrls.length < 5 && (
                 <label className="aspect-square rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition">
                   <ImagePlus size={24} className="text-slate-400 dark:text-slate-500" />
-                  <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
+                  <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic" className="hidden" onChange={handleFileChange} />
                 </label>
               )}
             </div>

@@ -1,4 +1,6 @@
 import pool from '../config/db.js';
+import { STATUS, deskForStatus } from '../config/workflow.js';
+import { resolveDeskOwner, reconcileDeskOwners } from '../models/deskModel.js';
 import { notifyAdminOverride } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { sendServerError } from '../utils/httpError.js';
@@ -235,6 +237,10 @@ export const overrideTicketStatus = async (req, res) => {
   const adminId = req.user.id;
   const adminName = req.user.name;
 
+  if (new_status && !Object.values(STATUS).includes(new_status)) {
+    return res.status(400).json({ success: false, message: `Unknown status "${new_status}".` });
+  }
+
   if (!remarks || !remarks.trim()) {
     return res.status(400).json({ success: false, message: 'Administrative reason / remarks are strictly required for an override.' });
   }
@@ -244,7 +250,7 @@ export const overrideTicketStatus = async (req, res) => {
     await connection.beginTransaction();
 
     const [rows] = await connection.query(
-      'SELECT id, status, title, assigned_je_id, department FROM tickets WHERE id = ? FOR UPDATE',
+      'SELECT id, status, title, assigned_je_id, department, campus FROM tickets WHERE id = ? FOR UPDATE',
       [ticket_id]
     );
     if (rows.length === 0) {
@@ -254,6 +260,7 @@ export const overrideTicketStatus = async (req, res) => {
     const currentTicket = rows[0];
     const updates = [];
     const updateParams = [];
+    let finalJeId = currentTicket.assigned_je_id;
     let auditRemarks = `[SYSADMIN OVERRIDE by ${adminName}]: ${remarks.trim()}`;
 
     // Handle status change
@@ -276,10 +283,18 @@ export const overrideTicketStatus = async (req, res) => {
       }
       updates.push('assigned_je_id = ?');
       updateParams.push(new_assigned_je_id);
+      finalJeId = jeUser[0].id;
       auditRemarks += ` | Reassigned to JE ${jeUser[0].name} (${jeUser[0].email})`;
     }
 
     if (updates.length > 0) {
+      // A4: the desk owner must follow the new status / JE, or nobody can act.
+      const desk = deskForStatus(finalStatus);
+      const owner = desk
+        ? await resolveDeskOwner(connection, { ...currentTicket, status: finalStatus, assigned_je_id: finalJeId }, desk)
+        : null;
+      updates.push('current_desk_user_id = ?');
+      updateParams.push(owner?.id ?? null);
       updateParams.push(ticket_id);
       await connection.query(
         `UPDATE tickets SET ${updates.join(', ')} WHERE id = ?`,
@@ -351,9 +366,48 @@ export const getAllUsers = async (req, res) => {
 };
 
 // 6. Create New User
+const CAMPUSES = ['NORTH', 'SOUTH', 'BOTH'];
+const DEPARTMENTS = ['Civil', 'Electrical', 'Horticulture', 'Administration', 'General'];
+const SCOPED_ROLES = ['JE', 'AE', 'SE'];
+const SINGLETON_ROLES = ['DEAN', 'DIRECTOR'];
+
+// A1/A6/A7: routing reads user_scopes, so every save keeps them in step with
+// the user row; `scopes` ([{department, campus}]) replaces the extra coverage
+// (e.g. a Civil AE who also runs Horticulture). Then stale desk owners are healed.
+async function syncStaffRouting(connection, userId, scopes) {
+  const [[u]] = await connection.query(
+    'SELECT id, role, department, campus, is_active FROM users WHERE id = ?', [userId]);
+  if (SCOPED_ROLES.includes(u.role)) {
+    if (scopes) await connection.query('DELETE FROM user_scopes WHERE user_id = ?', [userId]);
+    const all = [...(u.campus ? [{ department: u.department, campus: u.campus }] : []), ...(scopes || [])];
+    for (const sc of all) {
+      await connection.query(
+        'INSERT IGNORE INTO user_scopes (user_id, department, campus) VALUES (?, ?, ?)',
+        [userId, sc.department, sc.campus]);
+    }
+  }
+  // Dean/Director are singleton desks: a real account replaces the dummy seed.
+  if (SINGLETON_ROLES.includes(u.role) && u.is_active) {
+    await connection.query('UPDATE users SET is_active = FALSE WHERE role = ? AND id <> ?', [u.role, userId]);
+  }
+  await reconcileDeskOwners(connection);
+}
+
+// null = ok, else a 400 message
+function validateStaffInput({ campus, scopes }) {
+  if (campus != null && !CAMPUSES.includes(campus)) return 'campus must be NORTH, SOUTH or BOTH.';
+  if (scopes != null) {
+    if (!Array.isArray(scopes) || scopes.some((x) => !DEPARTMENTS.includes(x?.department) || !CAMPUSES.includes(x?.campus))) {
+      return 'scopes must be a list of { department, campus } with valid values.';
+    }
+  }
+  return null;
+}
+
 export const createUser = async (req, res) => {
   const name = req.body.name || req.body.full_name;
-  const { email, role, department, phone, firebase_uid } = req.body;
+  const { email, role, department, phone, firebase_uid, scopes } = req.body;
+  let { campus } = req.body;
 
   if (!name || !email || !role || !department) {
     return res.status(400).json({ success: false, message: 'Name, email, role, and department are required.' });
@@ -366,19 +420,33 @@ export const createUser = async (req, res) => {
     });
   }
 
+  if (role === 'SE' && !campus) campus = 'BOTH';
+  if (['JE', 'AE'].includes(role) && !campus) {
+    return res.status(400).json({ success: false, message: 'JE and AE accounts require a campus (NORTH, SOUTH or BOTH).' });
+  }
+  const bad = validateStaffInput({ campus, scopes });
+  if (bad) return res.status(400).json({ success: false, message: bad });
+
   const generatedUid = firebase_uid || `campus_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
+  const connection = await pool.getConnection();
   try {
-    const [result] = await pool.query(
-      `INSERT INTO users (firebase_uid, name, email, role, department, phone, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
-      [generatedUid, name.trim(), email.trim().toLowerCase(), role, department, phone || null]
+    await connection.beginTransaction();
+    const [result] = await connection.query(
+      `INSERT INTO users (firebase_uid, name, email, role, department, campus, phone, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)`,
+      [generatedUid, name.trim(), email.trim().toLowerCase(), role, department, campus || null, phone || null]
     );
+    await syncStaffRouting(connection, result.insertId, scopes);
+    await connection.commit();
 
     const [createdUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
     res.json({ success: true, user: createdUsers[0] });
   } catch (error) {
+    await connection.rollback();
     return sendServerError(req, res, error, 'createUser error');
+  } finally {
+    connection.release();
   }
 };
 
@@ -386,9 +454,13 @@ export const createUser = async (req, res) => {
 export const updateUser = async (req, res) => {
   const { id } = req.params;
   const name = req.body.name !== undefined ? req.body.name : req.body.full_name;
-  const { email, role, department, phone, is_active } = req.body;
+  const { email, role, department, campus, phone, is_active, scopes } = req.body;
 
+  const connection = await pool.getConnection();
   try {
+    const bad = validateStaffInput({ campus, scopes });
+    if (bad) return res.status(400).json({ success: false, message: bad });
+
     // Validate role & department consistency
     if (role === 'JE' && department && !['Civil', 'Electrical', 'Horticulture'].includes(department)) {
       return res.status(400).json({ 
@@ -414,20 +486,28 @@ export const updateUser = async (req, res) => {
     if (email !== undefined) { updates.push('email = ?'); params.push(email.trim().toLowerCase()); }
     if (role !== undefined) { updates.push('role = ?'); params.push(role); }
     if (department !== undefined) { updates.push('department = ?'); params.push(department); }
+    if (campus !== undefined) { updates.push('campus = ?'); params.push(campus || null); }
     if (phone !== undefined) { updates.push('phone = ?'); params.push(phone); }
     if (is_active !== undefined) { updates.push('is_active = ?'); params.push(Boolean(is_active)); }
 
-    if (updates.length === 0) {
+    if (updates.length === 0 && scopes === undefined) {
       return res.status(400).json({ success: false, message: 'No fields provided for update.' });
     }
 
-    params.push(id);
-    await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+    await connection.beginTransaction();
+    if (updates.length > 0) {
+      await connection.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, [...params, id]);
+    }
+    await syncStaffRouting(connection, id, scopes);
+    await connection.commit();
 
     const [updatedUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
     res.json({ success: true, user: updatedUsers[0] });
   } catch (error) {
+    await connection.rollback();
     return sendServerError(req, res, error, 'updateUser error');
+  } finally {
+    connection.release();
   }
 };
 

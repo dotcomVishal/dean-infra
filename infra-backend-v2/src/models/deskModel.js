@@ -3,6 +3,7 @@
 // a desk may DO live in config/workflow.js.
 
 import logger from '../utils/logger.js';
+import { STATUS, deskForStatus } from '../config/workflow.js';
 
 const PERSON = 'u.id, u.name, u.email';
 
@@ -18,7 +19,10 @@ export async function resolveAeForScope(connection, { department, campus }) {
        JOIN user_scopes s ON s.user_id = u.id
       WHERE u.role = 'AE' AND u.is_active = TRUE
         AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))
-      ORDER BY (s.campus = 'BOTH') ASC, u.id ASC
+      ORDER BY (s.campus = 'BOTH') ASC,
+        (SELECT COUNT(*) FROM tickets t
+          WHERE t.current_desk_user_id = u.id AND t.status IN ('UNASSIGNED', 'PENDING_AE_APPROVAL')) ASC,
+        u.id ASC
       LIMIT 1`,
     [department, campus ?? null, campus ?? null]
   );
@@ -69,6 +73,53 @@ export async function findDeskOwner(connection, ticket, desk) {
   }
 }
 
+/** Is `userId` still a legitimate holder of `desk` for this ticket (right role, active, AE in scope)? */
+async function holdsDesk(connection, ticket, desk, userId) {
+  if (userId == null) return false;
+  if (desk === 'JE' && userId !== ticket.assigned_je_id) return false;
+  const campus = ticket.campus ?? null;
+  const [rows] = await connection.query(
+    `SELECT 1 FROM users u
+      WHERE u.id = ? AND u.role = ? AND u.is_active = TRUE
+        AND (? <> 'AE' OR EXISTS (
+              SELECT 1 FROM user_scopes s
+               WHERE s.user_id = u.id AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))))`,
+    [userId, desk, desk, ticket.department, campus, campus]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * The desk owner id to trust: the stored one while still legitimate, else a
+ * fresh resolution (no fallback), else whatever is stored (A2/A3: stale
+ * owners, SYSADMIN fallbacks and deactivated staff must not strand a ticket).
+ */
+export async function effectiveOwnerId(connection, ticket, desk) {
+  const stored = ticket.current_desk_user_id ?? null;
+  if (await holdsDesk(connection, ticket, desk, stored)) return stored;
+  return (await findDeskOwner(connection, ticket, desk))?.id ?? stored;
+}
+
+const DESK_STATUSES = Object.values(STATUS).filter((s) => deskForStatus(s));
+
+/** Re-point every open desk ticket whose stored owner is stale. Returns how many changed. */
+export async function reconcileDeskOwners(connection) {
+  const [tickets] = await connection.query(
+    `SELECT id, status, department, campus, assigned_je_id, current_desk_user_id
+       FROM tickets WHERE status IN (?)`,
+    [DESK_STATUSES]
+  );
+  let fixed = 0;
+  for (const t of tickets) {
+    const id = await effectiveOwnerId(connection, t, deskForStatus(t.status));
+    if (id !== t.current_desk_user_id) {
+      await connection.query('UPDATE tickets SET current_desk_user_id = ? WHERE id = ?', [id, t.id]);
+      fixed += 1;
+    }
+  }
+  return fixed;
+}
+
 /** Owner with the SYSADMIN fallback + an alert in the log when it kicks in. */
 export async function resolveDeskOwner(connection, ticket, desk) {
   const owner = await findDeskOwner(connection, ticket, desk);
@@ -85,13 +136,14 @@ export async function findOwners(connection, ticket, desks) {
   return out;
 }
 
-/** An active JE whose scope covers this department (any campus, per plan.md §3.2 picker). */
-export async function getEligibleJe(connection, jeId, department) {
+/** An active JE whose scope covers this department and the ticket's campus (null campus = any). */
+export async function getEligibleJe(connection, jeId, department, campus = null) {
   const [rows] = await connection.query(
     `SELECT ${PERSON} FROM users u
       WHERE u.id = ? AND u.role = 'JE' AND u.is_active = TRUE
-        AND EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?)`,
-    [jeId, department]
+        AND EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?
+                    AND (? IS NULL OR s.campus IN (?, 'BOTH')))`,
+    [jeId, department, campus, campus]
   );
   return rows[0] ?? null;
 }

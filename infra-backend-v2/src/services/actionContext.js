@@ -4,7 +4,7 @@
 // the buttons the UI is shown and the actions the server accepts come from
 // the same inputs.
 import { DESK_RANK, deskForStatus } from '../config/workflow.js';
-import { findDeskOwner, findOwners } from '../models/deskModel.js';
+import { effectiveOwnerId, findOwners } from '../models/deskModel.js';
 import { loadLimits } from '../models/limitsModel.js';
 import { latestEstimate } from '../models/reportModel.js';
 
@@ -19,12 +19,11 @@ const DESKS = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'];
 export async function loadActionContext(connection, ticketRow, user) {
   const desk = deskForStatus(ticketRow.status);
 
-  // Tickets raised before current_desk_user_id existed have NULL: resolve the
-  // owner on the fly so they stay actionable instead of being stranded.
-  let currentDeskUserId = ticketRow.current_desk_user_id;
-  if (currentDeskUserId == null && desk) {
-    currentDeskUserId = (await findDeskOwner(connection, ticketRow, desk))?.id ?? null;
-  }
+  // Stored owner may be NULL (pre-desk tickets) or stale (SYSADMIN fallback,
+  // replaced/deactivated staff, scopes added later): re-resolve when so.
+  const currentDeskUserId = desk
+    ? await effectiveOwnerId(connection, ticketRow, desk)
+    : ticketRow.current_desk_user_id;
 
   const ticket = { status: ticketRow.status, current_desk_user_id: currentDeskUserId };
   let limits = {};

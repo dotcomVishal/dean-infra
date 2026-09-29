@@ -72,10 +72,10 @@ export const performTicketAction = async (req, res) => {
     let nextDeskUser = null;
     let assignedJeId;
     if (action === ACTION.ASSIGN_JE) {
-      nextDeskUser = await deskModel.getEligibleJe(connection, assignee_id, row.department);
+      nextDeskUser = await deskModel.getEligibleJe(connection, assignee_id, row.department, row.campus);
       if (!nextDeskUser) {
         throw new WorkflowError(
-          `User ${assignee_id} is not an active JE covering ${row.department}.`,
+          `User ${assignee_id} is not an active JE covering ${row.department}${row.campus ? ` (${row.campus})` : ''}.`,
           { code: 'INVALID_ASSIGNEE', status: 400 });
       }
       assignedJeId = nextDeskUser.id;

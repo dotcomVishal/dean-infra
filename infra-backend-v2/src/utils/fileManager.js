@@ -11,6 +11,7 @@ export const moveFile = async (file, ticketId, subFolder) => {
 
   const newPath = path.join(ticketDir, file.filename);
   await fs.promises.rename(file.path, newPath);
+  file.path = newPath; // so cleanupTempFiles removes it if the txn rolls back
 
   return `/uploads/tickets/${ticketId}/${folder}/${file.filename}`;
 };
