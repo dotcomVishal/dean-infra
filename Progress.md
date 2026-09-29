@@ -1,4 +1,23 @@
-# Progress — Phase 1 (Hotfixes)
+# Progress
+
+## Overall status (audited 2026-09-29)
+
+Code on `tazer` is ahead of this file: phases 2–8 of `plan.md` are already in the tree (migrations 003–006, `seed-staff.mjs`, new `workflow.js`, `actionController`, notifications outbox, `visibility.js`, authenticated attachments, unified ticket page, CI, `update.sh`). 208 unit tests pass. Only Phase 2 leftovers found, closed below.
+
+### Phase 2 leftovers (this pass)
+
+- **D6** — `src/config/db.js`: `connectionLimit` 100 → 15; removed duplicate `dotenv.config()` from `db.js` and `utils/mailer.js` (`server.js` loads it first; `seed-mock-data.mjs` now imports `dotenv/config` itself).
+- **D7** — mock users removed from `schema.sql` (production Docker entrypoint no longer seeds them). Moved to `scripts/seed-mock-users.sql`, loaded by `npm run seed:mock-users` (dev/test only; skips if `users` is non-empty). The `scripts/test-*.mjs` e2e scripts need it run once. Real staff: `npm run seed:staff`.
+
+### Still open
+
+- **F6** — `Login.tsx` LDAP form still a `console.log` stub (Phase 7 item, left alone).
+- Q13/Q14 in `plan.md` (return path after change request, real limits/Dean/Director names).
+- Not re-verified in this pass: integration tests against MySQL (no DB locally); fresh-DB migration with an empty `users` table should be run once via `npm run test:integration:local`.
+
+---
+
+# Phase 1 (Hotfixes)
 
 Status: **complete**. Branch: `tazer`. Scope: patch current model only, per `plan.md` §4 Phase 1. No schema changes, no new tables, no new endpoints.
 
