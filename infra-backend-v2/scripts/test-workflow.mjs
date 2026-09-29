@@ -33,8 +33,8 @@ const MATRIX = [
   [ROLE.JE,       STATUS.ASSIGNED_TO_JE,            ['SUBMIT_REPORT']],
   [ROLE.JE,       STATUS.RETURNED_TO_JE,            ['SUBMIT_REPORT']],
   [ROLE.AE,       STATUS.PENDING_AE_APPROVAL,       ['FORWARD', 'REQUEST_CHANGES']],          // AE: no approve, no reject (Q1)
-  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       ['FORWARD', 'APPROVE', 'REQUEST_CHANGES', 'REJECT']],
-  [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     ['FORWARD', 'APPROVE', 'REQUEST_CHANGES', 'REJECT']],
+  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       ['FORWARD', 'APPROVE', 'REQUEST_CHANGES']],
+  [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     ['FORWARD', 'APPROVE', 'REQUEST_CHANGES']],
   [ROLE.DIRECTOR, STATUS.PENDING_DIRECTOR_APPROVAL, ['APPROVE', 'REQUEST_CHANGES', 'REJECT']], // Director: no forward
 ];
 for (const [role, status, expected] of MATRIX) {
@@ -65,19 +65,20 @@ test('unknown desk owner fails closed', () => {
 // ---- rank-based routing of REQUEST_CHANGES targets -------------------------------------
 const TARGETS = [
   [ROLE.AE,       STATUS.PENDING_AE_APPROVAL,       ['JE']],
-  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       ['JE', 'AE']],
-  [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     ['JE', 'AE', 'SE']],
-  [ROLE.DIRECTOR, STATUS.PENDING_DIRECTOR_APPROVAL, ['JE', 'AE', 'SE', 'DEAN']],
+  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       ['AE']],
+  [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     ['SE']],
+  [ROLE.DIRECTOR, STATUS.PENDING_DIRECTOR_APPROVAL, ['DEAN']],
 ];
 for (const [role, status, expected] of TARGETS) {
-  test(`REQUEST_CHANGES targets for ${role}: only LOWER desks (${expected.join(', ')})`, () => {
+  test(`REQUEST_CHANGES targets for ${role}: only the previous desk (${expected.join(', ')})`, () => {
     assert.deepEqual(find(availableActions(user(role), ticket(status), LIMITS), 'REQUEST_CHANGES').targets, expected);
   });
 }
 
-test('target-desk availability: a lower desk with no owner is not offered', () => {
-  const t = ticket(STATUS.PENDING_DEAN_APPROVAL, { desk_owners: { JE: 11, AE: null, SE: 13 } });
-  assert.deepEqual(find(availableActions(user(ROLE.DEAN), t, LIMITS), 'REQUEST_CHANGES').targets, ['JE', 'SE']);
+test('target-desk availability: previous desk with no owner is not offered', () => {
+  const t = ticket(STATUS.PENDING_DEAN_APPROVAL, { desk_owners: { JE: 11, AE: 12, SE: null } });
+  const d = find(availableActions(user(ROLE.DEAN), t, LIMITS), 'REQUEST_CHANGES');
+  assert.equal(d.enabled, false);
 });
 test('target-desk availability: no available lower desk disables REQUEST_CHANGES', () => {
   const t = ticket(STATUS.PENDING_AE_APPROVAL, { desk_owners: { JE: null } });
@@ -90,10 +91,10 @@ test('target-desk availability: no available lower desk disables REQUEST_CHANGES
 const APPROVE_CASES = [
   // [role, status, estimate, limits, expected enabled, expected code]
   [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       50_000,    LIMITS, true,  undefined],            // exactly at limit
-  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       50_000.01, LIMITS, false, 'ABOVE_LIMIT'],
-  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       400_000,   LIMITS, false, 'ABOVE_LIMIT'],
+  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       50_000.01, LIMITS, true,  undefined],
+  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       400_000,   LIMITS, true,  undefined],
   [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     500_000,   LIMITS, true,  undefined],            // 5 lakh
-  [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     500_001,   LIMITS, false, 'ABOVE_LIMIT'],
+  [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     500_001,   LIMITS, true,  undefined],
   [ROLE.DIRECTOR, STATUS.PENDING_DIRECTOR_APPROVAL, 99_999_999, LIMITS, true, undefined],            // no limit
   [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       null,      LIMITS, false, 'ESTIMATE_MISSING'],
   [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       10_000,    {},     false, 'LIMIT_NOT_CONFIGURED'], // fail closed
@@ -105,11 +106,14 @@ for (const [role, status, estimate, limits, enabled, code] of APPROVE_CASES) {
     assert.equal(d.code, code);
   });
 }
-test('above the limit APPROVE throws ABOVE_LIMIT and FORWARD still works (forced forward)', () => {
-  const t = ticket(STATUS.PENDING_SE_APPROVAL, { estimate: 120_000 });
-  throwsCode(() => resolveAction({ user: user(ROLE.SE), ticket: t, limits: LIMITS, action: ACTION.APPROVE }), 'ABOVE_LIMIT');
-  const fwd = resolveAction({ user: user(ROLE.SE), ticket: t, limits: LIMITS, action: ACTION.FORWARD });
-  assert.equal(fwd.toStatus, STATUS.PENDING_DEAN_APPROVAL);
+test('APPROVE above the limit escalates to the next desk as a FORWARD', () => {
+  const se = resolveAction({ user: user(ROLE.SE), ticket: ticket(STATUS.PENDING_SE_APPROVAL, { estimate: 60_000 }), limits: LIMITS, action: ACTION.APPROVE });
+  assert.equal(se.toStatus, STATUS.PENDING_DEAN_APPROVAL);
+  assert.equal(se.logAction, 'FORWARDED');
+  assert.equal(se.action, ACTION.FORWARD);
+  assert.equal(se.escalated, true);
+  const dean = resolveAction({ user: user(ROLE.DEAN), ticket: ticket(STATUS.PENDING_DEAN_APPROVAL, { estimate: 600_000 }), limits: LIMITS, action: ACTION.APPROVE });
+  assert.equal(dean.toStatus, STATUS.PENDING_DIRECTOR_APPROVAL);
 });
 
 // ---- resolveAction transitions -----------------------------------------------------------
@@ -121,7 +125,6 @@ const TRANSITIONS = [
   [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       'FORWARD',         undefined, STATUS.PENDING_DEAN_APPROVAL,     'FORWARDED',         'DEAN'],
   [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       'APPROVE',         undefined, STATUS.APPROVED_FOR_TENDERING,    'APPROVED',          null],
   [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       'REQUEST_CHANGES', 'AE',      STATUS.PENDING_AE_APPROVAL,       'CHANGES_REQUESTED', 'AE'],
-  [ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       'REJECT',          undefined, STATUS.DENIED,                    'REJECTED',          null],
   [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     'FORWARD',         undefined, STATUS.PENDING_DIRECTOR_APPROVAL, 'FORWARDED',         'DIRECTOR'],
   [ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     'REQUEST_CHANGES', 'SE',      STATUS.PENDING_SE_APPROVAL,       'CHANGES_REQUESTED', 'SE'],
   [ROLE.DIRECTOR, STATUS.PENDING_DIRECTOR_APPROVAL, 'APPROVE',         undefined, STATUS.APPROVED_FOR_TENDERING,    'APPROVED',          null],
@@ -147,6 +150,9 @@ test('JE SUBMIT_REPORT -> PENDING_AE_APPROVAL / SUBMITTED', () => {
 const REFUSALS = [
   ['AE cannot APPROVE (Q1)',                        ROLE.AE,       STATUS.PENDING_AE_APPROVAL,       'APPROVE',         undefined, 'ACTION_NOT_ALLOWED'],
   ['AE cannot REJECT (Q1)',                         ROLE.AE,       STATUS.PENDING_AE_APPROVAL,       'REJECT',          undefined, 'ACTION_NOT_ALLOWED'],
+  ['SE cannot REJECT',                              ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       'REJECT',          undefined, 'ACTION_NOT_ALLOWED'],
+  ['Dean cannot REJECT',                            ROLE.DEAN,     STATUS.PENDING_DEAN_APPROVAL,     'REJECT',          undefined, 'ACTION_NOT_ALLOWED'],
+  ['Director cannot skip to JE',                    ROLE.DIRECTOR, STATUS.PENDING_DIRECTOR_APPROVAL, 'REQUEST_CHANGES', 'JE',      'INVALID_TARGET_DESK'],
   ['Director cannot FORWARD (no forward)',          ROLE.DIRECTOR, STATUS.PENDING_DIRECTOR_APPROVAL, 'FORWARD',         undefined, 'ACTION_NOT_ALLOWED'],
   ['SE cannot send changes to Dean (upwards)',      ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       'REQUEST_CHANGES', 'DEAN',    'INVALID_TARGET_DESK'],
   ['SE cannot send changes to itself',              ROLE.SE,       STATUS.PENDING_SE_APPROVAL,       'REQUEST_CHANGES', 'SE',      'INVALID_TARGET_DESK'],

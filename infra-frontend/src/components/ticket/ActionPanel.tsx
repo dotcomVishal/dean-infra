@@ -26,6 +26,10 @@ function meta(a: AvailableAction) {
       return { label: `Forward to ${to}`, hint: `${to} desk decides next`, tone: 'blue' as const, Icon: ArrowRight };
     }
     case 'APPROVE':
+      if (a.escalates_to) {
+        const to = deskLabel(a.escalates_to);
+        return { label: `Approve (escalates to ${to})`, hint: `Above your limit — ${to} desk decides next`, tone: 'emerald' as const, Icon: CheckCircle2 };
+      }
       return { label: 'Approve', hint: 'Sanction the work and release it for tendering', tone: 'emerald' as const, Icon: CheckCircle2 };
     case 'REQUEST_CHANGES':
       return { label: 'Request changes', hint: 'Send it back to a lower desk with a message', tone: 'amber' as const, Icon: CornerUpLeft };
@@ -87,22 +91,23 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
   const rc = actions.find((a) => a.action === 'REQUEST_CHANGES');
   const limit = ticket.approval_limit;
   const estimate = ticket.report?.estimated_amount;
+  const sendTo = toDesk || (rc?.targets?.length === 1 ? rc.targets[0] : '');
   const myRank = DESK_RANK[desk] ?? 1;
 
   const submit = async () => {
     if (!current) return;
     const payload: Record<string, unknown> = { action: current.action };
     if (current.action === 'REQUEST_CHANGES') {
-      if (!toDesk) return toast.error('Choose who to send this to.');
+      if (!sendTo) return toast.error('Choose who to send this to.');
       if (!message.trim()) return toast.error('Write what needs to change.');
-      payload.to_desk = toDesk; payload.message = message.trim();
+      payload.to_desk = sendTo; payload.message = message.trim();
     }
     if (current.action === 'REJECT') {
       if (!message.trim()) return toast.error('Give the reason for rejecting.');
       payload.message = message.trim();
       if (publicNote.trim()) payload.public_note = publicNote.trim();
     }
-    if (current.action === 'FORWARD' && replying) {
+    if ((current.action === 'FORWARD' || (current.action === 'APPROVE' && current.escalates_to)) && replying) {
       if (!message.trim()) return toast.error('Reply to the change request before you forward.');
       payload.message = message.trim();
     }
@@ -208,7 +213,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
                 <label htmlFor="sendto" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   Send to <span className="text-rose-500">*</span>
                 </label>
-                <select id="sendto" value={toDesk} onChange={(e) => setToDesk(e.target.value)} className={fieldCls}>
+                <select id="sendto" value={sendTo} onChange={(e) => setToDesk(e.target.value)} className={fieldCls}>
                   <option value="">Select a desk…</option>
                   {(rc?.targets ?? []).map((d) => (
                     <option key={d} value={d}>{deskLabel(d)}{ticket.desk_people?.[d] ? ` — ${ticket.desk_people[d]}` : ''}</option>
@@ -220,14 +225,14 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
                   What needs to change <span className="text-rose-500">*</span>
                 </label>
                 <textarea id="msg" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} resize-none`} />
-                {toDesk ? <VisibleTo desks={visibleDesks(DESK_RANK[toDesk])} /> : (
+                {sendTo ? <VisibleTo desks={visibleDesks(DESK_RANK[sendTo])} /> : (
                   <p className="mt-1 text-[11px] text-slate-400">Pick a desk to see who can read this message.</p>
                 )}
               </div>
             </>
           )}
 
-          {current.action === 'FORWARD' && replying && openRequest && (
+          {(current.action === 'FORWARD' || (current.action === 'APPROVE' && current.escalates_to)) && replying && openRequest && (
             <div>
               <label htmlFor="reply" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 Reply to {deskLabel(openRequest.author_desk)} <span className="text-rose-500">*</span>

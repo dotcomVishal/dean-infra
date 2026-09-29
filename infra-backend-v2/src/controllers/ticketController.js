@@ -67,7 +67,14 @@ export const createTicket = async (req, res) => {
     // themselves -- this is a distinct, pre-existing feature (JE-initiated
     // non-recurring proposals), not part of the fair-assignment pool.
     // Every other ticket goes through the fair auto-assignment engine.
+    let jeCoversCampus = false;
     if (req.user.role === 'JE' && req.user.department === department) {
+      const [scope] = await connection.query(
+        "SELECT 1 FROM user_scopes WHERE user_id = ? AND campus IN (?, 'BOTH') LIMIT 1",
+        [req.user.id, campus]);
+      jeCoversCampus = scope.length > 0;
+    }
+    if (jeCoversCampus) {
       assignment = {
         status: 'ASSIGNED_TO_JE',
         assignedJeId: req.user.id,
@@ -202,8 +209,8 @@ export const getQueue = async (req, res) => {
       whereClauses.push("t.status = 'RETURNED_TO_JE'");
     }
   } else if (role === 'SE') {
-    whereClauses.push('t.department = ?');
-    queryParams.push(department);
+    whereClauses.push('(t.department = ? OR t.current_desk_user_id = ?)');
+    queryParams.push(department, req.user.id);
     if (tab === 'pending') {
       whereClauses.push("t.status = 'PENDING_SE_APPROVAL'");
     } else if (tab === 'returned') {
