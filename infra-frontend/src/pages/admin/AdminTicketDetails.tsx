@@ -3,10 +3,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
   Loader2, ArrowLeft, MapPin, User, Building2, 
-  History, ExternalLink, Mail, Phone, Image as ImageIcon,
+  History, Mail, Phone, Image as ImageIcon,
   ShieldAlert, RefreshCw, FileCheck
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
+import { DocLink } from '../../components/ticket/Attachments';
 
 const ALL_STATUSES = [
   'ASSIGNED_TO_JE',
@@ -74,7 +76,7 @@ export default function AdminTicketDetails() {
   const handleExecuteOverride = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!overrideRemarks.trim()) {
-      alert('Administrative justification remarks are strictly required.');
+      toast.error('Administrative justification remarks are strictly required.');
       return;
     }
 
@@ -86,13 +88,13 @@ export default function AdminTicketDetails() {
         remarks: overrideRemarks.trim(),
       });
       if (res.data.success) {
-        alert('Ticket state and audit record updated successfully.');
+        toast.success('Ticket state and audit record updated successfully.');
         setOverrideRemarks('');
         fetchDetails();
       }
     } catch (err: any) {
       console.error('Override error:', err);
-      alert(err.response?.data?.message || 'Failed to execute override.');
+      toast.error(err.response?.data?.message || 'Failed to execute override.');
     } finally {
       setIsSubmittingOverride(false);
     }
@@ -389,24 +391,21 @@ export default function AdminTicketDetails() {
 
             {attachments.length > 0 ? (
               <div className="space-y-2">
-                {attachments.map((file: any, i: number) => (
-                  <a
-                    key={i}
-                    href={file.file_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-700/60 hover:border-blue-500 transition group text-xs"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <span className="font-medium text-slate-800 dark:text-slate-200 block truncate">
-                        {file.file_url.split('/').pop()}
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {file.document_category?.replace(/_/g, ' ') || 'Attachment'} · by {file.uploader_name || 'User'}
-                      </span>
-                    </div>
-                    <ExternalLink size={14} className="text-slate-400 group-hover:text-blue-500 shrink-0" />
-                  </a>
+                {attachments.map((file: any) => (
+                  <div key={file.id} className="space-y-1">
+                    <DocLink
+                      file={{
+                        id: file.id,
+                        created_at: file.created_at,
+                        document_category: file.document_category,
+                        file_name: String(file.file_url).split('/').pop()?.replace(/^\d+-\d+-/, '') || 'file',
+                        download_url: `/api/attachments/${file.id}`,
+                      }}
+                    />
+                    <span className="block px-1 text-[10px] text-slate-400">
+                      {file.document_category?.replace(/_/g, ' ') || 'Attachment'} · by {file.uploader_name || 'User'}
+                    </span>
+                  </div>
                 ))}
               </div>
             ) : (

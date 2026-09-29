@@ -8,6 +8,7 @@ import {
   ShieldCheck, RefreshCw
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
 
 interface TicketSummary {
   id: number;
@@ -123,7 +124,7 @@ export default function JeTenderControl() {
       }
     } catch (err: any) {
       console.error('Failed to update tender milestone:', err);
-      alert(err.response?.data?.message || 'Milestone update failed.');
+      toast.error(err.response?.data?.message || 'Milestone update failed.');
     } finally {
       setIsUpdating(false);
     }

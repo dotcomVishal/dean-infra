@@ -1,17 +1,28 @@
 import pool from '../config/db.js';
-import { sendEmail } from '../utils/mailer.js';
-import { resolveTransition, resolveTenderUpdate, WorkflowError, ROLE } from '../config/workflow.js';
+import {
+  ACTION, resolveAction, resolveTenderUpdate, planMessages, nextOpenRequestId,
+  WorkflowError,
+} from '../config/workflow.js';
 import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
 import { createTicketSchema, formatZodIssues } from '../validation/ticketValidation.js';
 import { assignTicket } from '../services/assignment.js';
+import * as ticketModel from '../models/ticketModel.js';
+import * as messageModel from '../models/messageModel.js';
+import * as deskModel from '../models/deskModel.js';
+import * as reportModel from '../models/reportModel.js';
+import { insertAudit } from '../models/auditModel.js';
+import { notifyTicketCreated, notifyTransition, notifyPostApproval } from '../services/notifier.js';
+import { kickOutbox } from '../cron/emailReminders.js';
+import { redactQueueRow } from '../services/visibility.js';
+import { sendServerError } from '../utils/httpError.js';
 
 // D2: no runtime DDL. Schema is owned by migrations only -- ALTER TABLE inside
 // a request transaction used to cause an implicit MySQL commit, silently
 // committing a half-finished transaction that the later rollback could not undo.
-export async function safeInsertAttachment(conn, ticketId, fileUrl, userId, category = 'APPLICANT_EVIDENCE') {
+export async function safeInsertAttachment(conn, ticketId, fileUrl, userId, category = 'APPLICANT_EVIDENCE', reportId = null) {
   await conn.query(
-    'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
-    [ticketId, fileUrl, userId, category]
+    'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category, report_id) VALUES (?, ?, ?, ?, ?)',
+    [ticketId, fileUrl, userId, category, reportId]
   );
 }
 
@@ -110,84 +121,12 @@ export const createTicket = async (req, res) => {
       ]
     );
 
+    // Outbox: the assignment/UNASSIGNED notice + its reminder series + the
+    // applicant's stage mail are written in this same transaction (plan.md §3.4).
+    await notifyTicketCreated(connection, { ticketId: ticket_id, assignment });
+
     await connection.commit();
-
-    // Notify the desk that now owns the ticket -- the assigned JE, or the AE
-    // if it's queued UNASSIGNED.
-    const portalUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const reporterLine = `${req.user.name} (${req.user.email}${req.user.phone ? `, Phone: ${req.user.phone}` : ''})`;
-    const locationBlock = `${campus} campus${building ? `, ${building}` : ''} — ${landmark}`;
-
-    if (assignment.status === 'ASSIGNED_TO_JE') {
-      const emailSubject = `[Deanery of Infrastructure] New Ticket #${ticket_id} Assigned: ${finalTitle}`;
-      const emailText = `Dear ${assignment.deskUser.name},
-
-A new infrastructure maintenance/work ticket has been assigned to your desk for site inspection.
-
-======================================================================
-TICKET INFORMATION
-======================================================================
-• Ticket ID:      #TKT-${String(ticket_id).padStart(4, '0')}
-• Title:          ${finalTitle}
-• Department:     ${department} Engineering
-• Category:       ${category}
-• Priority:       ${priority}
-• Work Type:      ${type === 'non-recurring' ? 'Non-Recurring Proposal' : 'Recurring Maintenance'}
-• Reported By:    ${reporterLine}
-• Contact Phone:  ${contact_phone}
-• Location:       ${locationBlock}
-• Date & Time:    ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
-
-======================================================================
-ISSUE DESCRIPTION
-======================================================================
-${description}
-
-======================================================================
-ACTION REQUIRED
-======================================================================
-Please inspect the physical site, evaluate technical requirements, and file your inspection report with the estimated financial sanction on the Deanery portal:
-
-🔗 Review & File Report: ${portalUrl}/je/ticket/${ticket_id}
-
-Deanery of Infrastructure, IIT Mandi
-This is an automated operational notification.`;
-      sendEmail(assignment.deskUser.email, emailSubject, emailText);
-    } else {
-      const emailSubject = `[Deanery of Infrastructure] Ticket #${ticket_id} UNASSIGNED — no JE available: ${finalTitle}`;
-      const emailText = `Dear ${assignment.deskUser.name},
-
-No Junior Engineer is currently available for ${department} / ${campus} campus (the pool is exhausted or everyone is on leave). This ticket needs a JE chosen manually.
-
-======================================================================
-TICKET INFORMATION
-======================================================================
-• Ticket ID:      #TKT-${String(ticket_id).padStart(4, '0')}
-• Title:          ${finalTitle}
-• Department:     ${department} Engineering
-• Category:       ${category}
-• Priority:       ${priority}
-• Reported By:    ${reporterLine}
-• Contact Phone:  ${contact_phone}
-• Location:       ${locationBlock}
-• Date & Time:    ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
-
-======================================================================
-ISSUE DESCRIPTION
-======================================================================
-${description}
-
-======================================================================
-ACTION REQUIRED
-======================================================================
-Review the ticket and choose a JE from the Deanery portal:
-
-🔗 Review: ${portalUrl}/approvals
-
-Deanery of Infrastructure, IIT Mandi
-This is an automated operational notification.`;
-      sendEmail(assignment.deskUser.email, emailSubject, emailText);
-    }
+    kickOutbox();
 
     res.json({
       success: true,
@@ -199,7 +138,7 @@ This is an automated operational notification.`;
   } catch (error) {
     await connection.rollback();
     cleanupTempFiles(req.files);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'ticketController:140');
   } finally {
     connection.release();
   }
@@ -249,14 +188,11 @@ export const getQueue = async (req, res) => {
   }
 
   if (role === 'AE') {
-    // NOTE: still scoped by the AE's single users.department, so an AE whose
-    // extra coverage lives only in user_scopes (e.g. the Civil AE also
-    // carrying Horticulture for their campus) won't see those tickets here
-    // yet. Fixing that means every AE/SE scope check in this file reading
-    // from user_scopes -- deferred to Phase 4/6 (workflow + visibility
-    // rewrite) per plan.md, not part of this pass.
-    whereClauses.push('t.department = ?');
-    queryParams.push(department);
+    // Department match (legacy single-department scope) OR the ticket is on
+    // this AE's desk right now -- an AE whose extra coverage lives only in
+    // user_scopes (e.g. Horticulture) still sees tickets routed to them.
+    whereClauses.push('(t.department = ? OR t.current_desk_user_id = ?)');
+    queryParams.push(department, req.user.id);
     if (tab === 'pending') {
       // UNASSIGNED tickets routed here by the fair-assignment engine
       // (plan.md Q8) surface in the AE's pending tab alongside their normal
@@ -313,10 +249,10 @@ export const getQueue = async (req, res) => {
 
   try {
     const [tickets] = await pool.query(query, queryParams);
-    res.json({ success: true, page, limit, tab, tickets });
+    const viewer = { role };
+    res.json({ success: true, page, limit, tab, tickets: tickets.map((t) => redactQueueRow(viewer, t)) });
   } catch (error) {
-    console.error('getQueue error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getQueue error');
   }
 };
 
@@ -327,20 +263,23 @@ export const getQueue = async (req, res) => {
 // errors (strict mode) or silently rounds -- neither is acceptable for money.
 const MAX_ESTIMATE = 99_999_999.99;
 
+const POST_APPROVAL_HEADLINE = Object.freeze({
+  TENDER_PUBLISHED: 'Tender published',
+  WORK_IN_PROGRESS: 'Work awarded — work in progress',
+  CLOSED: 'Closed',
+});
+
 export async function applyReportSubmission(
   connection, { ticketId, jeId, role, natureOfWork, estimate, remarks }
 ) {
-  const [rows] = await connection.query(
-    `SELECT id, status FROM tickets WHERE id = ? AND assigned_je_id = ? FOR UPDATE`,
-    [ticketId, jeId]
-  );
-  if (rows.length === 0) {
+  const ticket = await ticketModel.lockForJe(connection, ticketId, jeId);
+  if (!ticket) {
     throw new WorkflowError(
       `Ticket ${ticketId} not found, or it is not assigned to you.`,
       { code: 'NOT_FOUND', status: 404 }
     );
   }
-  const currentStatus = rows[0].status;
+  const currentStatus = ticket.status;
 
   // Validate the free-text field here; the state machine validates the money.
   if (typeof natureOfWork !== 'string' || natureOfWork.trim().length === 0) {
@@ -375,34 +314,74 @@ export async function applyReportSubmission(
   // The state machine owns the decision. Note we pass `role` in rather than
   // assuming JE: if someone wires this route to the wrong middleware, the
   // logic still refuses. Do not trust route-level RBAC on its own.
-  const { status: nextStatus, logAction } = resolveTransition({
-    currentStatus, role, action: 'SUBMIT_REPORT', estimate: amount,
+  // A JE is the owner of their own desk by definition (assigned_je_id); tickets
+  // routed after Phase 3 also carry it in current_desk_user_id.
+  const t = resolveAction({
+    user: { id: jeId, role },
+    ticket: {
+      status: currentStatus,
+      current_desk_user_id: ticket.current_desk_user_id ?? ticket.assigned_je_id,
+    },
+    action: ACTION.SUBMIT_REPORT,
+    estimate: amount,
   });
 
-  // The reports table keeps EVERY version, so a returned-and-refiled ticket
-  // preserves its history. /details reads the newest with ORDER BY ... LIMIT 1.
-  const [reportResult] = await connection.query(
-    `INSERT INTO reports (ticket_id, je_id, nature_of_work, estimated_amount)
-     VALUES (?, ?, ?, ?)`,
-    [ticketId, jeId, natureOfWork.trim(), amount]
-  );
+  // A report filed while a change request is addressed to the JE ANSWERS it:
+  // it links to that request and the reply (the report remarks) is mandatory.
+  const openRequest = ticket.open_change_request_id
+    ? await messageModel.getMessage(connection, ticket.open_change_request_id)
+    : null;
+  const answersMessageId = openRequest && openRequest.to_desk === 'JE' ? openRequest.id : null;
+  const specs = planMessages({
+    action: ACTION.SUBMIT_REPORT, fromDesk: t.fromDesk, toDesk: t.toDesk,
+    payload: { message: remarks }, openRequest,
+  });
 
-  const [result] = await connection.query(
-    `UPDATE tickets SET status = ? WHERE id = ? AND status = ?`,
-    [nextStatus, ticketId, currentStatus]
-  );
-  if (result.affectedRows !== 1) {
+  const aeOwner = await deskModel.resolveDeskOwner(connection, ticket, t.toDesk);
+  if (!aeOwner) {
+    throw new WorkflowError('Nobody is available at the AE desk for this ticket.',
+      { code: 'NO_DESK_OWNER', status: 409 });
+  }
+
+  // The reports table keeps EVERY version (incrementing per ticket), so a
+  // returned-and-refiled ticket preserves its history. The ticket row is
+  // locked, so MAX(version)+1 cannot race; uq_report_ticket_version backs it.
+  const version = await reportModel.nextVersion(connection, ticketId);
+  const reportId = await reportModel.insertReport(connection, {
+    ticketId, jeId, version, natureOfWork: natureOfWork.trim(), amount,
+    remarks: typeof remarks === 'string' && remarks.trim() ? remarks.trim() : null,
+    answersMessageId,
+  });
+
+  const thread = ticket.open_change_request_id
+    ? await messageModel.getThread(connection, ticket.open_change_request_id)
+    : {};
+  const applied = await ticketModel.applyTransition(connection, {
+    ticketId, fromStatus: t.fromStatus, toStatus: t.toStatus,
+    currentDeskUserId: aeOwner.id,
+    openChangeRequestId: nextOpenRequestId({
+      openId: ticket.open_change_request_id, toDesk: t.toDesk, messagesById: thread,
+    }),
+  });
+  if (!applied) {
     throw new WorkflowError(
       'This ticket changed while you were working on it. Reload and try again.',
       { code: 'CONFLICT', status: 409 });
   }
 
-  await connection.query(
-    `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
-    [ticketId, jeId, logAction, remarks || `Report filed, estimate INR ${amount}`]
-  );
+  const auditId = await insertAudit(connection, {
+    ticketId, userId: jeId, action: t.logAction,
+    remarks: `Report v${version} filed, estimate INR ${amount}`,
+    fromStatus: t.fromStatus, toStatus: t.toStatus, fromDesk: t.fromDesk, toDesk: t.toDesk,
+  });
+  for (const spec of specs) {
+    spec.to_user_id = (await deskModel.resolveDeskOwner(connection, ticket, spec.to_desk))?.id ?? null;
+  }
+  await messageModel.insertMessages(connection, {
+    ticketId, auditLogId: auditId, authorUserId: jeId, specs,
+  });
 
-  return { nextStatus, reportId: reportResult.insertId, amount };
+  return { nextStatus: t.toStatus, fromStatus: t.fromStatus, nextDeskUser: aeOwner, reportId, version, amount };
 }
 
 export const submitReport = async (req, res) => {
@@ -440,18 +419,24 @@ export const submitReport = async (req, res) => {
 
       for (const photo of sitePhotos) {
         const fileUrl = await moveFile(photo, ticketId, 'je_reports/site_photos');
-        await safeInsertAttachment(connection, ticketId, fileUrl, req.user.id, 'JE_SITE_PHOTO');
+        await safeInsertAttachment(connection, ticketId, fileUrl, req.user.id, 'JE_SITE_PHOTO', out.reportId);
       }
 
       for (const doc of estimateDocs) {
         const fileUrl = await moveFile(doc, ticketId, 'je_reports/estimate_docs');
-        await safeInsertAttachment(connection, ticketId, fileUrl, req.user.id, 'JE_ESTIMATE_DOC');
+        await safeInsertAttachment(connection, ticketId, fileUrl, req.user.id, 'JE_ESTIMATE_DOC', out.reportId);
       }
     }
 
+    await notifyTransition(connection, {
+      ticketId, fromStatus: out.fromStatus, toStatus: out.nextStatus, action: ACTION.SUBMIT_REPORT,
+      toDesk: 'AE', nextDeskUser: out.nextDeskUser, actor: { name: req.user.name, desk: 'JE' },
+    });
+
     await connection.commit();
+    kickOutbox();
     res.json({
-      success: true, status: out.nextStatus, report_id: out.reportId,
+      success: true, status: out.nextStatus, report_id: out.reportId, version: out.version,
       message: `Report filed. Ticket forwarded to ${out.nextStatus.replace(/_/g, ' ')}.`,
     });
   } catch (error) {
@@ -461,8 +446,7 @@ export const submitReport = async (req, res) => {
       return res.status(error.status).json({
         success: false, code: error.code, message: error.message });
     }
-    console.error('submitReport failed:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+    return sendServerError(req, res, error, 'submitReport');
   } finally {
     connection.release();
   }
@@ -517,10 +501,10 @@ export async function applyTenderUpdate(connection, { ticketId, jeId, milestone,
 
   // 5. Every state change gets an audit row. The old code wrote none, which
   //    for a public-money workflow is a compliance gap, not just a nicety.
-  await connection.query(
-    `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
-    [ticketId, jeId, logAction, remarks || `Milestone set to ${nextStatus}`]
-  );
+  await insertAudit(connection, {
+    ticketId, userId: jeId, action: logAction, remarks: remarks || `Milestone set to ${nextStatus}`,
+    fromStatus: currentStatus, toStatus: nextStatus,
+  });
 
   return nextStatus;
 }
@@ -536,13 +520,19 @@ export const updateTenderStatus = async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    const [before] = await connection.query(
+      'SELECT status FROM tickets WHERE id = ? AND assigned_je_id = ? FOR UPDATE', [ticketId, req.user.id]);
     const nextStatus = await applyTenderUpdate(connection, {
       ticketId,
       jeId: req.user.id,
       milestone: req.body.milestone,
       remarks: req.body.remarks,
     });
+    await notifyPostApproval(connection, {
+      ticketId, fromStatus: before[0]?.status ?? null, toStatus: nextStatus, headline: POST_APPROVAL_HEADLINE[nextStatus],
+    });
     await connection.commit();
+    kickOutbox();
     res.json({ success: true, status: nextStatus, message: `Ticket updated to ${nextStatus}` });
   } catch (error) {
     await connection.rollback();
@@ -554,90 +544,7 @@ export const updateTenderStatus = async (req, res) => {
     }
     // Anything else is a real bug. Log it, and do NOT leak internals to the
     // client -- the old code returned error.message raw, which can expose SQL.
-    console.error('updateTenderStatus failed:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
-  } finally {
-    connection.release();
-  }
-};
-
-// REVIEW TICKET: Zero-trust review for AE, SE, DEAN, DIRECTOR
-export const reviewTicket = async (req, res) => {
-  const ticketId = Number.parseInt(req.params.ticket_id, 10);
-  if (!Number.isInteger(ticketId) || ticketId <= 0) {
-    return res.status(400).json({
-      success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.',
-    });
-  }
-
-  const { action, remarks } = req.body;
-  const { id: userId, role } = req.user; // Zero trust: identity verified from token & DB
-
-  if (!action || !['APPROVE', 'RETURN', 'DENY'].includes(action)) {
-    return res.status(400).json({ success: false, message: 'Valid action (APPROVE, RETURN, DENY) is required.' });
-  }
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    const [rows] = await connection.query(
-      `SELECT id, status, department FROM tickets WHERE id = ? FOR UPDATE`,
-      [ticketId]
-    );
-    if (rows.length === 0) {
-      throw new WorkflowError(`Ticket ${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
-    }
-
-    const currentStatus = rows[0].status;
-
-    // S7: the reviewer must own this ticket's desk. Without this, the
-    // Electrical AE could act on a Civil ticket at PENDING_AE_APPROVAL, since
-    // only the role was checked, never the department. Dean/Director/SYSADMIN
-    // act institute-wide, so they are not scoped here.
-    if ((role === 'AE' || role === 'SE') && rows[0].department !== req.user.department) {
-      throw new WorkflowError(
-        `Ticket ${ticketId} belongs to the ${rows[0].department} department, not your desk.`,
-        { code: 'WRONG_DEPARTMENT', status: 403 }
-      );
-    }
-
-    // Fetch latest estimate from reports
-    const [reports] = await connection.query(
-      `SELECT estimated_amount FROM reports WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1`,
-      [ticketId]
-    );
-    const estimate = reports.length > 0 ? parseFloat(reports[0].estimated_amount) : null;
-
-    const { status: nextStatus, logAction } = resolveTransition({
-      currentStatus,
-      role,
-      action,
-      estimate,
-    });
-
-    const [result] = await connection.query(
-      `UPDATE tickets SET status = ? WHERE id = ? AND status = ?`,
-      [nextStatus, ticketId, currentStatus]
-    );
-    if (result.affectedRows !== 1) {
-      throw new WorkflowError('This ticket changed while you were reviewing it. Reload and try again.', { code: 'CONFLICT', status: 409 });
-    }
-
-    await connection.query(
-      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
-      [ticketId, userId, logAction, remarks || `${action} by ${role}`]
-    );
-
-    await connection.commit();
-    res.json({ success: true, status: nextStatus, message: `Ticket updated to ${nextStatus}` });
-  } catch (error) {
-    await connection.rollback();
-    if (error instanceof WorkflowError) {
-      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
-    }
-    console.error('reviewTicket failed:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+    return sendServerError(req, res, error, 'updateTenderStatus');
   } finally {
     connection.release();
   }
@@ -706,9 +613,14 @@ export const publishTender = async (req, res) => {
       );
     }
 
+    await notifyPostApproval(connection, {
+      ticketId: ticket_id, fromStatus: 'APPROVED_FOR_TENDERING', toStatus: 'TENDER_PUBLISHED',
+      headline: POST_APPROVAL_HEADLINE.TENDER_PUBLISHED,
+    });
+
     // Write audit log
     await connection.query(
-      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, 'PASSED', ?)`,
+      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, from_status, to_status) VALUES (?, ?, 'TENDER_PUBLISHED', ?, 'APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED')`,
       [
         ticket_id,
         userId,
@@ -717,6 +629,7 @@ export const publishTender = async (req, res) => {
     );
 
     await connection.commit();
+    kickOutbox();
     res.json({
       success: true,
       tender_id: tenderResult.insertId,
@@ -728,8 +641,7 @@ export const publishTender = async (req, res) => {
     if (error instanceof WorkflowError) {
       return res.status(error.status).json({ success: false, code: error.code, message: error.message });
     }
-    console.error('publishTender error:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+    return sendServerError(req, res, error, 'publishTender error');
   } finally {
     connection.release();
   }
@@ -804,15 +716,22 @@ export const awardTender = async (req, res) => {
 
     // Audit log
     await connection.query(
-      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, 'PASSED', ?)`,
+      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, from_status, to_status) VALUES (?, ?, 'WORK_AWARDED', ?, ?, 'WORK_IN_PROGRESS')`,
       [
         ticket_id,
         userId,
-        `[Work Order Awarded]: Agency: "${awarded_agency.trim()}", Contract Value: INR ${val || 'As per BOQ'}`
+        `[Work Order Awarded]: Agency: "${awarded_agency.trim()}", Contract Value: INR ${val || 'As per BOQ'}`,
+        currentStatus,
       ]
     );
 
+    await notifyPostApproval(connection, {
+      ticketId: ticket_id, fromStatus: currentStatus, toStatus: 'WORK_IN_PROGRESS',
+      headline: POST_APPROVAL_HEADLINE.WORK_IN_PROGRESS,
+    });
+
     await connection.commit();
+    kickOutbox();
     res.json({
       success: true,
       status: 'WORK_IN_PROGRESS',
@@ -823,8 +742,7 @@ export const awardTender = async (req, res) => {
     if (error instanceof WorkflowError) {
       return res.status(error.status).json({ success: false, code: error.code, message: error.message });
     }
-    console.error('awardTender error:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+    return sendServerError(req, res, error, 'awardTender error');
   } finally {
     connection.release();
   }
@@ -883,7 +801,7 @@ export const recordBill = async (req, res) => {
 
     // Audit log
     await connection.query(
-      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, 'PASSED', ?)`,
+      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, 'BILL_RECORDED', ?)`,
       [
         ticket_id,
         userId,
@@ -899,8 +817,7 @@ export const recordBill = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
-    console.error('recordBill error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'recordBill error');
   } finally {
     connection.release();
   }
@@ -929,8 +846,7 @@ export const updateBillPayment = async (req, res) => {
     const [updated] = await pool.query('SELECT * FROM bills WHERE id = ?', [bill_id]);
     res.json({ success: true, bill: updated[0] });
   } catch (error) {
-    console.error('updateBillPayment error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'updateBillPayment error');
   }
 };
 
@@ -972,7 +888,6 @@ export const getAccountantOverview = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('getAccountantOverview error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getAccountantOverview error');
   }
 };

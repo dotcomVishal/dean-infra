@@ -1,5 +1,7 @@
 import pool from '../config/db.js';
-import { sendEmail } from '../utils/mailer.js';
+import { notifyAdminOverride } from '../services/notifier.js';
+import { kickOutbox } from '../cron/emailReminders.js';
+import { sendServerError } from '../utils/httpError.js';
 
 // 1. System Overview Metrics
 export const getAdminMetrics = async (req, res) => {
@@ -101,8 +103,7 @@ export const getAdminMetrics = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('getAdminMetrics error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getAdminMetrics error');
   }
 };
 
@@ -168,8 +169,7 @@ export const getAllTickets = async (req, res) => {
       tickets,
     });
   } catch (error) {
-    console.error('getAllTickets error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getAllTickets error');
   }
 };
 
@@ -222,8 +222,7 @@ export const getTicketMasterDetails = async (req, res) => {
 
     res.json({ success: true, ticket: ticketData });
   } catch (error) {
-    console.error('getTicketMasterDetails error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getTicketMasterDetails error');
   }
 };
 
@@ -267,7 +266,6 @@ export const overrideTicketStatus = async (req, res) => {
     }
 
     // Handle JE reassignment
-    let reassignedJeEmail = null;
     if (new_assigned_je_id && parseInt(new_assigned_je_id, 10) !== currentTicket.assigned_je_id) {
       const [jeUser] = await connection.query(
         'SELECT id, name, email FROM users WHERE id = ? AND role = "JE"',
@@ -278,7 +276,6 @@ export const overrideTicketStatus = async (req, res) => {
       }
       updates.push('assigned_je_id = ?');
       updateParams.push(new_assigned_je_id);
-      reassignedJeEmail = jeUser[0].email;
       auditRemarks += ` | Reassigned to JE ${jeUser[0].name} (${jeUser[0].email})`;
     }
 
@@ -293,20 +290,17 @@ export const overrideTicketStatus = async (req, res) => {
     // Record immutable audit log
     await connection.query(
       'INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)',
-      [ticket_id, adminId, 'APPROVED', auditRemarks]
+      [ticket_id, adminId, 'OVERRIDE', auditRemarks]
     );
 
-    await connection.commit();
-
-    // If reassigned, notify the new JE
-    if (reassignedJeEmail) {
-      const portalUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      sendEmail(
-        reassignedJeEmail,
-        `[Deanery Admin Reassignment] Ticket #${ticket_id}: ${currentTicket.title}`,
-        `Dear Engineer,\n\nTicket #${ticket_id} ("${currentTicket.title}") has been administratively assigned to your desk by System Administration.\n\nReason: ${remarks}\n\nView Ticket: ${portalUrl}/je/ticket/${ticket_id}\n\nDeanery of Infrastructure, IIT Mandi`
-      );
+    // Restart the right reminder series for wherever the ticket now sits, and
+    // tell the new JE / the applicant (stage only) -- same transaction.
+    if (updates.length > 0) {
+      await notifyAdminOverride(connection, { ticketId: ticket_id, fromStatus: currentTicket.status });
     }
+
+    await connection.commit();
+    kickOutbox();
 
     res.json({
       success: true,
@@ -315,8 +309,7 @@ export const overrideTicketStatus = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
-    console.error('overrideTicketStatus error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'overrideTicketStatus error');
   } finally {
     connection.release();
   }
@@ -353,8 +346,7 @@ export const getAllUsers = async (req, res) => {
     const [users] = await pool.query(query, params);
     res.json({ success: true, users });
   } catch (error) {
-    console.error('getAllUsers error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getAllUsers error');
   }
 };
 
@@ -386,8 +378,7 @@ export const createUser = async (req, res) => {
     const [createdUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
     res.json({ success: true, user: createdUsers[0] });
   } catch (error) {
-    console.error('createUser error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'createUser error');
   }
 };
 
@@ -436,8 +427,7 @@ export const updateUser = async (req, res) => {
     const [updatedUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
     res.json({ success: true, user: updatedUsers[0] });
   } catch (error) {
-    console.error('updateUser error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'updateUser error');
   }
 };
 
@@ -470,8 +460,7 @@ export const getMasterAuditLogs = async (req, res) => {
     const [logs] = await pool.query(query, params);
     res.json({ success: true, logs });
   } catch (error) {
-    console.error('getMasterAuditLogs error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getMasterAuditLogs error');
   }
 };
 
@@ -488,7 +477,6 @@ export const getActiveJes = async (req, res) => {
     `);
     res.json({ success: true, jes });
   } catch (error) {
-    console.error('getActiveJes error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getActiveJes error');
   }
 };

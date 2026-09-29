@@ -4,7 +4,7 @@ import path from 'path';
 import pool from '../src/config/db.js';
 import { runMigrations } from '../src/config/migrate.js';
 import { moveFile } from '../src/utils/fileManager.js';
-import { resolveTransition, resolveTenderUpdate, STATUS, ROLE } from '../src/config/workflow.js';
+import { resolveAction, availableActions, resolveTenderUpdate, STATUS, ROLE, WorkflowError } from '../src/config/workflow.js';
 
 let passed = 0;
 let failed = 0;
@@ -163,41 +163,42 @@ async function runTests() {
     );
 
     // State machine transition: JE filing report moves ticket to PENDING_AE_APPROVAL
-    const jeTransition = resolveTransition({
-      currentStatus: STATUS.ASSIGNED_TO_JE,
-      role: ROLE.JE,
+    const jeTransition = resolveAction({
+      user: { id: jeId, role: ROLE.JE },
+      ticket: { status: STATUS.ASSIGNED_TO_JE, current_desk_user_id: jeId },
       action: 'SUBMIT_REPORT',
       estimate: estimatedAmount
     });
-    assert(jeTransition.status === STATUS.PENDING_AE_APPROVAL, 'Workflow state transitioned to PENDING_AE_APPROVAL');
+    assert(jeTransition.toStatus === STATUS.PENDING_AE_APPROVAL, 'Workflow state transitioned to PENDING_AE_APPROVAL');
 
-    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [jeTransition.status, testTicketId]);
+    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [jeTransition.toStatus, testTicketId]);
 
     // ----------------------------------------------------
     // TEST 5: Authority Review & Auto-Escalation Ladder
     // ----------------------------------------------------
     console.log('\n--- 5. Testing Financial Ceilings & Auto-Escalation Ladder ---');
-    // AE reviews Rs. 45,000 (Ceiling is Rs. 25,000 -> Must escalate to SE)
-    const aeTransition = resolveTransition({
-      currentStatus: STATUS.PENDING_AE_APPROVAL,
-      role: ROLE.AE,
-      action: 'APPROVE',
-      estimate: estimatedAmount
-    });
-    assert(aeTransition.status === STATUS.PENDING_SE_APPROVAL, 'AE approval automatically escalated to PENDING_SE_APPROVAL (> 25k)');
+    // The AE has no approval power (Q1): it can only forward Rs. 45,000 to the SE.
+    const LIMITS = { SE_APPROVE: 50000, DEAN_APPROVE: 500000 };
+    const aeUser = { id: 501, role: ROLE.AE };
+    const atAe = { status: STATUS.PENDING_AE_APPROVAL, current_desk_user_id: 501, estimate: estimatedAmount };
+    let aeApproveRefused = false;
+    try { resolveAction({ user: aeUser, ticket: atAe, limits: LIMITS, action: 'APPROVE' }); }
+    catch (e) { aeApproveRefused = e instanceof WorkflowError && e.code === 'ACTION_NOT_ALLOWED'; }
+    assert(aeApproveRefused, 'AE cannot APPROVE (Q1) -- only FORWARD / REQUEST_CHANGES');
+    const aeTransition = resolveAction({ user: aeUser, ticket: atAe, limits: LIMITS, action: 'FORWARD' });
+    assert(aeTransition.toStatus === STATUS.PENDING_SE_APPROVAL, 'AE FORWARD moves the ticket to PENDING_SE_APPROVAL');
 
-    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [aeTransition.status, testTicketId]);
+    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [aeTransition.toStatus, testTicketId]);
 
-    // SE reviews Rs. 45,000 (Ceiling is Rs. 50,000 -> Under ceiling -> Sanctioned!)
-    const seTransition = resolveTransition({
-      currentStatus: STATUS.PENDING_SE_APPROVAL,
-      role: ROLE.SE,
-      action: 'APPROVE',
-      estimate: estimatedAmount
-    });
-    assert(seTransition.status === STATUS.APPROVED_FOR_TENDERING, 'SE approval sanctions work -> APPROVED_FOR_TENDERING (<= 50k)');
+    // SE approves Rs. 45,000 (limit Rs. 50,000 -> within limit -> sanctioned)
+    const seUser = { id: 502, role: ROLE.SE };
+    const atSe = { status: STATUS.PENDING_SE_APPROVAL, current_desk_user_id: 502, estimate: estimatedAmount };
+    const seTransition = resolveAction({ user: seUser, ticket: atSe, limits: LIMITS, action: 'APPROVE' });
+    assert(seTransition.toStatus === STATUS.APPROVED_FOR_TENDERING, 'SE approval sanctions work -> APPROVED_FOR_TENDERING (<= 50k)');
+    const seAbove = availableActions(seUser, { ...atSe, estimate: 60000 }, LIMITS).actions.find(a => a.action === 'APPROVE');
+    assert(seAbove.enabled === false && seAbove.code === 'ABOVE_LIMIT', 'SE APPROVE disabled above 50k (forces FORWARD)');
 
-    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [seTransition.status, testTicketId]);
+    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [seTransition.toStatus, testTicketId]);
 
     // ----------------------------------------------------
     // TEST 6: Clerical GeM/CPP Tender Desk

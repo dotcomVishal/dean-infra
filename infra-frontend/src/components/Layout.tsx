@@ -76,6 +76,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         { name: 'System Audit', path: '/admin/audit', icon: History }
       );
     }
+    // Anybody can raise a ticket, whatever their role (W15/F9). Applicants and
+    // JEs already have their own entry above.
+    if (!['APPLICANT', 'JE', 'SYSADMIN'].includes(role)) {
+      base.push({ name: 'Raise Ticket', path: '/raise', icon: PlusCircle });
+    }
     return base;
   };
   const navLinks = getNavLinks();

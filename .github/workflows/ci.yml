@@ -1,0 +1,60 @@
+name: CI
+
+# PRs and pushes to main run this directly. Pushes to `tazer` run it through
+# deploy.yml (workflow_call), so a red test blocks the deploy.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  backend-tests:
+    name: Backend unit + integration (node --test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Throwaway MySQL, destroyed with the job. Integration tests build their own
+    # schema (scripts/prepare-test-db.mjs) and their own fixture rows.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-throwaway
+          MYSQL_DATABASE: deanery_infra
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-throwaway"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    defaults:
+      run:
+        working-directory: infra-backend-v2
+
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ci-throwaway
+      DB_NAME: deanery_infra
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra-backend-v2/package-lock.json
+
+      - run: npm ci
+
+      - name: "Unit tests (no DB): state machine, visibility, error masking, mailer"
+        run: npm run test:unit
+
+      - name: "Integration tests (MySQL service container): assignment + schema/state-machine agreement"
+        run: npm run test:integration

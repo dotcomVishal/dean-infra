@@ -30,7 +30,7 @@ await t('approved ticket + CLOSED -> commits and writes an audit row', async () 
   const next = await applyTenderUpdate(c, { ticketId: 7, jeId: 3, milestone: STATUS.CLOSED });
   eq(next, STATUS.CLOSED, 'next status');
   if (!ran(c, 'INSERT INTO audit_logs')) throw new Error('no audit row written');
-  eq(c.calls.find(x => x.sql.includes('INSERT')).params[2], 'PASSED', 'audit action');
+  eq(c.calls.find(x => x.sql.includes('INSERT')).params[2], 'CLOSED', 'audit action');
 });
 
 console.log('\n=== S1: the JE self-approve attack ===');

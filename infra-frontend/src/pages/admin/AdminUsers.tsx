@@ -5,6 +5,7 @@ import {
   CheckCircle2, XCircle
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
 
 const ALL_USER_DEPARTMENTS = [
   'Civil', 
@@ -127,7 +128,7 @@ export default function AdminUsers() {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserData.email || !newUserData.full_name) {
-      alert('Please fill out email and full name.');
+      toast.error('Please fill out email and full name.');
       return;
     }
 
@@ -141,7 +142,7 @@ export default function AdminUsers() {
         department: newUserData.department
       });
       if (res.data.success) {
-        alert('User account created successfully.');
+        toast.success('User account created successfully.');
         setCreateUserModalOpen(false);
         setNewUserData({
           email: '',
@@ -153,7 +154,7 @@ export default function AdminUsers() {
       }
     } catch (err: any) {
       console.error('Create user error:', err);
-      alert(err.response?.data?.message || 'Failed to create user account.');
+      toast.error(err.response?.data?.message || 'Failed to create user account.');
     } finally {
       setIsSaving(false);
     }
@@ -188,13 +189,13 @@ export default function AdminUsers() {
 
       const res = await api.put(`/admin/users/${selectedUser.id}`, payload);
       if (res.data.success) {
-        alert('User account updated successfully.');
+        toast.success('User account updated successfully.');
         setEditUserModalOpen(false);
         fetchUsers();
       }
     } catch (err: any) {
       console.error('Update user error:', err);
-      alert(err.response?.data?.message || 'Failed to update user.');
+      toast.error(err.response?.data?.message || 'Failed to update user.');
     } finally {
       setIsSaving(false);
     }

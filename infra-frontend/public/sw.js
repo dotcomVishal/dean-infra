@@ -1,5 +1,6 @@
 // IIT Mandi Deanery of Infrastructure Service Worker
-const CACHE_NAME = 'dean-infra-v2.0.1';
+// v2.0.2: attachments are private (S14) -- bumping the name makes activate() delete every older cache, including any /uploads copies.
+const CACHE_NAME = 'dean-infra-v2.0.2';
 
 const CORE_ASSETS = [
   '/',
@@ -65,21 +66,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Uploaded documents & photos -> Stale-while-revalidate
+  // 2. Attachments (/api/attachments/*) are private and already covered by the
+  //    /api/ rule above (network only). Never cache them, and never cache the
+  //    legacy /uploads path either.
   if (url.pathname.startsWith('/uploads/')) {
-    event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(request);
-        const fetchPromise = fetch(request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            cache.put(request, networkResponse.clone());
-          }
-          return networkResponse;
-        }).catch(() => cached);
-
-        return cached || fetchPromise;
-      })
-    );
     return;
   }
 

@@ -1,5 +1,7 @@
 import { auth } from '../config/firebase.js';
 import pool from '../config/db.js';
+import logger from '../utils/logger.js';
+import { sendServerError } from '../utils/httpError.js';
 
 export const syncUser = async (req, res) => {
   const authHeader = req.headers.authorization;
@@ -10,8 +12,19 @@ export const syncUser = async (req, res) => {
 
   const token = authHeader.split(' ')[1];
 
+  // S12: a Firebase verification failure is a client problem (401), and its raw
+  // message is logged, never returned. Anything after this that throws is a 500.
+  let decodedToken;
   try {
-    const decodedToken = await auth.verifyIdToken(token);
+    decodedToken = await auth.verifyIdToken(token);
+  } catch (error) {
+    logger.warn('auth sync: token verification failed', {
+      requestId: req.id, firebaseCode: error.code, reason: error.message,
+    });
+    return res.status(401).json({ success: false, message: 'Invalid or expired token.', requestId: req.id });
+  }
+
+  try {
     const { uid, email, name } = decodedToken;
 
     // S4: this is the exact point where a Firebase identity gets linked to a
@@ -73,7 +86,6 @@ export const syncUser = async (req, res) => {
     res.json({ success: true, user });
 
   } catch (error) {
-    console.error('Auth Sync Error:', error.message);
-    res.status(403).json({ success: false, message: error.message || 'Invalid or expired token.' });
+    return sendServerError(req, res, error, 'syncUser');
   }
 };

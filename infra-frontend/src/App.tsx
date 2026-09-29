@@ -1,11 +1,12 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuthStore } from './store/authStore';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
+import { useAuthStore, useIsSignedIn } from './store/authStore';
 
 // Common Pages & Components
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Layout from './components/Layout';
 import { ProtectedRoute } from './routes/ProtectedRoute';
+import ToastHost from './components/ToastHost';
 import RaiseTicket from './pages/RaiseTicket';
 import MyTickets from './pages/MyTickets';
 import TicketDetails from './pages/TicketDetails';
@@ -13,7 +14,6 @@ import TicketDetails from './pages/TicketDetails';
 // Junior Engineer (JE) Micro-Frontend Pages
 import JeDashboard from './pages/je/JeDashboard';
 import JeRaiseTicket from './pages/je/JeRaiseTicket';
-import JeTicketDetails from './pages/je/JeTicketDetails';
 import JeTenderControl from './pages/je/JeTenderControl';
 // Master System Admin Micro-Frontend Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -26,8 +26,21 @@ import AuthorityDashboard from './pages/authority/AuthorityDashboard';
 import ClericalDashboard from './pages/clerical/ClericalDashboard';
 import AccountantDashboard from './pages/finance/AccountantDashboard';
 
+// Old per-role ticket URL: keep bookmarks and emailed links working.
+function TicketRedirect({ base }: { base: string }) {
+  const { id } = useParams();
+  return <Navigate to={`${base}/${id}`} replace />;
+}
+
+// Signed-in users leave /login, back to where they were headed if a guard sent them here.
+function LoginRoute({ signedIn }: { signedIn: boolean }) {
+  const from = (useLocation().state as { from?: string } | null)?.from;
+  return signedIn ? <Navigate to={from && from !== '/login' ? from : '/'} replace /> : <Login />;
+}
+
 export default function App() {
-  const { isAuthenticated, user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const isAuthenticated = useIsSignedIn();
   const isJe = user?.role === 'JE';
   const isSysAdmin = user?.role === 'SYSADMIN';
   const isClerical = user?.role === 'CLERICAL';
@@ -36,11 +49,12 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ToastHost />
       <Routes>
         {/* 1. PUBLIC ROUTE: Kick authenticated users away from the login screen */}
         <Route 
           path="/login" 
-          element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} 
+          element={<LoginRoute signedIn={isAuthenticated} />} 
         />
 
         {/* 2. SECURE ROUTE GUARD: Only authenticated users pass this point */}
@@ -87,12 +101,12 @@ export default function App() {
             } 
           />
 
-          {/* Ticket Details: JE inspection for JE, Admin master details for SYSADMIN, standard authority/applicant view otherwise */}
+          {/* Ticket Details: ONE page for every role. It renders its sections from the role and the API payload. */}
           <Route 
             path="/ticket/:id" 
             element={
               <Layout>
-                {isJe ? <JeTicketDetails /> : isSysAdmin ? <AdminTicketDetails /> : <TicketDetails />}
+                <TicketDetails />
               </Layout>
             } 
           />
@@ -119,14 +133,7 @@ export default function App() {
                 </Layout>
               } 
             />
-            <Route 
-              path="/je/ticket/:id" 
-              element={
-                <Layout>
-                  <JeTicketDetails />
-                </Layout>
-              } 
-            />
+            <Route path="/je/ticket/:id" element={<TicketRedirect base="/ticket" />} />
             <Route 
               path="/je/tender/:id" 
               element={

@@ -1,0 +1,279 @@
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, CheckCircle2, CornerUpLeft, Eye, Loader2, Send, UserCheck, XCircle, ClipboardCheck, Gavel } from 'lucide-react';
+import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
+import { DESK_RANK, deskLabel, errorMessage, inr, visibleDesks } from '../../lib/ticketUi';
+import type { AvailableAction, TicketDetail } from './types';
+import { openThread } from '../../lib/threads';
+import ReportForm from './ReportForm';
+
+interface JeChoice { id: number; name: string; open_tickets: number; on_leave: boolean; same_campus: boolean }
+
+const fieldCls =
+  'w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
+
+const TONE = {
+  blue: { on: 'border-blue-500 bg-blue-50 dark:bg-blue-950/40', btn: 'bg-blue-600 hover:bg-blue-700', ic: 'text-blue-600' },
+  emerald: { on: 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40', btn: 'bg-emerald-600 hover:bg-emerald-700', ic: 'text-emerald-600' },
+  amber: { on: 'border-amber-500 bg-amber-50 dark:bg-amber-950/40', btn: 'bg-amber-600 hover:bg-amber-700', ic: 'text-amber-600' },
+  rose: { on: 'border-rose-500 bg-rose-50 dark:bg-rose-950/40', btn: 'bg-rose-600 hover:bg-rose-700', ic: 'text-rose-600' },
+} as const;
+
+function meta(a: AvailableAction) {
+  switch (a.action) {
+    case 'FORWARD': {
+      const to = deskLabel(a.targets?.[0]);
+      return { label: `Forward to ${to}`, hint: `${to} desk decides next`, tone: 'blue' as const, Icon: ArrowRight };
+    }
+    case 'APPROVE':
+      return { label: 'Approve', hint: 'Sanction the work and release it for tendering', tone: 'emerald' as const, Icon: CheckCircle2 };
+    case 'REQUEST_CHANGES':
+      return { label: 'Request changes', hint: 'Send it back to a lower desk with a message', tone: 'amber' as const, Icon: CornerUpLeft };
+    case 'REJECT':
+      return { label: 'Reject', hint: 'Close the ticket as rejected', tone: 'rose' as const, Icon: XCircle };
+    case 'ASSIGN_JE':
+      return { label: 'Assign a JE', hint: 'Nobody was free — choose who inspects this', tone: 'blue' as const, Icon: UserCheck };
+    default:
+      return { label: 'Submit inspection report', hint: 'File findings and estimate for the AE', tone: 'blue' as const, Icon: ClipboardCheck };
+  }
+}
+
+function VisibleTo({ desks, extra }: { desks: string[]; extra?: string }) {
+  return (
+    <p className="mt-1 flex items-start gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+      <Eye size={12} className="mt-px shrink-0" />
+      <span>Visible to: {[...(extra ? [extra] : []), ...desks].join(', ')}</span>
+    </p>
+  );
+}
+
+/** Renders ONLY what the API says this person may do (available_actions). No client-side permission logic. */
+export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; onDone: () => void }) {
+  const aa = ticket.available_actions;
+  const actions = aa?.actions ?? [];
+  const desk = aa?.desk ?? null;
+
+  const { head: openRequest } = useMemo(
+    () => openThread(ticket.messages ?? [], ticket.open_change_request_id), [ticket.messages, ticket.open_change_request_id]);
+  const replying = !!openRequest && !!desk && openRequest.to_desk === desk;
+
+  const [selected, setSelected] = useState<string | null>(null);
+  const [toDesk, setToDesk] = useState('');
+  const [message, setMessage] = useState('');
+  const [internal, setInternal] = useState('');
+  const [publicNote, setPublicNote] = useState('');
+  const [assignee, setAssignee] = useState('');
+  const [jes, setJes] = useState<JeChoice[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  // One choice = no extra tap. Reset the form whenever the ticket moves.
+  const enabledCount = actions.filter((a) => a.enabled).length;
+  useEffect(() => {
+    setSelected(enabledCount === 1 ? actions.find((a) => a.enabled)!.action : null);
+    setToDesk(''); setMessage(''); setInternal(''); setPublicNote(''); setAssignee('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticket.id, ticket.status, enabledCount]);
+
+  useEffect(() => {
+    if (selected !== 'ASSIGN_JE') return;
+    api.get(`/tickets/${ticket.id}/assignable-jes`)
+      .then((r) => setJes(r.data.jes ?? []))
+      .catch((e) => toast.error(errorMessage(e, 'Could not load the JE list.')));
+  }, [selected, ticket.id]);
+
+  if (actions.length === 0 || !desk) return null;
+
+  const current = actions.find((a) => a.action === selected) ?? null;
+  const rc = actions.find((a) => a.action === 'REQUEST_CHANGES');
+  const limit = ticket.approval_limit;
+  const estimate = ticket.report?.estimated_amount;
+  const myRank = DESK_RANK[desk] ?? 1;
+
+  const submit = async () => {
+    if (!current) return;
+    const payload: Record<string, unknown> = { action: current.action };
+    if (current.action === 'REQUEST_CHANGES') {
+      if (!toDesk) return toast.error('Choose who to send this to.');
+      if (!message.trim()) return toast.error('Write what needs to change.');
+      payload.to_desk = toDesk; payload.message = message.trim();
+    }
+    if (current.action === 'REJECT') {
+      if (!message.trim()) return toast.error('Give the reason for rejecting.');
+      payload.message = message.trim();
+      if (publicNote.trim()) payload.public_note = publicNote.trim();
+    }
+    if (current.action === 'FORWARD' && replying) {
+      if (!message.trim()) return toast.error('Reply to the change request before you forward.');
+      payload.message = message.trim();
+    }
+    if (current.action === 'ASSIGN_JE') {
+      if (!assignee) return toast.error('Choose a JE.');
+      payload.assignee_id = Number(assignee);
+    }
+    if (internal.trim() && current.action !== 'ASSIGN_JE') payload.internal_remark = internal.trim();
+
+    setBusy(true);
+    try {
+      const res = await api.post(`/tickets/${ticket.id}/actions`, payload);
+      toast.success(res.data?.message || 'Done.');
+      onDone();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not complete this action.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tone = current ? TONE[meta(current).tone] : TONE.blue;
+
+  return (
+    <section
+      aria-label="Your decision"
+      className="rounded-2xl border-2 border-blue-500/30 bg-white p-4 shadow-sm dark:bg-slate-800 md:p-6"
+    >
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Your decision · {deskLabel(desk)} desk</p>
+          <h2 className="mt-0.5 flex items-center gap-2 text-base font-bold text-slate-900 dark:text-white">
+            <Gavel size={16} /> What do you want to do?
+          </h2>
+        </div>
+        {limit?.can_approve && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-right text-[11px] dark:border-slate-700 dark:bg-slate-900/50">
+            <span className="block font-bold uppercase text-slate-400">Approval limit</span>
+            <span className="font-mono font-bold text-slate-900 dark:text-white">
+              {limit.unlimited ? 'Unlimited' : limit.amount == null ? 'Not configured' : inr(limit.amount)}
+            </span>
+            {estimate != null && <span className="block text-slate-500">Estimate {inr(estimate)}</span>}
+          </div>
+        )}
+      </div>
+
+      {/* Buttons come straight from available_actions. */}
+      <div className={`grid gap-2 ${actions.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+        {actions.map((a) => {
+          const m = meta(a);
+          const active = selected === a.action;
+          return (
+            <button
+              key={a.action}
+              type="button"
+              disabled={!a.enabled}
+              onClick={() => setSelected(a.action)}
+              aria-pressed={active}
+              className={`flex min-h-[3.5rem] items-start gap-3 rounded-xl border-2 p-3 text-left transition ${
+                active ? TONE[m.tone].on : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600'
+              } disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              <m.Icon size={18} className={`mt-0.5 shrink-0 ${TONE[m.tone].ic}`} />
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-slate-900 dark:text-white">{m.label}</span>
+                <span className="block text-xs text-slate-500 dark:text-slate-400">{a.enabled ? m.hint : a.reason ?? 'Not available right now.'}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {current?.action === 'SUBMIT_REPORT' && (
+        <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
+          <ReportForm
+            ticketId={ticket.id}
+            previous={ticket.report}
+            request={replying ? openRequest : null}
+            onDone={onDone}
+          />
+        </div>
+      )}
+
+      {current && current.action !== 'SUBMIT_REPORT' && (
+        <div className="mt-4 space-y-4 border-t border-slate-100 pt-4 dark:border-slate-700">
+          {current.action === 'ASSIGN_JE' && (
+            <div>
+              <label htmlFor="assignee" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Choose JE</label>
+              <select id="assignee" value={assignee} onChange={(e) => setAssignee(e.target.value)} className={fieldCls}>
+                <option value="">Select a JE…</option>
+                {jes.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.name} · {j.open_tickets} open{j.on_leave ? ' · on leave' : ''}{j.same_campus ? '' : ' · other campus'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {current.action === 'REQUEST_CHANGES' && (
+            <>
+              <div>
+                <label htmlFor="sendto" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Send to <span className="text-rose-500">*</span>
+                </label>
+                <select id="sendto" value={toDesk} onChange={(e) => setToDesk(e.target.value)} className={fieldCls}>
+                  <option value="">Select a desk…</option>
+                  {(rc?.targets ?? []).map((d) => (
+                    <option key={d} value={d}>{deskLabel(d)}{ticket.desk_people?.[d] ? ` — ${ticket.desk_people[d]}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="msg" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  What needs to change <span className="text-rose-500">*</span>
+                </label>
+                <textarea id="msg" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} resize-none`} />
+                {toDesk ? <VisibleTo desks={visibleDesks(DESK_RANK[toDesk])} /> : (
+                  <p className="mt-1 text-[11px] text-slate-400">Pick a desk to see who can read this message.</p>
+                )}
+              </div>
+            </>
+          )}
+
+          {current.action === 'FORWARD' && replying && openRequest && (
+            <div>
+              <label htmlFor="reply" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Reply to {deskLabel(openRequest.author_desk)} <span className="text-rose-500">*</span>
+              </label>
+              <textarea id="reply" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} resize-none`} />
+              <VisibleTo desks={visibleDesks(myRank)} />
+            </div>
+          )}
+
+          {current.action === 'REJECT' && (
+            <>
+              <div>
+                <label htmlFor="why" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Reason for rejecting <span className="text-rose-500">*</span>
+                </label>
+                <textarea id="why" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} resize-none`} />
+                <VisibleTo desks={visibleDesks(1)} />
+              </div>
+              <div>
+                <label htmlFor="pub" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Note for the applicant (optional)</label>
+                <textarea id="pub" rows={2} value={publicNote} onChange={(e) => setPublicNote(e.target.value)} className={`${fieldCls} resize-none`} />
+                <VisibleTo desks={visibleDesks(1)} extra="Applicant" />
+              </div>
+            </>
+          )}
+
+          {current.action !== 'ASSIGN_JE' && (
+            <div>
+              <label htmlFor="internal" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Internal remark (optional)</label>
+              <textarea id="internal" rows={2} value={internal} onChange={(e) => setInternal(e.target.value)} className={`${fieldCls} resize-none`}
+                placeholder="Only your desk and higher can read this." />
+              <VisibleTo desks={visibleDesks(myRank)} />
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-sm transition disabled:opacity-60 ${tone.btn}`}
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+            Confirm — {meta(current).label}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}

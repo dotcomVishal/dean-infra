@@ -10,6 +10,9 @@ import authRoutes from './routes/authRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import availabilityRoutes from './routes/availabilityRoutes.js';
+import attachmentRoutes from './routes/attachmentRoutes.js';
+import { requestId } from './middleware/requestId.js';
+import { errorHandler } from './middleware/errorHandler.js';
 
 // 1. Initialize __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -22,6 +25,10 @@ const app = express();
 // the rate limiter's 100 requests / 15 min is shared by the whole institute.
 app.set('trust proxy', 1);
 
+// S12: request id + structured access log. First, so every later response
+// (rate limit, 404, error) carries X-Request-Id.
+app.use(requestId);
+
 // 3. Enable CORS for all incoming requests (API and static files)
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173', 
@@ -31,7 +38,7 @@ app.use(cors({
 // 4. Security Headers with CORP configured for cross-origin asset loading
 app.use(helmet({
   crossOriginOpenerPolicy: false, // Allows the Google login popup to work
-  crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allows frontend to load images/files from /uploads
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // API responses (incl. /api/attachments) are read by the SPA; access is gated by auth + CORS
   contentSecurityPolicy: false,   // Allows inline scripts/styles if needed
 }));
 
@@ -39,20 +46,17 @@ app.use(helmet({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 6. Serve the Public and Uploads folders with explicit CORS and CORP headers
+// 6. Public assets only. S2: /uploads is NOT served statically -- every file goes
+// through the authenticated GET /api/attachments/:id (visibility-checked).
 app.use(express.static(path.join(__dirname, '../public')));
-app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
-  setHeaders: (res) => {
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-}));
 
 // 6. Prevent Brute Force
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: 'Too many requests, please try again later.'
+  handler: (req, res) => res.status(429).json({
+    success: false, message: 'Too many requests, please try again later.', requestId: req.id,
+  }),
 });
 app.use('/api/', apiLimiter);
 
@@ -61,12 +65,13 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/availability', availabilityRoutes);
+app.use('/api/attachments', attachmentRoutes);
 app.get('/api/health', (_req, res) => res.status(200).json({ success: true, status: 'ok' }));
 
-// 8. Global Error Handler
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ success: false, message: 'Internal Server Error' });
-});
+// Unknown route (this is also what a direct /uploads/... URL now gets)
+app.use((req, res) => res.status(404).json({ success: false, message: 'Not found', requestId: req.id }));
+
+// 8. Global Error Handler (S12)
+app.use(errorHandler);
 
 export default app;

@@ -50,3 +50,5 @@ onIdTokenChanged(auth, async (firebaseUser) => {
   const token = await firebaseUser.getIdToken();
   useAuthStore.setState({ token });
 });
+/** True only when a session AND a user profile exist. Every guard and the /login route use this one rule, so they can never disagree and bounce the user between /login and /. */
+export const useIsSignedIn = () => useAuthStore((s) => s.isAuthenticated && s.user !== null);

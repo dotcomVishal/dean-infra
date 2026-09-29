@@ -12,6 +12,7 @@
 // ============================================================
 import { z } from 'zod';
 import pool from '../config/db.js';
+import { sendServerError } from '../utils/httpError.js';
 
 const markLeaveSchema = z
   .object({
@@ -104,8 +105,7 @@ export const markLeave = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('markLeave error:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+    return sendServerError(req, res, error, 'markLeave error');
   }
 };
 
@@ -136,8 +136,7 @@ export const removeLeave = async (req, res) => {
     await pool.query('DELETE FROM user_availability WHERE id = ?', [leaveId]);
     res.json({ success: true, message: 'Leave entry removed.' });
   } catch (error) {
-    console.error('removeLeave error:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+    return sendServerError(req, res, error, 'removeLeave error');
   }
 };
 
@@ -200,7 +199,6 @@ export const listAvailability = async (req, res) => {
     );
     return res.json({ success: true, availability: rows });
   } catch (error) {
-    console.error('listAvailability error:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+    return sendServerError(req, res, error, 'listAvailability error');
   }
 };

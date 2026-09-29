@@ -1,5 +1,6 @@
 import { auth } from '../config/firebase.js';
 import pool from '../config/db.js';
+import logger from '../utils/logger.js';
 
 export const requireAuth = async (req, res, next) => {
   let token;
@@ -71,10 +72,10 @@ export const requireAuth = async (req, res, next) => {
     next();
     
   } catch (error) {
-    console.error('Firebase Auth Error:', error.message);
+    logger.warn('auth: token rejected', { requestId: req.id, code: error.code, reason: error.message });
     // F1: an expired token used to come back as 403, which the frontend
     // interceptor did not treat as a logout signal, so every session silently
     // broke one hour after login instead of prompting a re-login.
-    return res.status(401).json({ success: false, message: 'Unauthorized: Invalid or expired token' });
+    return res.status(401).json({ success: false, message: 'Unauthorized: Invalid or expired token', requestId: req.id });
   }
 };

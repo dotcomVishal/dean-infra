@@ -6,6 +6,7 @@ import {
   Receipt, Landmark
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
 
 interface FinanceTicket {
   id: number;
@@ -165,7 +166,7 @@ export default function AccountantDashboard() {
   const handleSubmitBill = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTicket || !billData.bill_number || !billData.agency_name || !billData.net_amount) {
-      alert('Please fill out all mandatory bill parameters.');
+      toast.error('Please fill out all mandatory bill parameters.');
       return;
     }
 
@@ -173,14 +174,14 @@ export default function AccountantDashboard() {
     try {
       const res = await api.post(`/tickets/${selectedTicket.id}/bills`, billData);
       if (res.data.success) {
-        alert('Bill & Voucher recorded in financial accounts ledger.');
+        toast.success('Bill & Voucher recorded in financial accounts ledger.');
         setBillModalOpen(false);
         fetchTickets();
         fetchOverview();
       }
     } catch (err: any) {
       console.error('Record bill error:', err);
-      alert(err.response?.data?.message || 'Failed to record bill.');
+      toast.error(err.response?.data?.message || 'Failed to record bill.');
     } finally {
       setSubmittingBill(false);
     }
@@ -215,7 +216,7 @@ export default function AccountantDashboard() {
         payment_date: format(new Date(), 'yyyy-MM-dd')
       });
       if (res.data.success) {
-        alert('Payment status updated successfully.');
+        toast.success('Payment status updated successfully.');
         if (selectedTicket) {
           const bRes = await api.get(`/tickets/${selectedTicket.id}/bills`);
           setTicketBills(bRes.data.bills || []);
@@ -225,7 +226,7 @@ export default function AccountantDashboard() {
       }
     } catch (err: any) {
       console.error('Update payment error:', err);
-      alert(err.response?.data?.message || 'Failed to update payment.');
+      toast.error(err.response?.data?.message || 'Failed to update payment.');
     }
   };
 

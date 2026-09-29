@@ -6,8 +6,13 @@ on:
       - tazer
 
 jobs:
+  test:
+    name: Tests
+    uses: ./.github/workflows/ci.yml
+
   deploy:
     name: Deploy to Production Server
+    needs: test
     runs-on: ubuntu-latest
 
     steps:

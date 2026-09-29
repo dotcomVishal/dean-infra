@@ -22,7 +22,30 @@ const storage = multer.diskStorage({
   }
 });
 
+// S3: allow-list, not block-list. Extension AND declared MIME type must both be
+// on the list, so "x.html", "x.svg" or "x.jpg" sent as text/html are all refused.
+// (Downloads are served with nosniff + attachment for non-images regardless.)
+export const ALLOWED_UPLOADS = Object.freeze({
+  '.jpg':  ['image/jpeg'],
+  '.jpeg': ['image/jpeg'],
+  '.png':  ['image/png'],
+  '.webp': ['image/webp'],
+  '.heic': ['image/heic', 'image/heif'],
+  '.pdf':  ['application/pdf'],
+  '.xlsx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  '.docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+});
+
+export function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ALLOWED_UPLOADS[ext]?.includes(file.mimetype)) return cb(null, true);
+  const err = new Error(`File type not allowed: ${file.originalname}. Allowed: ${Object.keys(ALLOWED_UPLOADS).join(', ')}.`);
+  err.code = 'UNSUPPORTED_FILE_TYPE';
+  cb(err);
+}
+
 export const upload = multer({
   storage,
+  fileFilter,
   limits: { fileSize: 30 * 1024 * 1024 }
 });

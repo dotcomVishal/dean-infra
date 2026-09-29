@@ -1,10 +1,15 @@
 // ============================================================
 //  THE STATE MACHINE — single source of truth for the workflow.
-//  Pure functions only: no DB, no Express, no I/O.
-//  Every route handler reads from here. Nothing hardcodes a status.
+//  Pure functions only: no DB, no Express, no I/O. Every route/controller
+//  reads from here; nothing else hardcodes a status, a desk or a limit.
+//
+//  plan.md §3.3. Desk ranks: JE 1, AE 2, SE 3, Dean 4, Director 5.
+//  Status vocabulary is the CURRENT one (PENDING_AE_APPROVAL, RETURNED_TO_JE,
+//  DENIED ...); the shorter set from plan.md Q12 is a later rename.
 // ============================================================
 
 export const STATUS = Object.freeze({
+  UNASSIGNED:                'UNASSIGNED',
   ASSIGNED_TO_JE:            'ASSIGNED_TO_JE',
   PENDING_AE_APPROVAL:       'PENDING_AE_APPROVAL',
   PENDING_SE_APPROVAL:       'PENDING_SE_APPROVAL',
@@ -20,51 +25,38 @@ export const STATUS = Object.freeze({
 
 export const ROLE = Object.freeze({
   APPLICANT: 'APPLICANT', JE: 'JE', AE: 'AE', SE: 'SE',
-  DEAN: 'DEAN', DIRECTOR: 'DIRECTOR', SYSADMIN: 'SYSADMIN', CLERICAL: 'CLERICAL',
+  DEAN: 'DEAN', DIRECTOR: 'DIRECTOR', SYSADMIN: 'SYSADMIN',
+  CLERICAL: 'CLERICAL', ACCOUNTANT: 'ACCOUNTANT',
 });
 
+/** A "desk" is an approval-chain position; desk names equal role names. */
+export const DESK = Object.freeze({
+  JE: 'JE', AE: 'AE', SE: 'SE', DEAN: 'DEAN', DIRECTOR: 'DIRECTOR',
+});
+export const DESK_RANK = Object.freeze({ JE: 1, AE: 2, SE: 3, DEAN: 4, DIRECTOR: 5 });
+const DESKS_BY_RANK = Object.freeze(['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR']);
 
-// export const INCLUDE_SE = true;
-
-export const BUDGET_CEILING = Object.freeze({
-  AE:       25_000,   
-  SE:       50_000,   
-  DEAN:    500_000,   
-  DIRECTOR: Infinity, 
+export const ACTION = Object.freeze({
+  FORWARD:         'FORWARD',
+  APPROVE:         'APPROVE',
+  REQUEST_CHANGES: 'REQUEST_CHANGES',
+  REJECT:          'REJECT',
+  ASSIGN_JE:       'ASSIGN_JE',
+  SUBMIT_REPORT:   'SUBMIT_REPORT',
 });
 
-export const APPROVAL_CHAIN = [ROLE.AE, ROLE.SE, ROLE.DEAN, ROLE.DIRECTOR];
-
-const PENDING_STATUS_FOR = {
-  AE:       STATUS.PENDING_AE_APPROVAL,
-  SE:       STATUS.PENDING_SE_APPROVAL,
-  DEAN:     STATUS.PENDING_DEAN_APPROVAL,
-  DIRECTOR: STATUS.PENDING_DIRECTOR_APPROVAL,
-};
-
-// Tender milestones updated by JE post-approval
-export const TENDER_MILESTONES = Object.freeze([
-  STATUS.TENDER_PUBLISHED,
-  STATUS.WORK_IN_PROGRESS,
-  STATUS.CLOSED,
-]);
-// --- end config -------------------------------------------------------------
-
-
-// Every value that can ever land in audit_logs.action. The DB ENUM must hold
-// EXACTLY this list
+// Every value the DB ENUM audit_logs.action must hold (migration 005). PASSED,
+// RETURNED and DENIED exist only for rows written before that migration.
 export const LOG_ACTION = Object.freeze({
-  CREATED:   'CREATED',    // ticket raised
-  ASSIGNED:  'ASSIGNED',   // auto-assigned to a JE
-  SUBMITTED: 'SUBMITTED',  // JE files report + estimate
-  PASSED:    'PASSED',     // escalated to the next desk
-  APPROVED:  'APPROVED',   // sanctioned within this desk's ceiling
-  RETURNED:  'RETURNED',   // sent back for revision
-  DENIED:    'DENIED',     // Director rejects outright
+  CREATED: 'CREATED', ASSIGNED: 'ASSIGNED', REASSIGNED: 'REASSIGNED',
+  REMINDER_SENT: 'REMINDER_SENT', SUBMITTED: 'SUBMITTED', FORWARDED: 'FORWARDED',
+  APPROVED: 'APPROVED', CHANGES_REQUESTED: 'CHANGES_REQUESTED', REJECTED: 'REJECTED',
+  TENDER_PUBLISHED: 'TENDER_PUBLISHED', WORK_AWARDED: 'WORK_AWARDED',
+  WORK_COMPLETED: 'WORK_COMPLETED', BILL_RECORDED: 'BILL_RECORDED',
+  BILL_UPDATED: 'BILL_UPDATED', CLOSED: 'CLOSED', OVERRIDE: 'OVERRIDE',
 });
 
-
-/** Thrown for every rule violation, so handlers can map it to a 403/409. */
+/** Thrown for every rule violation, so handlers can map it to a 4xx. */
 export class WorkflowError extends Error {
   constructor(message, { code = 'INVALID_TRANSITION', status = 409 } = {}) {
     super(message);
@@ -74,145 +66,333 @@ export class WorkflowError extends Error {
   }
 }
 
-/** Who owns a ticket in this status? null = terminal, nobody. */
-export function actorForStatus(status) {
-  // The JE owns the ticket while inspecting it, AND again after approval while
-  // driving tender milestones.
-  if (status === STATUS.ASSIGNED_TO_JE ||
-      status === STATUS.RETURNED_TO_JE ||
-      status === STATUS.APPROVED_FOR_TENDERING ||
-      status === STATUS.TENDER_PUBLISHED ||
-      status === STATUS.WORK_IN_PROGRESS) return ROLE.JE;
-  return Object.keys(PENDING_STATUS_FOR).find(r => PENDING_STATUS_FOR[r] === status) ?? null;
+// ---- desk <-> status tables -------------------------------------------------
+const DESK_FOR_STATUS = Object.freeze({
+  [STATUS.UNASSIGNED]:                DESK.AE,
+  [STATUS.ASSIGNED_TO_JE]:            DESK.JE,
+  [STATUS.RETURNED_TO_JE]:            DESK.JE,
+  [STATUS.PENDING_AE_APPROVAL]:       DESK.AE,
+  [STATUS.PENDING_SE_APPROVAL]:       DESK.SE,
+  [STATUS.PENDING_DEAN_APPROVAL]:     DESK.DEAN,
+  [STATUS.PENDING_DIRECTOR_APPROVAL]: DESK.DIRECTOR,
+});
+const STATUS_FOR_DESK = Object.freeze({
+  [DESK.JE]:       STATUS.RETURNED_TO_JE,
+  [DESK.AE]:       STATUS.PENDING_AE_APPROVAL,
+  [DESK.SE]:       STATUS.PENDING_SE_APPROVAL,
+  [DESK.DEAN]:     STATUS.PENDING_DEAN_APPROVAL,
+  [DESK.DIRECTOR]: STATUS.PENDING_DIRECTOR_APPROVAL,
+});
+const NEXT_DESK = Object.freeze({ [DESK.AE]: DESK.SE, [DESK.SE]: DESK.DEAN, [DESK.DEAN]: DESK.DIRECTOR });
+
+// Who may APPROVE, and against which financial_limits key. The AE has no
+// approval power (Q1); the Director has no limit.
+const APPROVAL_LIMIT_KEY = Object.freeze({ [DESK.SE]: 'SE_APPROVE', [DESK.DEAN]: 'DEAN_APPROVE' });
+const CAN_APPROVE = Object.freeze([DESK.SE, DESK.DEAN, DESK.DIRECTOR]);
+const CAN_REJECT  = Object.freeze([DESK.SE, DESK.DEAN, DESK.DIRECTOR]);
+
+/** Approval-limit summary for a desk, so the UI never hardcodes ceilings (F3).
+ *  { can_approve:false } for AE/JE; { unlimited:true } for the Director;
+ *  otherwise the configured amount (null = row missing, fail closed). */
+export function approvalLimitFor(desk, limits = {}) {
+  if (!CAN_APPROVE.includes(desk)) return { can_approve: false, unlimited: false, amount: null };
+  const key = APPROVAL_LIMIT_KEY[desk];
+  if (!key) return { can_approve: true, unlimited: true, amount: null };
+  return { can_approve: true, unlimited: false, amount: limits[key] ?? null };
 }
 
-/** The next desk up the ladder, or null at the top. */
-function nextApprover(role) {
-  const i = APPROVAL_CHAIN.indexOf(role);
-  if (i === -1) return null;
-  return APPROVAL_CHAIN[i + 1] ?? null;
+/** Which desk owns a ticket in this status? null = nobody (post-approval or terminal). */
+export function deskForStatus(status) {
+  return DESK_FOR_STATUS[status] ?? null;
 }
 
-/** The desk immediately below in the ladder, or JE if at the bottom of the approval chain. */
-function previousDesk(role) {
-  const i = APPROVAL_CHAIN.indexOf(role);
-  if (i === -1) return null;
-  if (i === 0) return ROLE.JE; // AE returns back to JE
-  return APPROVAL_CHAIN[i - 1]; // SE -> AE, DEAN -> SE, DIRECTOR -> DEAN
+const inr = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
+
+/**
+ * What can `user` do to `ticket` right now?  THE rule engine for the desks.
+ * Pure: same inputs, same output. The frontend renders only from this list.
+ *
+ * @param {{id:number, role:string}} user
+ * @param {{
+ *   status:string, current_desk_user_id:(number|null), estimate?:(number|null),
+ *   desk_owners?:Object<string,(number|null)>,   // who sits at each lower desk for THIS ticket
+ * }} ticket
+ * @param {Object<string,number>} limits   financial_limits rows, e.g. { SE_APPROVE: 50000, DEAN_APPROVE: 500000 }
+ * @returns {{desk:(string|null), actions:Array<{action:string, enabled:boolean, code?:string, reason?:string, targets?:string[]}>}}
+ */
+export function availableActions(user, ticket, limits = {}) {
+  const desk = deskForStatus(ticket.status);
+  // Not this role's desk, or not this exact person (fixes S7: the right ROLE
+  // at the wrong PERSON's desk is still refused). Fail closed if unknown.
+  if (!desk || user.role !== desk) return { desk, actions: [] };
+  if (ticket.current_desk_user_id == null || ticket.current_desk_user_id !== user.id) {
+    return { desk, actions: [] };
+  }
+
+  if (ticket.status === STATUS.UNASSIGNED) {
+    return { desk, actions: [{ action: ACTION.ASSIGN_JE, enabled: true }] };
+  }
+  if (desk === DESK.JE) {
+    return { desk, actions: [{ action: ACTION.SUBMIT_REPORT, enabled: true }] };
+  }
+
+  const actions = [];
+
+  const next = NEXT_DESK[desk];
+  if (next) actions.push({ action: ACTION.FORWARD, enabled: true, targets: [next] });
+
+  if (CAN_APPROVE.includes(desk)) {
+    const key = APPROVAL_LIMIT_KEY[desk];
+    const estimate = ticket.estimate;
+    let d = { action: ACTION.APPROVE, enabled: true };
+    if (estimate == null || Number.isNaN(Number(estimate))) {
+      d = { action: ACTION.APPROVE, enabled: false, code: 'ESTIMATE_MISSING',
+            reason: 'Cannot approve: no JE estimate on file for this ticket.' };
+    } else if (key) {
+      const limit = limits[key];
+      if (limit == null) {
+        // Fail closed: a missing financial_limits row must never mean "no limit".
+        d = { action: ACTION.APPROVE, enabled: false, code: 'LIMIT_NOT_CONFIGURED',
+              reason: `No financial limit configured for ${key}.` };
+      } else if (Number(estimate) > Number(limit)) {
+        d = { action: ACTION.APPROVE, enabled: false, code: 'ABOVE_LIMIT',
+              reason: `Estimate ${inr(estimate)} is above your approval limit of ${inr(limit)}. Forward it instead.` };
+      }
+    }
+    actions.push(d);
+  }
+
+  const owners = ticket.desk_owners;
+  const targets = DESKS_BY_RANK.filter(
+    (d) => DESK_RANK[d] < DESK_RANK[desk] && (owners === undefined || owners[d] != null)
+  );
+  actions.push(targets.length > 0
+    ? { action: ACTION.REQUEST_CHANGES, enabled: true, targets }
+    : { action: ACTION.REQUEST_CHANGES, enabled: false, code: 'NO_TARGET_DESK',
+        reason: 'No lower desk currently has an owner to send changes to.' });
+
+  if (CAN_REJECT.includes(desk)) actions.push({ action: ACTION.REJECT, enabled: true });
+
+  return { desk, actions };
 }
 
 /**
- * THE core rule engine. Pure: same inputs always give the same output.
- * @returns {{ status: string, logAction: string }}
+ * Validate one requested action against availableActions and compute the
+ * transition. Never trusts route-level RBAC: `user` and `ticket` are checked
+ * again here.
+ *
+ * @param {{user, ticket, limits, action:string, to_desk?:string, estimate?:number}} input
+ *        `estimate` is only for SUBMIT_REPORT: the amount the JE is filing.
+ * @returns {{action, fromDesk, toDesk:(string|null), fromStatus, toStatus, logAction}}
  * @throws {WorkflowError}
  */
-export function resolveTransition({ currentStatus, role, action, estimate }) {
-  // Rule 0: it must be this role's turn. This is the guard v1 never had, which
-  // let a DIRECTOR approve a ticket still at ASSIGNED_TO_JE — skipping the JE.
-  const expected = actorForStatus(currentStatus);
-  if (expected !== role) {
+export function resolveAction({ user, ticket, limits = {}, action, to_desk, estimate }) {
+  const fromStatus = ticket.status;
+  const { desk, actions } = availableActions(user, ticket, limits);
+
+  if (!desk) {
+    // A JE trying to file a report onto an approved/terminal ticket gets the
+    // specific error; everyone else is simply not on the desk.
+    if (action === ACTION.SUBMIT_REPORT && user.role === ROLE.JE) {
+      throw new WorkflowError(
+        `A report can only be filed while the ticket is with the JE (ticket is at ${fromStatus}).`,
+        { code: 'REPORT_NOT_ALLOWED', status: 409 });
+    }
+    throw new WorkflowError(`Ticket is at ${fromStatus}, which is nobody's desk for ${action}.`,
+      { code: 'NOT_YOUR_DESK', status: 403 });
+  }
+  if (user.role !== desk || actions.length === 0) {
     throw new WorkflowError(
-      `Ticket is at ${currentStatus}, which is ${expected ?? 'nobody'}'s desk — not ${role}'s.`,
-      { code: 'NOT_YOUR_DESK', status: 403 }
-    );
+      `Ticket is at ${fromStatus}, which is ${desk}'s desk — not yours (${user.role}, or a different person).`,
+      { code: 'NOT_YOUR_DESK', status: 403 });
   }
 
-  if (role === ROLE.JE) {
-    // A JE has exactly ONE move in the approval flow. Be explicit and closed:
-    if (action === 'SUBMIT_REPORT') {
-      // Only from the two "JE is inspecting" states. Never from an approved
-      // ticket, or a JE could drag sanctioned work back down to the AE.
-      if (currentStatus !== STATUS.ASSIGNED_TO_JE && currentStatus !== STATUS.RETURNED_TO_JE) {
-        throw new WorkflowError(
-          `A report can only be filed from ${STATUS.ASSIGNED_TO_JE} or ${STATUS.RETURNED_TO_JE} ` +
-          `(ticket is at ${currentStatus}).`,
-          { code: 'REPORT_NOT_ALLOWED', status: 409 }
-        );
-      }
-      // No estimate = no way to apply a ceiling. Hard fail, never guess.
+  const descriptor = actions.find((a) => a.action === action);
+  if (!descriptor) {
+    throw new WorkflowError(
+      `${user.role} cannot ${action} at ${fromStatus}. Allowed: ${actions.map((a) => a.action).join(', ') || 'none'}.`,
+      { code: 'ACTION_NOT_ALLOWED', status: 403 });
+  }
+  if (!descriptor.enabled) {
+    throw new WorkflowError(descriptor.reason, { code: descriptor.code, status: 409 });
+  }
+
+  switch (action) {
+    case ACTION.SUBMIT_REPORT: {
       if (estimate === null || estimate === undefined || Number.isNaN(Number(estimate))) {
         throw new WorkflowError('A report must include an estimated amount.',
           { code: 'ESTIMATE_REQUIRED', status: 400 });
       }
       if (Number(estimate) <= 0) {
         throw new WorkflowError(
-          'Estimated amount must be greater than zero. If no work is required, ' +
-          'the ticket should be closed instead of approved.',
+          'Estimated amount must be greater than zero. If no work is required, the ticket should be closed instead of approved.',
           { code: 'ESTIMATE_INVALID', status: 400 });
       }
-      return { status: STATUS.PENDING_AE_APPROVAL, logAction: 'SUBMITTED' };
+      return done(DESK.JE, DESK.AE, STATUS.PENDING_AE_APPROVAL, LOG_ACTION.SUBMITTED);
     }
-
-    // Tender milestones go through resolveTenderUpdate(), not here.
-    throw new WorkflowError(
-      `A JE cannot '${action}' a ticket. A JE may only submit a report; ` +
-      `approvals belong to AE/SE/Dean/Director.`,
-      { code: 'JE_ACTION_NOT_ALLOWED', status: 403 }
-    );
+    case ACTION.ASSIGN_JE:
+      return done(DESK.AE, DESK.JE, STATUS.ASSIGNED_TO_JE, LOG_ACTION.ASSIGNED);
+    case ACTION.FORWARD: {
+      const to = descriptor.targets[0];
+      return done(desk, to, STATUS_FOR_DESK[to], LOG_ACTION.FORWARDED);
+    }
+    case ACTION.APPROVE:
+      return done(desk, null, STATUS.APPROVED_FOR_TENDERING, LOG_ACTION.APPROVED);
+    case ACTION.REJECT:
+      return done(desk, null, STATUS.DENIED, LOG_ACTION.REJECTED);
+    case ACTION.REQUEST_CHANGES: {
+      if (!to_desk) {
+        throw new WorkflowError('REQUEST_CHANGES needs to_desk.', { code: 'TO_DESK_REQUIRED', status: 400 });
+      }
+      if (!descriptor.targets.includes(to_desk)) {
+        throw new WorkflowError(
+          `${desk} cannot send changes to ${to_desk}. Allowed: ${descriptor.targets.join(', ')}.`,
+          { code: 'INVALID_TARGET_DESK', status: 400 });
+      }
+      return done(desk, to_desk, STATUS_FOR_DESK[to_desk], LOG_ACTION.CHANGES_REQUESTED);
+    }
+    /* c8 ignore next 2 */
+    default:
+      throw new WorkflowError(`Unknown action '${action}'.`, { code: 'UNKNOWN_ACTION', status: 400 });
   }
 
-  // ---- Approver actions ---------------------------------------------------
-  // ---- Approver actions ---------------------------------------------------
-  if (action === 'RETURN') {
-    const prev = previousDesk(role);
-    if (!prev) {
-      throw new WorkflowError(`Cannot return ticket from ${role}.`, {
-        code: 'CANNOT_RETURN',
-        status: 400,
-      });
-    }
-
-    // Returning to JE uses the dedicated RETURNED_TO_JE status
-    if (prev === ROLE.JE) {
-      return { status: STATUS.RETURNED_TO_JE, logAction: 'RETURNED' };
-    }
-
-    // Returning to higher officers puts it back in their pending queue
-    return { status: PENDING_STATUS_FOR[prev], logAction: 'RETURNED' };
+  function done(fromDesk, toDesk, toStatus, logAction) {
+    return { action, fromDesk, toDesk, fromStatus, toStatus, logAction };
   }
-
-  if (action === 'DENY') {
-    // Only director can deny
-    if (role !== ROLE.DIRECTOR) {
-      throw new WorkflowError(`Only the DIRECTOR can deny a ticket. ${role} can RETURN it.`,
-        { code: 'DENY_NOT_ALLOWED', status: 403 });
-    }
-    return { status: STATUS.DENIED, logAction: 'DENIED' };
-  }
-
-  if (action === 'APPROVE') {
-    if (estimate === null || estimate === undefined || Number.isNaN(Number(estimate))) {
-      throw new WorkflowError('Cannot approve: no JE estimate on file for this ticket.',
-        { code: 'ESTIMATE_MISSING', status: 409 });
-    }
-    const amount = Number(estimate);
-    const ceiling = BUDGET_CEILING[role];
-
-    if (amount <= ceiling) {
-      return { status: STATUS.APPROVED_FOR_TENDERING, logAction: 'APPROVED' };
-    }
-    const next = nextApprover(role);
-    if (!next) {
-      throw new WorkflowError('No higher authority to escalate to.',
-        { code: 'NO_HIGHER_AUTHORITY', status: 409 });
-    }
-    return { status: PENDING_STATUS_FOR[next], logAction: 'PASSED' };
-  }
-
-  throw new WorkflowError(`Unknown action '${action}'.`, { code: 'UNKNOWN_ACTION', status: 400 });
 }
 
-// W6: the post-approval ladder is forward-only. CLOSED is terminal -- it is
-// deliberately absent from here, so a closed ticket can never accept another
-// milestone (the old code kept CLOSED in `allowedCurrent`, which reopened it).
+// ---- messages (plan.md §3.1 ticket_messages, §3.6 message rules) --------------
+
+/**
+ * Which ticket_messages rows does this action write?  Pure; enforces the
+ * payload rules and stamps each row with the visible_from_rank it will keep
+ * forever.
+ *
+ * `openRequest` = the change request currently open on the ticket
+ * ({ id, author_desk, to_desk } or null). A desk "replies" when the open
+ * request is addressed to it.
+ *
+ * @returns {Array<{kind, author_desk, to_desk, body, visible_from_rank, in_reply_to}>}
+ * @throws {WorkflowError}
+ */
+export function planMessages({ action, fromDesk, toDesk, payload = {}, openRequest = null }) {
+  const { message, internal_remark, public_note } = payload;
+  const rank = DESK_RANK[fromDesk];
+  const replying = openRequest != null && openRequest.to_desk === fromDesk;
+  const specs = [];
+
+  const need = (text, what) => {
+    if (typeof text !== 'string' || text.trim() === '') {
+      throw new WorkflowError(`${what} requires a message.`, { code: 'MESSAGE_REQUIRED', status: 400 });
+    }
+    return text.trim();
+  };
+
+  if (action === ACTION.REQUEST_CHANGES) {
+    specs.push({
+      kind: 'CHANGE_REQUEST', author_desk: fromDesk, to_desk: toDesk, body: need(message, 'REQUEST_CHANGES'),
+      // CHANGE_REQUEST from X to Y: readable by every desk with rank >= rank(Y).
+      visible_from_rank: DESK_RANK[toDesk], in_reply_to: openRequest ? openRequest.id : null,
+    });
+  } else if (action === ACTION.REJECT) {
+    specs.push({
+      kind: 'REJECTION_REASON', author_desk: fromDesk, to_desk: null, body: need(message, 'REJECT'),
+      visible_from_rank: 1, in_reply_to: null,
+    });
+  } else if (replying && (action === ACTION.FORWARD || action === ACTION.SUBMIT_REPORT)) {
+    // Answering a change request: the reply is mandatory.
+    specs.push({
+      kind: 'REPLY', author_desk: fromDesk, to_desk: openRequest.author_desk,
+      body: need(message, 'Answering a change request'),
+      // REPLY from Y to X: rank of Y, same readers as the request it answers.
+      visible_from_rank: rank, in_reply_to: openRequest.id,
+    });
+  } else if (action !== ACTION.SUBMIT_REPORT && typeof message === 'string' && message.trim() !== '') {
+    // SUBMIT_REPORT's "message" is the report's own remarks column; every
+    // other action that is not a change request/rejection/reply has no use
+    // for one -- refuse it rather than silently dropping it.
+    throw new WorkflowError(
+      `${action} does not take a message. Use internal_remark or public_note.`,
+      { code: 'MESSAGE_NOT_ALLOWED', status: 400 });
+  }
+
+  if (typeof internal_remark === 'string' && internal_remark.trim() !== '') {
+    specs.push({
+      kind: 'INTERNAL_REMARK', author_desk: fromDesk, to_desk: null, body: internal_remark.trim(),
+      visible_from_rank: rank, in_reply_to: null,
+    });
+  }
+  if (typeof public_note === 'string' && public_note.trim() !== '') {
+    specs.push({
+      kind: 'PUBLIC_NOTE', author_desk: fromDesk, to_desk: null, body: public_note.trim(),
+      visible_from_rank: 0, in_reply_to: null,
+    });
+  }
+  return specs;
+}
+
+/**
+ * The ticket's open_change_request_id after a move.
+ *  - A new REQUEST_CHANGES message becomes the head of the thread.
+ *  - A terminal move (approve/reject, toDesk null) closes everything.
+ *  - Otherwise, once the ticket climbs back to (or past) the desk that wrote
+ *    the open request, that request is answered: pop to its parent, repeat.
+ *
+ * @param {Object<number,{author_desk:string,in_reply_to:(number|null)}>} messagesById  the open request's thread
+ */
+export function nextOpenRequestId({ openId, newRequestId = null, toDesk, messagesById = {} }) {
+  if (newRequestId != null) return newRequestId;
+  if (toDesk == null) return null;
+  const arrived = DESK_RANK[toDesk];
+  let id = openId ?? null;
+  while (id != null) {
+    const m = messagesById[id];
+    if (!m) return null;
+    if (arrived >= DESK_RANK[m.author_desk]) id = m.in_reply_to ?? null;
+    else break;
+  }
+  return id;
+}
+
+/**
+ * May this viewer read this message? One plain comparison (plan.md §3.6):
+ * a desk reads a message when its rank >= the message's visible_from_rank,
+ * so lower tiers never see internal executive remarks. PUBLIC_NOTE is the
+ * only kind the applicant (or non-desk staff) can read.
+ *
+ * @param {{role:string, isApplicant?:boolean}} viewer
+ */
+export function canReadMessage(viewer, message) {
+  if (viewer.role === ROLE.SYSADMIN) return true;
+  const rank = DESK_RANK[viewer.role] ?? 0;
+  if (message.kind === 'PUBLIC_NOTE') return viewer.isApplicant === true || rank >= 1;
+  return rank >= 1 && rank >= message.visible_from_rank;
+}
+
+// ---- post-approval ladder (tender milestones) ---------------------------------
+
+// Tender milestones updated by JE post-approval
+export const TENDER_MILESTONES = Object.freeze([
+  STATUS.TENDER_PUBLISHED,
+  STATUS.WORK_IN_PROGRESS,
+  STATUS.CLOSED,
+]);
+
+// W6: forward-only. CLOSED is terminal and deliberately absent from the
+// "may move" set, so a closed ticket can never accept another milestone.
 const TENDER_LADDER = [
   STATUS.APPROVED_FOR_TENDERING,
   STATUS.TENDER_PUBLISHED,
   STATUS.WORK_IN_PROGRESS,
   STATUS.CLOSED,
 ];
+const TENDER_LOG_ACTION = Object.freeze({
+  [STATUS.TENDER_PUBLISHED]: LOG_ACTION.TENDER_PUBLISHED,
+  [STATUS.WORK_IN_PROGRESS]: LOG_ACTION.WORK_AWARDED,
+  [STATUS.CLOSED]:           LOG_ACTION.CLOSED,
+});
 
-/** Guard for the JE's tender endpoint — this is the S1 fix. */
+/** Guard for the JE's tender endpoint — the S1 fix. */
 export function resolveTenderUpdate({ currentStatus, milestone }) {
   const currentIdx = TENDER_LADDER.indexOf(currentStatus);
   if (currentIdx === -1 || currentStatus === STATUS.CLOSED) {
@@ -227,8 +407,6 @@ export function resolveTenderUpdate({ currentStatus, milestone }) {
       { code: 'INVALID_MILESTONE', status: 400 }
     );
   }
-  // W6: milestone must be strictly ahead of the current position on the
-  // ladder, so the JE can never move a ticket backwards.
   const milestoneIdx = TENDER_LADDER.indexOf(milestone);
   if (milestoneIdx <= currentIdx) {
     throw new WorkflowError(
@@ -236,10 +414,5 @@ export function resolveTenderUpdate({ currentStatus, milestone }) {
       { code: 'BACKWARD_TRANSITION', status: 409 }
     );
   }
-  return { status: milestone, logAction: 'PASSED' };
-}
-
-/** For the frontend: should this user see the action buttons? */
-export function canAct(role, currentStatus) {
-  return actorForStatus(currentStatus) === role;
+  return { status: milestone, logAction: TENDER_LOG_ACTION[milestone] };
 }

@@ -1,0 +1,24 @@
+# O2: throwaway MySQL for integration tests. Data lives in tmpfs and vanishes with the container.
+#
+#   docker compose -f docker-compose.test.yml up -d --wait
+#   cd infra-backend-v2 && npm run test:integration:local
+#   docker compose -f docker-compose.test.yml down
+#
+# Port 3307 so it never collides with the production compose stack's MySQL (3306).
+# The password is a throwaway for a container that only listens on localhost.
+services:
+  mysql-test:
+    image: mysql:8.0
+    container_name: dean-mysql-test
+    ports:
+      - "127.0.0.1:3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ci-throwaway
+      MYSQL_DATABASE: deanery_infra
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pci-throwaway"]
+      interval: 3s
+      timeout: 3s
+      retries: 30

@@ -22,12 +22,14 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// One 401 handler: clear the session and let the router send the user to
+// /login. No hard reload, and nothing at all when the user is already on
+// /login (a failed sign-in must show its error, not reload the page).
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && useAuthStore.getState().isAuthenticated) {
       useAuthStore.getState().logout();
-      window.location.href = '/login';
     }
     return Promise.reject(error);
   }

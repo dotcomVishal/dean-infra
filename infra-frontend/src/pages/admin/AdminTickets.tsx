@@ -6,6 +6,7 @@ import {
   RefreshCw, ShieldAlert, ArrowRight, X
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
 
 const ALL_STATUSES = [
   'ASSIGNED_TO_JE',
@@ -121,7 +122,7 @@ export default function AdminTickets() {
     e.preventDefault();
     if (!selectedTicket) return;
     if (!overrideRemarks.trim()) {
-      alert('Administrative justification remarks are strictly mandatory.');
+      toast.error('Administrative justification remarks are strictly mandatory.');
       return;
     }
 
@@ -133,13 +134,13 @@ export default function AdminTickets() {
         remarks: overrideRemarks.trim(),
       });
       if (res.data.success) {
-        alert('Ticket state and audit trail updated successfully.');
+        toast.success('Ticket state and audit trail updated successfully.');
         setOverrideModalOpen(false);
         fetchTickets();
       }
     } catch (err: any) {
       console.error('Override error:', err);
-      alert(err.response?.data?.message || 'Failed to execute override.');
+      toast.error(err.response?.data?.message || 'Failed to execute override.');
     } finally {
       setIsSubmittingOverride(false);
     }

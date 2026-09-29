@@ -4,6 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { Loader2, Search, ChevronLeft, ChevronRight, Filter, ArrowUpDown } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
+import { staffStatusLabel } from '../lib/ticketUi';
+
+// Applicant rows carry a plain-words stage_label; staff rows carry a status.
+const statusText = (t: { status: string; stage_label?: string }) => t.stage_label || staffStatusLabel(t.status);
 
 export default function MyTickets() {
   const { user } = useAuthStore();
@@ -149,7 +153,7 @@ export default function MyTickets() {
                   <div className="flex justify-between items-start">
                     <span className="text-blue-600 dark:text-blue-400 font-mono text-sm font-bold">#TKT-{ticket.id.toString().padStart(4, '0')}</span>
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border ${getStatusStyle(ticket.status)}`}>
-                      {ticket.status.replace(/_/g, ' ')}
+                      {statusText(ticket)}
                     </span>
                   </div>
                   <div>
@@ -176,7 +180,7 @@ export default function MyTickets() {
                   </div>
                   <div className="col-span-2">
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border ${getStatusStyle(ticket.status)}`}>
-                      {ticket.status.replace(/_/g, ' ')}
+                      {statusText(ticket)}
                     </span>
                   </div>
                   <div className="col-span-2 text-right text-sm text-slate-500 dark:text-slate-400 font-medium">

@@ -10,13 +10,22 @@ import {
   getQueue,
   submitReport,
   updateTenderStatus,
-  reviewTicket,
   publishTender,
   awardTender,
   recordBill,
   updateBillPayment,
   getAccountantOverview,
 } from '../controllers/ticketController.js';
+import { performTicketAction } from '../controllers/actionController.js';
+import { getDeskBoard, getAssignableJes } from '../controllers/deskController.js';
+import { availableActions, approvalLimitFor } from '../config/workflow.js';
+import { findDeskOwner } from '../models/deskModel.js';
+import { loadActionContext } from '../services/actionContext.js';
+import { listForTicket } from '../models/messageModel.js';
+import {
+  loadViewer, canViewTicket, staffRole, capabilities, applicantTicket, buildTicketDetails,
+} from '../services/visibility.js';
+import { sendServerError } from '../utils/httpError.js';
 
 const router = express.Router();
 
@@ -28,15 +37,20 @@ router.use(requireAuth);
 // applicant is a relation (tickets.applicant_id), not a role restriction.
 router.get('/applicant', async (req, res) => {
   try {
-    const [tickets] = await pool.query(
+    const [rows] = await pool.query(
       `SELECT * FROM tickets WHERE applicant_id = ? ORDER BY created_at DESC`,
       [req.user.id]
     );
-    res.json({ success: true, tickets });
+    // Applicant view: no assignee / desk-owner ids, stage in plain words (Q11).
+    res.json({ success: true, tickets: rows.map(applicantTicket) });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'ticketRoutes:46');
   }
 });
+
+// 1.6 Role dashboards: My desk / Watching / My tickets (Phase 7). Registered
+// before any '/:ticket_id' route so 'desk' is never read as an id.
+router.get('/desk', getDeskBoard);
 
 // 1. Raise a Ticket (Hooks up to the actual Auto-Assignment & Email logic)
 // W15: any active, authenticated user may raise a ticket -- students, faculty,
@@ -65,8 +79,13 @@ router.post(
 // 4. JE Manual Tendering Milestone Update
 router.post('/:ticket_id/tender', requireRole(['JE']), updateTenderStatus);
 
-// 4.5 Authority Hierarchical Review (AE, SE, Dean, Director, SYSADMIN)
-router.post('/:ticket_id/review', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN']), reviewTicket);
+// 4.5 Desk actions (replaces /review): FORWARD, APPROVE, REQUEST_CHANGES,
+// REJECT, ASSIGN_JE. The route only gates the role; the state machine decides
+// whether THIS person may do THIS action on THIS ticket right now.
+router.post('/:ticket_id/actions', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), performTicketAction);
+
+// 4.6 JE picker for the AE's ASSIGN_JE action on an UNASSIGNED ticket.
+router.get('/:ticket_id/assignable-jes', requireRole(['AE']), getAssignableJes);
 
 // 5. JE Dashboard (Securely uses token ID, no payload spoofing)
 router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
@@ -88,7 +107,7 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
     );
     res.json({ success: true, tickets });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'ticketRoutes:109');
   }
 });
 
@@ -118,21 +137,17 @@ router.get(
   requireRole(['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'CLERICAL', 'ACCOUNTANT', 'SYSADMIN']),
   async (req, res) => {
     const { ticket_id } = req.params;
-    const { role, department, id: userId } = req.user;
     try {
       const [ticketRows] = await pool.query(
-        'SELECT department, assigned_je_id FROM tickets WHERE id = ?',
+        `SELECT id, applicant_id, department, campus, status, assigned_je_id, current_desk_user_id
+           FROM tickets WHERE id = ?`,
         [ticket_id]
       );
       if (ticketRows.length === 0) {
         return res.status(404).json({ success: false, message: 'Ticket not found' });
       }
-      const ticket = ticketRows[0];
-
-      if (role === 'JE' && ticket.assigned_je_id !== userId) {
-        return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
-      }
-      if ((role === 'AE' || role === 'SE') && ticket.department !== department) {
+      const viewer = await loadViewer(pool, req.user, ticketRows[0]);
+      if (!capabilities(viewer, ticketRows[0]).tenders) {
         return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
       }
 
@@ -146,8 +161,7 @@ router.get(
       );
       res.json({ success: true, tenders });
     } catch (error) {
-      console.error('getTenders error:', error);
-      res.status(500).json({ success: false, message: 'Internal Server Error' });
+      return sendServerError(req, res, error, 'getTenders error');
     }
   }
 );
@@ -167,6 +181,18 @@ router.get(
   async (req, res) => {
     const { ticket_id } = req.params;
     try {
+      const [ticketRows] = await pool.query(
+        `SELECT id, applicant_id, department, campus, status, assigned_je_id, current_desk_user_id
+           FROM tickets WHERE id = ?`,
+        [ticket_id]
+      );
+      if (ticketRows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Ticket not found' });
+      }
+      const viewer = await loadViewer(pool, req.user, ticketRows[0]);
+      if (!capabilities(viewer, ticketRows[0]).bills) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+      }
       const [bills] = await pool.query(
         `SELECT b.*, u.name as accountant_name 
          FROM bills b 
@@ -177,7 +203,7 @@ router.get(
       );
       res.json({ success: true, bills });
     } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
+      return sendServerError(req, res, error, 'ticketRoutes:206');
     }
   }
 );
@@ -195,7 +221,7 @@ router.patch(
 );
 
 // -------------------------------------------------------------
-// 8. STRICT HIERARCHICAL TICKET DETAILS (Redacted based on role)
+// 8. TICKET DETAILS -- every redaction decision lives in services/visibility.js
 // -------------------------------------------------------------
 router.get('/:ticket_id/details', async (req, res) => {
   const { ticket_id } = req.params;
@@ -203,150 +229,82 @@ router.get('/:ticket_id/details', async (req, res) => {
   const userId = req.user.id;
 
   try {
-    // 1. Fetch Ticket & Applicant Info
     const [tickets] = await pool.query(
-      `SELECT t.*, u.name as applicant_name, u.email as applicant_email, u.phone as applicant_phone 
+      `SELECT t.*, u.name as applicant_name, u.email as applicant_email, u.phone as applicant_phone
        FROM tickets t JOIN users u ON t.applicant_id = u.id WHERE t.id = ?`,
       [ticket_id]
     );
     if (tickets.length === 0) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
+    const ticketRow = tickets[0];
 
-    const ticketData = tickets[0];
-
-    // S5: scope checks. Ownership only used to be enforced for APPLICANT,
-    // which let any JE read any ticket and any AE/SE read tickets outside
-    // their own department.
-    if (userRole === 'APPLICANT' && ticketData.applicant_id !== userId) {
-      return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
-    }
-    if (userRole === 'JE' && ticketData.assigned_je_id !== userId) {
-      return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
-    }
-    if ((userRole === 'AE' || userRole === 'SE') && ticketData.department !== req.user.department) {
-      return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
-    }
-    if (
-      (userRole === 'CLERICAL' || userRole === 'ACCOUNTANT') &&
-      !['APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED'].includes(ticketData.status)
-    ) {
+    // S5: one scope rule for every role (visibility matrix, plan.md §3.6).
+    const viewer = await loadViewer(pool, req.user, ticketRow);
+    if (!canViewTicket(viewer, ticketRow)) {
       return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
     }
 
-    // 2. Fetch Attachments (Safe with/without document_category)
-    let attachments = [];
-    try {
-      const [attRows] = await pool.query(
-        'SELECT id, file_url, uploaded_by, created_at, document_category FROM attachments WHERE ticket_id = ? ORDER BY created_at ASC',
-        [ticket_id]
-      );
-      attachments = attRows;
-    } catch (attErr) {
-      if (attErr.code === 'ER_BAD_FIELD_ERROR') {
-        const [rawRows] = await pool.query(
-          'SELECT id, file_url, uploaded_by, created_at FROM attachments WHERE ticket_id = ? ORDER BY created_at ASC',
-          [ticket_id]
-        );
-        attachments = rawRows.map(r => ({ ...r, document_category: 'APPLICANT_EVIDENCE' }));
-      } else {
-        throw attErr;
-      }
-    }
-
-    // 3. Fetch JE Reports
-    const [reports] = await pool.query(
-      'SELECT * FROM reports WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1',
+    const [attachments] = await pool.query(
+      `SELECT a.id, a.file_url, a.uploaded_by, a.created_at, a.document_category, a.report_id,
+              u.role AS uploader_role
+         FROM attachments a LEFT JOIN users u ON u.id = a.uploaded_by
+        WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
       [ticket_id]
     );
+    const [reports] = await pool.query(
+      'SELECT * FROM reports WHERE ticket_id = ? ORDER BY version DESC LIMIT 1', [ticket_id]);
 
-    // 4. Fetch Tenders
     let tenders = [];
     try {
-      const [tRows] = await pool.query('SELECT * FROM tenders WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
-      tenders = tRows;
+      [tenders] = await pool.query('SELECT * FROM tenders WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
     } catch (err) {
-      if (err.code === 'ER_NO_SUCH_TABLE') tenders = [];
-      else throw err;
+      if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
     }
-
-    // 5. Fetch Bills
     let bills = [];
     try {
-      const [bRows] = await pool.query('SELECT * FROM bills WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
-      bills = bRows;
+      [bills] = await pool.query('SELECT * FROM bills WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
     } catch (err) {
-      if (err.code === 'ER_NO_SUCH_TABLE') bills = [];
-      else throw err;
+      if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
     }
 
-    // 6. Fetch Audit Logs
     const [auditLogs] = await pool.query(
-      `SELECT a.action, a.remarks, a.created_at, u.name as actor_name, u.role as actor_role 
-       FROM audit_logs a JOIN users u ON a.user_id = u.id 
-       WHERE a.ticket_id = ? ORDER BY a.created_at ASC`,
+      `SELECT a.action, a.remarks, a.created_at, a.user_id, a.visibility, a.from_desk, a.to_desk,
+              u.name as actor_name, u.role as actor_role
+         FROM audit_logs a JOIN users u ON a.user_id = u.id
+        WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
       [ticket_id]
     );
+    const messages = await listForTicket(pool, ticket_id);
 
-    // =========================================================
-    // STRICT HIERARCHICAL REDACTION RULES
-    // =========================================================
-    if (userRole === 'APPLICANT') {
-      // APPLICANT: Can only see the issue status and their evidence photos.
-      // Strictly redact internal estimates, notes, authority remarks, tenders, and bills.
-      ticketData.attachments = attachments.filter(
-        (a) => a.document_category === 'APPLICANT_EVIDENCE' || a.document_category === 'JE_SITE_PHOTO'
-      );
-      ticketData.report = null;
-      ticketData.audit_logs = [];
-      ticketData.tenders = [];
-      ticketData.bills = [];
-    } else if (userRole === 'JE') {
-      // JE: Can see applicant request, their own reports, site photos, estimate docs.
-      // Internal remarks of higher authority desks are redacted.
-      ticketData.attachments = attachments;
-      ticketData.report = reports.length > 0 ? reports[0] : null;
-      ticketData.tenders = tenders;
-      ticketData.bills = bills;
-      // W3: a RETURNED entry IS the reason the JE's report was sent back --
-      // redacting it left the JE asked to fix a report without being told
-      // what was wrong with it.
-      ticketData.audit_logs = auditLogs.map((log) => ({
-        action: log.action,
-        created_at: log.created_at,
-        actor_role: log.actor_role,
-        remarks: log.actor_role === 'JE'
-          || ['SUBMITTED', 'CREATED', 'ASSIGNED', 'RETURNED'].includes(log.action)
-          ? log.remarks
-          : '[Internal Authority Decision Recorded]',
-      }));
-    } else if (userRole === 'CLERICAL') {
-      // CLERICAL: Sees work scope, estimate, tender records, and audit events.
-      ticketData.attachments = attachments;
-      ticketData.report = reports.length > 0 ? reports[0] : null;
-      ticketData.tenders = tenders;
-      ticketData.bills = bills;
-      ticketData.audit_logs = auditLogs;
-    } else if (userRole === 'ACCOUNTANT') {
-      // ACCOUNTANT: Sees work scope, estimates, awarded contracts, bill ledger, and audit events.
-      ticketData.attachments = attachments;
-      ticketData.report = reports.length > 0 ? reports[0] : null;
-      ticketData.tenders = tenders;
-      ticketData.bills = bills;
-      ticketData.audit_logs = auditLogs;
+    const ticketData = buildTicketDetails(viewer, ticketRow, {
+      attachments, reports, tenders, bills, auditLogs, messages,
+    });
+
+    // The buttons the UI may render come from the same state machine that
+    // enforces them on POST /actions (fixes F3: no hardcoded ceilings in the UI).
+    // Only a viewer with a staff view can hold a desk; the applicant view gets none.
+    if (staffRole(viewer, ticketRow) !== null) {
+      ticketData.open_change_request_id = ticketRow.open_change_request_id ?? null;
+      const ctx = await loadActionContext(pool, ticketRow, { id: userId, role: userRole });
+      ticketData.available_actions = availableActions({ id: userId, role: userRole }, ctx.ticket, ctx.limits);
+      // Limits and lower-desk names for the UI: it must never hardcode either (F3).
+      if (ticketData.available_actions.actions.length > 0) {
+        ticketData.approval_limit = approvalLimitFor(ticketData.available_actions.desk, ctx.limits);
+        const people = {};
+        for (const d of ctx.ticket.desk_owners ? Object.keys(ctx.ticket.desk_owners) : []) {
+          const owner = await findDeskOwner(pool, ticketRow, d);
+          if (owner) people[d] = owner.name;
+        }
+        ticketData.desk_people = people;
+      }
     } else {
-      // AUTHORITY ROLES (AE, SE, DEAN, DIRECTOR, SYSADMIN): Full unredacted visibility
-      ticketData.attachments = attachments;
-      ticketData.report = reports.length > 0 ? reports[0] : null;
-      ticketData.tenders = tenders;
-      ticketData.bills = bills;
-      ticketData.audit_logs = auditLogs;
+      ticketData.available_actions = { desk: null, actions: [] };
     }
 
     res.json({ success: true, ticket: ticketData });
   } catch (error) {
-    console.error('getTicketDetails error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    return sendServerError(req, res, error, 'getTicketDetails error');
   }
 });
 

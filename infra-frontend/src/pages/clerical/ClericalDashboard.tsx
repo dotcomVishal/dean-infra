@@ -6,6 +6,7 @@ import {
   FileText
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
 
 interface TenderTicket {
   id: number;
@@ -102,13 +103,13 @@ export default function ClericalDashboard() {
     try {
       const res = await api.post(`/tickets/${selectedTicket.id}/tenders`, nitData);
       if (res.data.success) {
-        alert(`Tender notice published on ${nitData.portal_type}. Status updated to TENDER_PUBLISHED.`);
+        toast.success(`Tender notice published on ${nitData.portal_type}. Status updated to TENDER_PUBLISHED.`);
         setPublishModalOpen(false);
         fetchTickets();
       }
     } catch (err: any) {
       console.error('Publish tender error:', err);
-      alert(err.response?.data?.message || 'Failed to publish tender.');
+      toast.error(err.response?.data?.message || 'Failed to publish tender.');
     } finally {
       setSubmitting(false);
     }
@@ -134,13 +135,13 @@ export default function ClericalDashboard() {
     try {
       const res = await api.post(`/tickets/${selectedTicket.id}/tenders/award`, awardData);
       if (res.data.success) {
-        alert('Work contract awarded successfully. Ticket moved to WORK_IN_PROGRESS.');
+        toast.success('Work contract awarded successfully. Ticket moved to WORK_IN_PROGRESS.');
         setAwardModalOpen(false);
         fetchTickets();
       }
     } catch (err: any) {
       console.error('Award tender error:', err);
-      alert(err.response?.data?.message || 'Failed to award contract.');
+      toast.error(err.response?.data?.message || 'Failed to award contract.');
     } finally {
       setSubmitting(false);
     }

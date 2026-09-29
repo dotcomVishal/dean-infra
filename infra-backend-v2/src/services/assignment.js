@@ -27,9 +27,10 @@
 //  the pick and the ticket insert that follows it are one atomic unit.
 // ============================================================
 
-// A JE/AE "counts" as busy while their ticket is still open with them. The
-// workflow rewrite (Phase 4) renames RETURNED_TO_JE -> CHANGES_REQUESTED;
-// until then this is the current model's equivalent set.
+import { resolveAeForScope, fallbackSysadmin } from '../models/deskModel.js';
+
+// A JE "counts" as busy while their ticket is still open with them
+// (RETURNED_TO_JE is this codebase's name for "changes requested").
 const OPEN_WITH_JE_STATUSES = ['ASSIGNED_TO_JE', 'RETURNED_TO_JE'];
 
 /**
@@ -73,34 +74,6 @@ export async function pickAvailableJe(connection, { department, campus }) {
     if (locked.length > 0) return locked[0];
   }
   return null;
-}
-
-/**
- * The AE for a (department, campus) scope -- exact match or a BOTH-campus
- * AE. Never the AE of the other campus (plan.md Q8: no cross-campus
- * fallback).
- */
-async function resolveAeForScope(connection, { department, campus }) {
-  const [rows] = await connection.query(
-    `SELECT u.id, u.name, u.email
-       FROM users u
-       JOIN user_scopes s ON s.user_id = u.id
-      WHERE u.role = 'AE' AND u.is_active = TRUE
-        AND s.department = ? AND s.campus IN (?, 'BOTH')
-      ORDER BY u.id ASC
-      LIMIT 1`,
-    [department, campus]
-  );
-  return rows[0] ?? null;
-}
-
-/** Last-resort desk owner if a scope has no AE configured at all (a roster
- *  gap, not an expected outcome) -- the ticket must still land somewhere. */
-async function fallbackSysadmin(connection) {
-  const [rows] = await connection.query(
-    `SELECT id, name, email FROM users WHERE role = 'SYSADMIN' AND is_active = TRUE ORDER BY id ASC LIMIT 1`
-  );
-  return rows[0] ?? null;
 }
 
 /**

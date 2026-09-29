@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { api } from '../../services/api';
+import DeskBoard from '../../components/DeskBoard';
 
 export interface JeTicket {
   id: number;
@@ -205,6 +206,11 @@ export default function JeDashboard() {
           </button>
         </div>
       </div>
+
+      {/* Desk board: My desk (SLA ageing), Watching, My tickets */}
+      <DeskBoard />
+
+      <h2 className="pt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">All my works</h2>
 
       {/* STAT CARDS (Matches Clean Dashboard Cards) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
