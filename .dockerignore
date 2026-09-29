@@ -35,3 +35,6 @@ infra-backend-v2/uploads/*
 Thumbs.db
 *.log
 coverage
+
+backups
+.update.lock

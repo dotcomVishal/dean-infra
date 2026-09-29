@@ -48,3 +48,6 @@ coverage/
 
 plan.md
 Progress.md
+# ---- Deploy artefacts (update.sh) ----
+backups/
+.update.lock
