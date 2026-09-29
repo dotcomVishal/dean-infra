@@ -68,9 +68,20 @@ docker compose config -q || fail "docker-compose.yml / .env does not validate"
 if [ "${SKIP_BACKUP:-0}" != "1" ] && [ -n "$(docker compose ps -q --status running mysql 2>/dev/null)" ]; then
   log "Backup database"
   DUMP="backups/deanery_infra_$(date +%Y%m%d_%H%M%S).sql.gz"
-  docker compose exec -T mysql sh -c \
+  TMP_DUMP="${DUMP}.tmp"
+  if docker compose exec -T mysql sh -c \
     'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --no-tablespaces "$MYSQL_DATABASE"' \
-    | gzip > "$DUMP" || { rm -f "$DUMP"; fail "database backup failed; deploy aborted, nothing was changed"; }
+    | gzip > "$TMP_DUMP"; then
+    :
+  elif docker compose exec -T mysql sh -c \
+    'mysqldump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines --no-tablespaces "$MYSQL_DATABASE"' \
+    | gzip > "$TMP_DUMP"; then
+    echo "WARNING: root dump authentication failed; backup used MYSQL_USER instead"
+  else
+    rm -f "$TMP_DUMP" "$DUMP"
+    fail "database backup failed; deploy aborted, nothing was changed"
+  fi
+  mv "$TMP_DUMP" "$DUMP"
   echo "Saved ${DUMP}"
   # shellcheck disable=SC2012
   ls -1t backups/deanery_infra_*.sql.gz 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | xargs -r rm -f --
