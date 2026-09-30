@@ -10,7 +10,7 @@
 //  then every 24 h. The AE is copied from the 4th reminder onwards (Q10).
 //  Applicant mail = stage + portal link only (emailTemplates.applicantStageEmail).
 // ============================================================
-import { STATUS, ACTION } from '../config/workflow.js';
+import { STATUS, ACTION, deskForStatus } from '../config/workflow.js';
 import { findDeskOwner } from '../models/deskModel.js';
 import * as notificationModel from '../models/notificationModel.js';
 import { stageLabel } from './visibility.js';
@@ -44,7 +44,7 @@ async function loadTicketBrief(connection, ticketId) {
   const [rows] = await connection.query(
     `SELECT t.id, t.title, t.department, t.campus, t.category, t.priority, t.type, t.description,
             t.building, t.landmark, t.contact_phone, t.status, t.applicant_id, t.assigned_je_id,
-            t.current_desk_user_id,
+            t.current_desk_user_id, t.is_mock,
             u.name AS applicant_name, u.email AS applicant_email, u.phone AS applicant_phone
        FROM tickets t JOIN users u ON u.id = t.applicant_id WHERE t.id = ?`,
     [ticketId]
@@ -99,6 +99,7 @@ export async function notifyApplicantStage(connection, { ticketId, applicantId, 
 /** Ticket just raised. `assignment` = result of services/assignment.assignTicket. */
 export async function notifyTicketCreated(connection, { ticketId, assignment, now = new Date() }) {
   const t = await loadTicketBrief(connection, ticketId);
+  if (t.is_mock) return; // Sysadmin test ticket: no mail, no reminders
   const owner = assignment.deskUser;
   if (assignment.status === STATUS.ASSIGNED_TO_JE) {
     await startDeskReminders(connection, {
@@ -120,6 +121,7 @@ export async function notifyTransition(connection, {
   actor, message = null, now = new Date(),
 }) {
   const t = await loadTicketBrief(connection, ticketId);
+  if (t.is_mock) return;
   await stopReminders(connection, ticketId);
 
   if (action === ACTION.ASSIGN_JE) {
@@ -167,6 +169,7 @@ export async function notifyTransition(connection, {
 /** Tender / award / closure (Clerical or JE milestone): tell the JE and the AE, and the applicant if the stage moved. */
 export async function notifyPostApproval(connection, { ticketId, fromStatus, toStatus, headline, now = new Date() }) {
   const t = await loadTicketBrief(connection, ticketId);
+  if (t.is_mock) return;
   await stopReminders(connection, ticketId);
   const je = await loadUser(connection, t.assigned_je_id);
   const ae = await findDeskOwner(connection, t, 'AE');
@@ -181,8 +184,9 @@ export async function notifyPostApproval(connection, { ticketId, fromStatus, toS
 }
 
 /** SYSADMIN override: restart the right reminder series for wherever the ticket ended up. */
-export async function notifyAdminOverride(connection, { ticketId, fromStatus, now = new Date() }) {
+export async function notifyAdminOverride(connection, { ticketId, fromStatus, newHolder = null, now = new Date() }) {
   const t = await loadTicketBrief(connection, ticketId);
+  if (t.is_mock) return;
   await stopReminders(connection, ticketId);
 
   if (JE_STAGE_STATUSES.includes(t.status)) {
@@ -200,6 +204,15 @@ export async function notifyAdminOverride(connection, { ticketId, fromStatus, no
         ticketId, desk: 'AE', user: ae, email: unassignedEmail(assignmentFields(t, ae)), now,
       });
     }
+  } else if (newHolder && t.current_desk_user_id === newHolder.id) {
+    // Approval desks (AE/SE/Dean/Director): tell the new holder the ticket is theirs.
+    await queueEmail(connection, {
+      ticketId, toUserId: newHolder.id, now,
+      email: movementEmail({
+        ticketId, title: t.title, recipientName: newHolder.name, desk: deskForStatus(t.status),
+        headline: 'Awaiting your review',
+      }),
+    });
   }
   if (t.status !== fromStatus) {
     await notifyApplicantStage(connection, {

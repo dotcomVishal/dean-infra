@@ -51,6 +51,7 @@ export function buildViewer(user, ticket, facts = {}) {
   const campusOk = (s) => ticket.campus == null || s.campus === 'BOTH' || s.campus === ticket.campus;
   const aeInScope = role === 'AE' && (
     ticket.current_desk_user_id === user.id
+    || ticket.assigned_ae_id === user.id // pinned holder keeps sight after the ticket moves on
     || (scopes.length > 0
       ? scopes.some((s) => s.department === ticket.department && campusOk(s))
       : user.department === ticket.department) // legacy AE with no user_scopes rows
@@ -187,6 +188,7 @@ export function filterAudit(viewer, ticket, rows) {
     action: r.action, remarks, created_at: r.created_at, actor_role: r.actor_role,
     ...(withName ? { actor_name: r.actor_name } : {}),
     from_desk: r.from_desk ?? null, to_desk: r.to_desk ?? null,
+    is_self_action: !!r.is_self_action,
   });
 
   if (staff === 'SYSADMIN') return rows.map((r) => shape(r, { remarks: r.remarks, withName: true }));

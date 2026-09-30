@@ -30,6 +30,17 @@ const neutralRemark = (t, actorName) => {
   }
 };
 
+/** Column values that pin the AE / SE holder when the ticket lands at that desk (undefined = leave as is). */
+export const pinsFor = (toDesk, owner) => {
+  if (!owner || owner.role !== toDesk) return {};
+  if (toDesk === 'AE') return { assignedAeId: owner.id };
+  if (toDesk === 'SE') return { assignedSeId: owner.id };
+  return {};
+};
+
+/** Actor is the person who raised the ticket. Test tickets are always raised by the Sysadmin, so they never count. */
+export const isSelfAction = (ticketRow, userId) => !ticketRow.is_mock && ticketRow.applicant_id === userId;
+
 export const performTicketAction = async (req, res) => {
   const ticketId = Number.parseInt(req.params.ticket_id, 10);
   if (!Number.isInteger(ticketId) || ticketId <= 0) {
@@ -100,10 +111,13 @@ export const performTicketAction = async (req, res) => {
             : {},
         });
 
+    // Landing at AE/SE pins the holder, so later scope changes cannot move the
+    // ticket to someone else and an override sticks (plan2.md F1).
+    const pins = pinsFor(t.toDesk, nextDeskUser);
     const applied = await ticketModel.applyTransition(connection, {
       ticketId, fromStatus: t.fromStatus, toStatus: t.toStatus,
       currentDeskUserId: nextDeskUser ? nextDeskUser.id : null,
-      openChangeRequestId: carriedOpen, assignedJeId,
+      openChangeRequestId: carriedOpen, assignedJeId, ...pins,
     });
     if (!applied) {
       throw new WorkflowError('This ticket changed while you were working on it. Reload and try again.',
@@ -114,6 +128,7 @@ export const performTicketAction = async (req, res) => {
       ticketId, userId: user.id, action: t.logAction, remarks: neutralRemark(t, req.user.name),
       fromStatus: t.fromStatus, toStatus: t.toStatus, fromDesk: t.fromDesk, toDesk: t.toDesk,
       visibility: opensNewRequest ? 'INTERNAL' : 'ALL',
+      isSelfAction: isSelfAction(row, user.id),
     });
 
     // to_user_id is resolved now so the record says exactly who received it.

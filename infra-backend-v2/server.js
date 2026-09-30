@@ -3,6 +3,7 @@ import 'dotenv/config';   // MUST be first: loads .env before anything reads pro
 import app from './src/app.js';
 import pool from './src/config/db.js'; // This triggers the database connection confirmation
 import { runMigrations } from './src/config/migrate.js';
+import { logDeskHealth } from './src/services/deskHealth.js';
 import { startEmailWorker } from './src/cron/emailReminders.js';
 import logger, { errorFields } from './src/utils/logger.js';
 
@@ -18,7 +19,13 @@ const PORT = process.env.PORT || 5000;
     logger.error('migration startup failed', errorFields(err));
     process.exit(1);
   }
-  
+
+  try {
+    await logDeskHealth(pool);
+  } catch (err) {
+    logger.error('desk health check failed', errorFields(err));
+  }
+
   app.listen(PORT, () => {
     logger.info('server listening', { port: PORT });
     startEmailWorker(); // outbox + reminder worker (every minute)

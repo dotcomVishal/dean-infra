@@ -4,6 +4,9 @@
 //  Rules, in order:
 //    1. Candidate JEs = active, scope matches (department, campus) or
 //       (department, 'BOTH'), and no user_availability row covers NOW().
+//       A JE who raised the ticket is ranked last: they get it only when no
+//       other JE is available (plan2.md decision 1, self-assignment is
+//       allowed and flagged in the audit log, never blocked).
 //    2. Pick the one with the lowest open-ticket count; ties broken by
 //       last_assigned_at (round robin), then id (deterministic).
 //    3. SELECT ... FOR UPDATE SKIP LOCKED on the candidate row, so two
@@ -38,7 +41,7 @@ const OPEN_WITH_JE_STATUSES = ['ASSIGNED_TO_JE', 'RETURNED_TO_JE'];
  * locks their row so a concurrent pick cannot land on the same person.
  * @returns {Promise<{id:number, name:string, email:string}|null>}
  */
-export async function pickAvailableJe(connection, { department, campus }) {
+export async function pickAvailableJe(connection, { department, campus, applicantId = null }) {
   // Step 1: rank candidates. Plain read, no lock -- open-ticket counts are a
   // snapshot used only to order the claim attempts below.
   const [candidates] = await connection.query(
@@ -53,13 +56,14 @@ export async function pickAvailableJe(connection, { department, campus }) {
           SELECT 1 FROM user_availability a
            WHERE a.user_id = u.id AND NOW() BETWEEN a.start_at AND a.end_at
         )
-      ORDER BY (
+      ORDER BY (u.id = ?) ASC,
+        (
           SELECT COUNT(*) FROM tickets t
-           WHERE t.assigned_je_id = u.id AND t.status IN (?)
+           WHERE t.assigned_je_id = u.id AND t.status IN (?) AND t.is_mock = FALSE
         ) ASC,
         u.last_assigned_at ASC,
         u.id ASC`,
-    [department, campus, OPEN_WITH_JE_STATUSES]
+    [department, campus, applicantId, OPEN_WITH_JE_STATUSES]
   );
 
   // Step 2: claim in rank order. A single-table FOR UPDATE SKIP LOCKED per
@@ -85,8 +89,8 @@ export async function pickAvailableJe(connection, { department, campus }) {
  *   deskUser: {id:number, name:string, email:string},
  * }>}
  */
-export async function assignTicket(connection, { department, campus }) {
-  const je = await pickAvailableJe(connection, { department, campus });
+export async function assignTicket(connection, { department, campus, applicantId = null }) {
+  const je = await pickAvailableJe(connection, { department, campus, applicantId });
   if (je) {
     await connection.query('UPDATE users SET last_assigned_at = NOW() WHERE id = ?', [je.id]);
     return { status: 'ASSIGNED_TO_JE', assignedJeId: je.id, currentDeskUserId: je.id, deskUser: je };

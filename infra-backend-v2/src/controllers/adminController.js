@@ -1,4 +1,9 @@
 import pool from '../config/db.js';
+import { STATUS, WorkflowError, deskForStatus } from '../config/workflow.js';
+import { resolveDeskOwner, loadAssignees } from '../models/deskModel.js';
+import { insertAudit } from '../models/auditModel.js';
+import { checkSingleHolders } from '../services/deskHealth.js';
+import { pinsFor, isSelfAction } from './actionController.js';
 import { notifyAdminOverride } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { sendServerError } from '../utils/httpError.js';
@@ -8,17 +13,17 @@ export const getAdminMetrics = async (req, res) => {
   try {
     // Ticket status counts
     const [statusCounts] = await pool.query(`
-      SELECT status, COUNT(*) as count FROM tickets GROUP BY status
+      SELECT status, COUNT(*) as count FROM tickets WHERE is_mock = FALSE GROUP BY status
     `);
 
     // Department counts
     const [deptCounts] = await pool.query(`
-      SELECT department, COUNT(*) as count FROM tickets GROUP BY department
+      SELECT department, COUNT(*) as count FROM tickets WHERE is_mock = FALSE GROUP BY department
     `);
 
     // Work type counts
     const [typeCounts] = await pool.query(`
-      SELECT type, COUNT(*) as count FROM tickets GROUP BY type
+      SELECT type, COUNT(*) as count FROM tickets WHERE is_mock = FALSE GROUP BY type
     `);
 
     // User counts by role
@@ -32,6 +37,8 @@ export const getAdminMetrics = async (req, res) => {
       SELECT COALESCE(SUM(r.estimated_amount), 0) as total_estimated_amount
       FROM reports r
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
+      JOIN tickets t ON t.id = r.ticket_id
+      WHERE t.is_mock = FALSE
     `);
 
     const [financeSum] = await pool.query(`
@@ -40,20 +47,21 @@ export const getAdminMetrics = async (req, res) => {
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
       JOIN tickets t ON t.id = r.ticket_id
       WHERE t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED')
+        AND t.is_mock = FALSE
     `);
 
     // JE Workloads
     const [jeWorkloads] = await pool.query(`
       SELECT u.id, u.name as full_name, u.email, u.department, COUNT(t.id) as active_tickets_count
       FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED')
+      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED') AND t.is_mock = FALSE
       WHERE u.role = 'JE' AND u.is_active = TRUE
       GROUP BY u.id, u.name, u.email, u.department
       ORDER BY active_tickets_count DESC
     `);
 
     // Total ticket count
-    const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM tickets`);
+    const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM tickets WHERE is_mock = FALSE`);
     const [totalUsersRow] = await pool.query(`SELECT COUNT(*) as total FROM users`);
 
     // Calculate stage groups
@@ -75,6 +83,12 @@ export const getAdminMetrics = async (req, res) => {
         closed += c;
       }
     }
+
+    const deskHealth = await checkSingleHolders(pool);
+    const [[selfRow]] = await pool.query(`
+      SELECT COUNT(*) AS n FROM audit_logs a JOIN tickets t ON t.id = a.ticket_id
+       WHERE a.is_self_action = TRUE AND t.is_mock = FALSE AND a.created_at >= NOW() - INTERVAL 30 DAY
+    `);
 
     const byDepartment = deptCounts.map(d => ({ department: d.department, count: Number(d.count) }));
     const byStatus = statusCounts.map(s => ({ status: s.status, count: Number(s.count) }));
@@ -100,7 +114,9 @@ export const getAdminMetrics = async (req, res) => {
         typeCounts,
         userRoleCounts,
         jeWorkloads,
+        selfActions30d: Number(selfRow.n),
       },
+      desk_health: deskHealth,
     });
   } catch (error) {
     return sendServerError(req, res, error, 'getAdminMetrics error');
@@ -109,14 +125,15 @@ export const getAdminMetrics = async (req, res) => {
 
 // 2. Master Tickets Query (with advanced filters & search)
 export const getAllTickets = async (req, res) => {
-  const { search, status, department, type, page = 1, limit = 25 } = req.query;
+  const { search, status, department, type, page = 1, limit = 25, include_mock } = req.query;
   const pageNum = parseInt(page, 10) || 1;
   const limitNum = parseInt(limit, 10) || 25;
   const offset = (pageNum - 1) * limitNum;
 
   let query = `
     SELECT 
-      t.id, t.title, t.department, t.type, t.description, t.location, t.status, t.created_at,
+      t.id, t.title, t.department, t.type, t.description, t.location, t.status, t.created_at, t.is_mock,
+      u_hold.name as current_holder_name,
       u_app.name as applicant_name, u_app.email as applicant_email, u_app.phone as applicant_phone,
       u_je.name as je_name, u_je.email as je_email,
       r.estimated_amount, r.nature_of_work,
@@ -124,6 +141,7 @@ export const getAllTickets = async (req, res) => {
     FROM tickets t
     JOIN users u_app ON t.applicant_id = u_app.id
     LEFT JOIN users u_je ON t.assigned_je_id = u_je.id
+    LEFT JOIN users u_hold ON t.current_desk_user_id = u_hold.id
     LEFT JOIN (
       SELECT r1.* FROM reports r1
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r2
@@ -132,6 +150,8 @@ export const getAllTickets = async (req, res) => {
     WHERE 1=1
   `;
   const params = [];
+
+  if (include_mock !== '1') query += ' AND t.is_mock = FALSE';
 
   if (search) {
     query += ` AND (t.title LIKE ? OR t.description LIKE ? OR t.id = ? OR u_app.name LIKE ? OR t.location LIKE ?)`;
@@ -219,6 +239,7 @@ export const getTicketMasterDetails = async (req, res) => {
       [ticket_id]
     );
     ticketData.audit_logs = auditLogs;
+    ticketData.assignees = await loadAssignees(pool, ticketData, 'SYSADMIN');
 
     res.json({ success: true, ticket: ticketData });
   } catch (error) {
@@ -226,77 +247,136 @@ export const getTicketMasterDetails = async (req, res) => {
   }
 };
 
-// 4. Admin Master Override: Force change status and/or reassign JE
+// 4. Admin Master Override: force the status and/or reassign the holder of any desk.
+//    Body: { remarks, new_status?, reassign?: { desk, user_id } }
+//    Legacy body { new_assigned_je_id } still means reassign JE.
+const REASSIGN_DESKS = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'];
+const OPEN_JE_STATUSES = ['ASSIGNED_TO_JE', 'RETURNED_TO_JE'];
+
+const badRequest = (message, code = 'BAD_REQUEST') => new WorkflowError(message, { code, status: 400 });
+
+// JE/AE work inside a (department, campus) scope. An override may go outside it; the audit line says so.
+async function outsideScope(connection, user, ticket) {
+  if (user.role !== 'JE' && user.role !== 'AE') return false;
+  const [rows] = await connection.query(
+    `SELECT 1 FROM user_scopes s
+      WHERE s.user_id = ? AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH')) LIMIT 1`,
+    [user.id, ticket.department, ticket.campus ?? null, ticket.campus ?? null]);
+  return rows.length === 0;
+}
+
 export const overrideTicketStatus = async (req, res) => {
   const { ticket_id } = req.params;
   const new_status = req.body.new_status || req.body.status;
-  const new_assigned_je_id = req.body.new_assigned_je_id || req.body.assigned_to_user_id;
+  const legacyJeId = req.body.new_assigned_je_id || req.body.assigned_to_user_id;
+  const reassign = req.body.reassign
+    ?? (legacyJeId ? { desk: 'JE', user_id: legacyJeId } : null);
   const remarks = req.body.remarks;
   const adminId = req.user.id;
   const adminName = req.user.name;
 
   if (!remarks || !remarks.trim()) {
-    return res.status(400).json({ success: false, message: 'Administrative reason / remarks are strictly required for an override.' });
+    return res.status(400).json({ success: false, message: 'A reason is required.' });
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const [rows] = await connection.query(
-      'SELECT id, status, title, assigned_je_id, department FROM tickets WHERE id = ? FOR UPDATE',
-      [ticket_id]
-    );
+    const [rows] = await connection.query('SELECT * FROM tickets WHERE id = ? FOR UPDATE', [ticket_id]);
     if (rows.length === 0) {
-      throw new Error(`Ticket #${ticket_id} not found.`);
+      throw new WorkflowError(`Ticket #${ticket_id} not found.`, { code: 'NOT_FOUND', status: 404 });
     }
-
-    const currentTicket = rows[0];
-    const updates = [];
-    const updateParams = [];
+    const current = rows[0];
     let auditRemarks = `[SYSADMIN OVERRIDE by ${adminName}]: ${remarks.trim()}`;
 
-    // Handle status change
-    let finalStatus = currentTicket.status;
-    if (new_status && new_status !== currentTicket.status) {
-      updates.push('status = ?');
-      updateParams.push(new_status);
-      finalStatus = new_status;
-      auditRemarks += ` | Status changed from ${currentTicket.status} to ${new_status}`;
+    // ---- validate the request before touching anything --------------------------------
+    if (new_status !== undefined && new_status !== null && new_status !== '' && !Object.values(STATUS).includes(new_status)) {
+      throw badRequest(`Unknown status '${new_status}'.`, 'INVALID_STATUS');
     }
+    const statusChanged = !!new_status && new_status !== current.status;
+    const finalStatus = statusChanged ? new_status : current.status;
 
-    // Handle JE reassignment
-    if (new_assigned_je_id && parseInt(new_assigned_je_id, 10) !== currentTicket.assigned_je_id) {
-      const [jeUser] = await connection.query(
-        'SELECT id, name, email FROM users WHERE id = ? AND role = "JE"',
-        [new_assigned_je_id]
-      );
-      if (jeUser.length === 0) {
-        throw new Error('Target user is not a valid Junior Engineer.');
+    let target = null;
+    if (reassign) {
+      const userId = Number.parseInt(reassign.user_id, 10);
+      if (!REASSIGN_DESKS.includes(reassign.desk)) {
+        throw badRequest(`desk must be one of ${REASSIGN_DESKS.join(', ')}.`, 'INVALID_DESK');
       }
-      updates.push('assigned_je_id = ?');
-      updateParams.push(new_assigned_je_id);
-      auditRemarks += ` | Reassigned to JE ${jeUser[0].name} (${jeUser[0].email})`;
+      if (!Number.isInteger(userId) || userId <= 0) throw badRequest('user_id must be a positive integer.', 'INVALID_ASSIGNEE');
+      const [users] = await connection.query(
+        'SELECT id, name, email, role, is_active FROM users WHERE id = ?', [userId]);
+      const u = users[0];
+      if (!u || !u.is_active || u.role !== reassign.desk) {
+        throw badRequest(`User ${userId} is not an active ${reassign.desk}.`, 'INVALID_ASSIGNEE');
+      }
+      target = { desk: reassign.desk, user: u };
     }
 
-    if (updates.length > 0) {
-      updateParams.push(ticket_id);
+    // ---- compute the new row ---------------------------------------------------------------
+    const set = {};
+    if (statusChanged) {
+      set.status = finalStatus;
+      set.status_changed_at = new Date();
+      auditRemarks += ` | Status changed from ${current.status} to ${finalStatus}`;
+    }
+    const next = { ...current, ...set };
+    if (target) {
+      const column = { JE: 'assigned_je_id', AE: 'assigned_ae_id', SE: 'assigned_se_id' }[target.desk];
+      if (column) {
+        set[column] = target.user.id;
+        next[column] = target.user.id;
+        if (target.desk === 'JE') set.assigned_at = new Date();
+      }
+      auditRemarks += ` | Reassigned ${target.desk} to ${target.user.name} (${target.user.email})`;
+      if (await outsideScope(connection, target.user, current)) {
+        auditRemarks += ` | Note: ${target.user.name} has no scope for ${current.department}/${current.campus ?? 'any campus'}`;
+      }
+    }
+
+    // Who must act now. Reassigning the desk the ticket sits at hands it over; a forced
+    // status recomputes the holder (pins are honoured); otherwise nothing changes.
+    const deskNow = deskForStatus(finalStatus);
+    let nextHolder = null;
+    if (target && target.desk === deskNow) {
+      nextHolder = target.user;
+    } else if (statusChanged) {
+      nextHolder = deskNow ? await resolveDeskOwner(connection, next, deskNow) : null;
+      if (deskNow && !nextHolder) {
+        throw new WorkflowError(`Nobody is available at the ${deskNow} desk for this ticket.`,
+          { code: 'NO_DESK_OWNER', status: 409 });
+      }
+      if (nextHolder) {
+        const pins = pinsFor(deskNow, nextHolder);
+        if (pins.assignedAeId !== undefined) set.assigned_ae_id = pins.assignedAeId;
+        if (pins.assignedSeId !== undefined) set.assigned_se_id = pins.assignedSeId;
+      }
+    }
+    const holderChanged = (target && target.desk === deskNow) || statusChanged;
+    if (holderChanged) set.current_desk_user_id = nextHolder ? nextHolder.id : null;
+
+    // ---- write ------------------------------------------------------------------------------------
+    const columns = Object.keys(set);
+    if (columns.length > 0) {
       await connection.query(
-        `UPDATE tickets SET ${updates.join(', ')} WHERE id = ?`,
-        updateParams
-      );
+        `UPDATE tickets SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
+        [...columns.map((c) => set[c]), ticket_id]);
     }
 
-    // Record immutable audit log
-    await connection.query(
-      'INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)',
-      [ticket_id, adminId, 'OVERRIDE', auditRemarks]
-    );
+    await insertAudit(connection, {
+      ticketId: Number(ticket_id), userId: adminId, action: target ? 'REASSIGNED' : 'OVERRIDE',
+      remarks: auditRemarks,
+      fromStatus: current.status, toStatus: finalStatus,
+      fromDesk: deskForStatus(current.status), toDesk: target ? target.desk : deskNow,
+      isSelfAction: isSelfAction(current, adminId),
+    });
 
     // Restart the right reminder series for wherever the ticket now sits, and
-    // tell the new JE / the applicant (stage only) -- same transaction.
-    if (updates.length > 0) {
-      await notifyAdminOverride(connection, { ticketId: ticket_id, fromStatus: currentTicket.status });
+    // tell the new holder / the applicant (stage only) -- same transaction.
+    if (columns.length > 0) {
+      await notifyAdminOverride(connection, {
+        ticketId: ticket_id, fromStatus: current.status, newHolder: holderChanged ? nextHolder : null,
+      });
     }
 
     await connection.commit();
@@ -305,15 +385,59 @@ export const overrideTicketStatus = async (req, res) => {
     res.json({
       success: true,
       status: finalStatus,
-      message: 'Ticket administratively updated and audit record logged.',
+      current_desk_user_id: set.current_desk_user_id !== undefined ? set.current_desk_user_id : current.current_desk_user_id,
+      message: 'Ticket updated.',
     });
   } catch (error) {
     await connection.rollback();
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
     return sendServerError(req, res, error, 'overrideTicketStatus error');
   } finally {
     connection.release();
   }
 };
+
+// Staff directory for the override form: active users of one desk, best match first.
+export const getStaff = async (req, res) => {
+  const { role, department, campus } = req.query;
+  if (!REASSIGN_DESKS.includes(role)) {
+    return res.status(400).json({ success: false, message: `role must be one of ${REASSIGN_DESKS.join(', ')}.` });
+  }
+  const load = role === 'JE'
+    ? `(SELECT COUNT(*) FROM tickets t WHERE t.assigned_je_id = u.id AND t.status IN (?) AND t.is_mock = FALSE)`
+    : `(SELECT COUNT(*) FROM tickets t WHERE t.current_desk_user_id = u.id AND t.status NOT IN ('CLOSED','DENIED') AND t.is_mock = FALSE)`;
+  const loadParams = role === 'JE' ? [OPEN_JE_STATUSES] : [];
+  try {
+    const [rows] = await pool.query(
+      `SELECT u.id, u.name, u.email, u.department, u.campus, ${load} AS open_tickets,
+              EXISTS (SELECT 1 FROM user_scopes s
+                       WHERE s.user_id = u.id AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))) AS scope_match,
+              EXISTS (SELECT 1 FROM user_availability a
+                       WHERE a.user_id = u.id AND NOW() BETWEEN a.start_at AND a.end_at) AS on_leave
+         FROM users u
+        WHERE u.role = ? AND u.is_active = TRUE
+        ORDER BY scope_match DESC, on_leave ASC, open_tickets ASC, u.name ASC`,
+      [...loadParams, department ?? null, campus ?? null, campus ?? null, role]
+    );
+    res.json({
+      success: true,
+      staff: rows.map((r) => ({
+        id: r.id, name: r.name, email: r.email, department: r.department, campus: r.campus,
+        open_tickets: Number(r.open_tickets), scope_match: !!r.scope_match && !!department, on_leave: !!r.on_leave,
+      })),
+    });
+  } catch (error) {
+    return sendServerError(req, res, error, 'getStaff error');
+  }
+};
+
+// Dean and Director are single-holder desks: tell the Sysadmin when an edit leaves one of them not at exactly one real holder.
+async function deskWarnings(roles) {
+  const health = await checkSingleHolders(pool);
+  return [...new Set(roles)].filter((r) => health[r] && !health[r].ok).map((r) => health[r].message);
+}
 
 // 5. User Account Management
 export const getAllUsers = async (req, res) => {
@@ -376,7 +500,8 @@ export const createUser = async (req, res) => {
     );
 
     const [createdUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
-    res.json({ success: true, user: createdUsers[0] });
+    const warnings = await deskWarnings([role]);
+    res.json({ success: true, user: createdUsers[0], ...(warnings.length ? { warnings } : {}) });
   } catch (error) {
     return sendServerError(req, res, error, 'createUser error');
   }
@@ -421,11 +546,13 @@ export const updateUser = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No fields provided for update.' });
     }
 
+    const [before] = await pool.query('SELECT role FROM users WHERE id = ?', [id]);
     params.push(id);
     await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
     const [updatedUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
-    res.json({ success: true, user: updatedUsers[0] });
+    const warnings = await deskWarnings([before[0]?.role, updatedUsers[0]?.role]);
+    res.json({ success: true, user: updatedUsers[0], ...(warnings.length ? { warnings } : {}) });
   } catch (error) {
     return sendServerError(req, res, error, 'updateUser error');
   }
@@ -433,7 +560,7 @@ export const updateUser = async (req, res) => {
 
 // 8. Global Audit Trail Stream
 export const getMasterAuditLogs = async (req, res) => {
-  const { ticket_id, page = 1, limit = 50 } = req.query;
+  const { ticket_id, page = 1, limit = 50, self_only, include_mock } = req.query;
   const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);
 
   let query = `
@@ -452,6 +579,8 @@ export const getMasterAuditLogs = async (req, res) => {
     query += ` AND a.ticket_id = ?`;
     params.push(ticket_id);
   }
+  if (self_only === '1') query += ` AND a.is_self_action = TRUE`;
+  if (include_mock !== '1') query += ` AND t.is_mock = FALSE`;
 
   query += ` ORDER BY a.created_at DESC LIMIT ? OFFSET ?`;
   params.push(parseInt(limit, 10), offset);
@@ -470,7 +599,7 @@ export const getActiveJes = async (req, res) => {
     const [jes] = await pool.query(`
       SELECT u.id, u.name, u.email, u.department, COUNT(t.id) as active_tickets
       FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED')
+      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED') AND t.is_mock = FALSE
       WHERE u.role = 'JE' AND u.is_active = TRUE
       GROUP BY u.id, u.name, u.email, u.department
       ORDER BY u.department, u.name

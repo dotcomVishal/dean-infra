@@ -30,7 +30,7 @@ export const downloadAttachment = async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT a.id, a.file_url, a.document_category, a.uploaded_by, u.role AS uploader_role,
-              t.id AS ticket_id, t.applicant_id, t.assigned_je_id, t.current_desk_user_id,
+              t.id AS ticket_id, t.applicant_id, t.assigned_je_id, t.assigned_ae_id, t.current_desk_user_id,
               t.department, t.campus, t.status
          FROM attachments a
          JOIN tickets t ON t.id = a.ticket_id

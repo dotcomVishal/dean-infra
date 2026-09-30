@@ -5,7 +5,7 @@
 // tickets" goes through the applicant projection, so it can never carry a
 // staff name, phone or estimate.
 import pool from '../config/db.js';
-import { STATUS, DESK_RANK, approvalLimitFor } from '../config/workflow.js';
+import { STATUS, DESK_RANK, approvalLimitFor, deskForStatus } from '../config/workflow.js';
 import { loadLimits } from '../models/limitsModel.js';
 import { applicantTicket } from '../services/visibility.js';
 import { sendServerError } from '../utils/httpError.js';
@@ -26,8 +26,9 @@ const DESK_STATUSES = Object.freeze({
 const ROW_SELECT = `
   SELECT t.id, t.title, t.department, t.campus, t.priority, t.status, t.created_at,
          COALESCE(t.status_changed_at, t.assigned_at, t.created_at) AS desk_since,
-         t.open_change_request_id, t.current_desk_user_id, r.estimated_amount
+         t.open_change_request_id, t.current_desk_user_id, hu.name AS current_holder_name, r.estimated_amount
     FROM tickets t
+    LEFT JOIN users hu ON hu.id = t.current_desk_user_id
     LEFT JOIN reports r ON r.ticket_id = t.id
      AND r.id = (SELECT MAX(r2.id) FROM reports r2 WHERE r2.ticket_id = t.id)`;
 
@@ -60,7 +61,7 @@ export const getDeskBoard = async (req, res) => {
         params = [userId];
       }
       [myDesk] = await pool.query(
-        `${ROW_SELECT} WHERE t.status IN (?) AND ${owner} ORDER BY desk_since ASC LIMIT 200`,
+        `${ROW_SELECT} WHERE t.is_mock = FALSE AND t.status IN (?) AND ${owner} ORDER BY desk_since ASC LIMIT 200`,
         [statuses, ...params]
       );
     }
@@ -73,7 +74,7 @@ export const getDeskBoard = async (req, res) => {
     if (role !== 'APPLICANT') {
       const [watchRows] = await pool.query(
         `${ROW_SELECT}
-          WHERE t.status NOT IN (?) AND t.applicant_id <> ?
+          WHERE t.is_mock = FALSE AND t.status NOT IN (?) AND t.applicant_id <> ?
             AND EXISTS (SELECT 1 FROM audit_logs a
                          WHERE a.ticket_id = t.id AND a.user_id = ? AND a.action <> 'REMINDER_SENT')
           ORDER BY desk_since DESC LIMIT 100`,
@@ -83,10 +84,10 @@ export const getDeskBoard = async (req, res) => {
     }
 
     const [mine] = await pool.query(
-      'SELECT * FROM tickets WHERE applicant_id = ? ORDER BY created_at DESC LIMIT 200', [userId]);
+      'SELECT * FROM tickets WHERE applicant_id = ? AND is_mock = FALSE ORDER BY created_at DESC LIMIT 200', [userId]);
 
     // on_my_desk = I can act now (an AE in scope also SEES other AEs' UNASSIGNED tickets).
-    const strip = ({ current_desk_user_id, ...rest }) => rest;
+    const strip = ({ current_desk_user_id, ...rest }) => ({ ...rest, current_desk: deskForStatus(rest.status) });
     const mark = (t) => ({
       ...strip(t),
       on_my_desk: role === 'AE' || role === 'SE' || role === 'DEAN' || role === 'DIRECTOR'

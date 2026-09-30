@@ -11,6 +11,7 @@ import {
   updateUser,
   getMasterAuditLogs,
   getActiveJes,
+  getStaff,
 } from '../controllers/adminController.js';
 
 const router = express.Router();
@@ -38,5 +39,8 @@ router.get('/audit-logs', getMasterAuditLogs);
 
 // JE directory for reassignment
 router.get('/jes', getActiveJes);
+
+// Staff directory for any desk (override form)
+router.get('/staff', getStaff);
 
 export default router;

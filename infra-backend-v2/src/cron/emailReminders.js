@@ -17,7 +17,7 @@
 import cron from 'node-cron';
 import pool from '../config/db.js';
 import logger, { errorFields } from '../utils/logger.js';
-import { deliverEmail } from '../utils/mailer.js';
+import { deliverEmail, isPlaceholderEmail } from '../utils/mailer.js';
 import * as notificationModel from '../models/notificationModel.js';
 import { findDeskOwner } from '../models/deskModel.js';
 import { insertAudit } from '../models/auditModel.js';
@@ -45,6 +45,11 @@ function reminderStillApplies(row, ticket) {
 }
 
 async function sendOne(row, { now, send }) {
+  // A placeholder Dean/Director has no real mailbox. Cancel instead of retrying until the Sysadmin sets the real e-mail.
+  if (isPlaceholderEmail(row.to_email)) {
+    await notificationModel.markCancelled(pool, row.id, 'placeholder address');
+    return 'cancelled';
+  }
   const isReminder = row.kind === 'REMINDER';
   let subject = row.subject;
   let body = row.body;
@@ -67,7 +72,7 @@ async function sendOne(row, { now, send }) {
     }
     if (row.desk === 'JE' && copiesAe(number)) {
       const ae = await findDeskOwner(pool, ticket, 'AE');
-      if (ae && ae.email !== row.to_email) cc = ae.email;
+      if (ae && ae.email !== row.to_email && !isPlaceholderEmail(ae.email)) cc = ae.email;
     }
   } else if (!row.to_active) {
     await notificationModel.markFailure(pool, row.id, {

@@ -1,7 +1,7 @@
 import pool from '../config/db.js';
 import {
   ACTION, resolveAction, resolveTenderUpdate, planMessages, nextOpenRequestId,
-  WorkflowError,
+  WorkflowError, deskForStatus,
 } from '../config/workflow.js';
 import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
 import { createTicketSchema, formatZodIssues } from '../validation/ticketValidation.js';
@@ -11,6 +11,7 @@ import * as messageModel from '../models/messageModel.js';
 import * as deskModel from '../models/deskModel.js';
 import * as reportModel from '../models/reportModel.js';
 import { insertAudit } from '../models/auditModel.js';
+import { pinsFor, isSelfAction } from './actionController.js';
 import { notifyTicketCreated, notifyTransition, notifyPostApproval } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { redactQueueRow } from '../services/visibility.js';
@@ -75,7 +76,7 @@ export const createTicket = async (req, res) => {
         deskUser: { id: req.user.id, name: req.user.name, email: req.user.email },
       };
     } else {
-      assignment = await assignTicket(connection, { department, campus });
+      assignment = await assignTicket(connection, { department, campus, applicantId: applicant_id });
     }
 
     // D2: no runtime DDL -- schema is owned by migrations only.
@@ -83,12 +84,14 @@ export const createTicket = async (req, res) => {
       `INSERT INTO tickets (
          applicant_id, assigned_je_id, department, title, type, description, location,
          campus, building, landmark, lat, lng, category, priority, contact_phone,
-         current_desk_user_id, status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         current_desk_user_id, assigned_ae_id, status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         applicant_id, assignment.assignedJeId, department, finalTitle, type, description, locationLabel,
         campus, building ?? null, landmark, lat ?? null, lng ?? null, category, priority, contact_phone,
-        assignment.currentDeskUserId, assignment.status,
+        assignment.currentDeskUserId,
+        assignment.status === 'UNASSIGNED' ? (pinsFor('AE', assignment.deskUser).assignedAeId ?? null) : null,
+        assignment.status,
       ]
     );
 
@@ -110,16 +113,14 @@ export const createTicket = async (req, res) => {
       `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
       [ticket_id, applicant_id, 'CREATED', `Ticket raised: "${finalTitle}" (${type}, ${campus} campus)`]
     );
-    await connection.query(
-      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
-      [
-        ticket_id, assignment.currentDeskUserId, 'ASSIGNED',
-        assignment.status === 'ASSIGNED_TO_JE'
-          ? `Auto-assigned to ${assignment.deskUser.name} (${assignment.deskUser.email})`
-          : `UNASSIGNED: no available JE for ${department}/${campus} (pool exhausted or all on leave). ` +
-            `Routed to AE ${assignment.deskUser.name} (${assignment.deskUser.email}) for manual assignment.`,
-      ]
-    );
+    await insertAudit(connection, {
+      ticketId: ticket_id, userId: assignment.currentDeskUserId, action: 'ASSIGNED',
+      remarks: assignment.status === 'ASSIGNED_TO_JE'
+        ? `Auto-assigned to ${assignment.deskUser.name} (${assignment.deskUser.email})`
+        : `UNASSIGNED: no available JE for ${department}/${campus} (pool exhausted or all on leave). ` +
+          `Routed to AE ${assignment.deskUser.name} (${assignment.deskUser.email}) for manual assignment.`,
+      isSelfAction: assignment.currentDeskUserId === applicant_id,
+    });
 
     // Outbox: the assignment/UNASSIGNED notice + its reminder series + the
     // applicant's stage mail are written in this same transaction (plan.md §3.4).
@@ -157,11 +158,13 @@ export const getQueue = async (req, res) => {
   const baseSelect = `
     SELECT t.*, 
            u.name as applicant_name, u.email as applicant_email, u.phone as applicant_phone,
+           hu.name as current_holder_name,
            r.estimated_amount, r.nature_of_work,
            tn.nit_number, tn.portal_type, tn.awarded_agency, tn.work_order_value, tn.status as tender_status,
            COALESCE(b.total_billed_amount, 0) as total_billed_amount, COALESCE(b.bills_count, 0) as bills_count
     FROM tickets t
     JOIN users u ON t.applicant_id = u.id
+    LEFT JOIN users hu ON hu.id = t.current_desk_user_id
     LEFT JOIN (
       SELECT r1.* FROM reports r1
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r2
@@ -179,7 +182,8 @@ export const getQueue = async (req, res) => {
     ) b ON t.id = b.ticket_id
   `;
 
-  let whereClauses = [];
+  // Sysadmin test tickets never appear in real queues.
+  let whereClauses = ['t.is_mock = FALSE'];
   let queryParams = [];
 
   if (search) {
@@ -250,7 +254,10 @@ export const getQueue = async (req, res) => {
   try {
     const [tickets] = await pool.query(query, queryParams);
     const viewer = { role };
-    res.json({ success: true, page, limit, tab, tickets: tickets.map((t) => redactQueueRow(viewer, t)) });
+    res.json({
+      success: true, page, limit, tab,
+      tickets: tickets.map((t) => redactQueueRow(viewer, { ...t, current_desk: deskForStatus(t.status) })),
+    });
   } catch (error) {
     return sendServerError(req, res, error, 'getQueue error');
   }
@@ -362,6 +369,7 @@ export async function applyReportSubmission(
     openChangeRequestId: nextOpenRequestId({
       openId: ticket.open_change_request_id, toDesk: t.toDesk, messagesById: thread,
     }),
+    ...pinsFor('AE', aeOwner),
   });
   if (!applied) {
     throw new WorkflowError(
@@ -373,6 +381,7 @@ export async function applyReportSubmission(
     ticketId, userId: jeId, action: t.logAction,
     remarks: `Report v${version} filed, estimate INR ${amount}`,
     fromStatus: t.fromStatus, toStatus: t.toStatus, fromDesk: t.fromDesk, toDesk: t.toDesk,
+    isSelfAction: isSelfAction(ticket, jeId),
   });
   for (const spec of specs) {
     spec.to_user_id = (await deskModel.resolveDeskOwner(connection, ticket, spec.to_desk))?.id ?? null;
@@ -859,22 +868,24 @@ export const getAccountantOverview = async (req, res) => {
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
       JOIN tickets t ON t.id = r.ticket_id
       WHERE t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED')
+        AND t.is_mock = FALSE
     `);
 
     // 2. Total contract value awarded
     const [contracts] = await pool.query(`
-      SELECT COALESCE(SUM(work_order_value), 0) as total_contract_value
-      FROM tenders
-      WHERE status = 'AWARDED'
+      SELECT COALESCE(SUM(tn.work_order_value), 0) as total_contract_value
+      FROM tenders tn JOIN tickets t ON t.id = tn.ticket_id
+      WHERE tn.status = 'AWARDED' AND t.is_mock = FALSE
     `);
 
     // 3. Total disbursed from bills
     const [disbursements] = await pool.query(`
       SELECT 
-        COALESCE(SUM(CASE WHEN payment_status = 'DISBURSED' THEN net_amount ELSE 0 END), 0) as total_disbursed,
-        COALESCE(SUM(CASE WHEN payment_status = 'PENDING' THEN net_amount ELSE 0 END), 0) as total_pending_disbursement,
-        COUNT(id) as total_bills_count
-      FROM bills
+        COALESCE(SUM(CASE WHEN b.payment_status = 'DISBURSED' THEN b.net_amount ELSE 0 END), 0) as total_disbursed,
+        COALESCE(SUM(CASE WHEN b.payment_status = 'PENDING' THEN b.net_amount ELSE 0 END), 0) as total_pending_disbursement,
+        COUNT(b.id) as total_bills_count
+      FROM bills b JOIN tickets t ON t.id = b.ticket_id
+      WHERE t.is_mock = FALSE
     `);
 
     res.json({

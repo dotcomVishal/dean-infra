@@ -35,3 +35,6 @@ export const deliverEmail = async ({ to, cc, subject, text }) => {
     text,
   });
 };
+
+/** Placeholder accounts use the reserved `.invalid` TLD (RFC 2606): mail to them can never be delivered. */
+export const isPlaceholderEmail = (email) => /\.invalid$/i.test(String(email ?? '').trim());

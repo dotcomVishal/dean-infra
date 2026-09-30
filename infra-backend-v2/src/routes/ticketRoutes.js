@@ -19,7 +19,7 @@ import {
 import { performTicketAction } from '../controllers/actionController.js';
 import { getDeskBoard, getAssignableJes } from '../controllers/deskController.js';
 import { availableActions, approvalLimitFor } from '../config/workflow.js';
-import { findDeskOwner } from '../models/deskModel.js';
+import { findDeskOwner, loadAssignees } from '../models/deskModel.js';
 import { loadActionContext } from '../services/actionContext.js';
 import { listForTicket } from '../models/messageModel.js';
 import {
@@ -38,7 +38,7 @@ router.use(requireAuth);
 router.get('/applicant', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT * FROM tickets WHERE applicant_id = ? ORDER BY created_at DESC`,
+      `SELECT * FROM tickets WHERE applicant_id = ? AND is_mock = FALSE ORDER BY created_at DESC`,
       [req.user.id]
     );
     // Applicant view: no assignee / desk-owner ids, stage in plain words (Q11).
@@ -139,7 +139,8 @@ router.get(
     const { ticket_id } = req.params;
     try {
       const [ticketRows] = await pool.query(
-        `SELECT id, applicant_id, department, campus, status, assigned_je_id, current_desk_user_id
+        `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
+                is_mock, current_desk_user_id
            FROM tickets WHERE id = ?`,
         [ticket_id]
       );
@@ -182,7 +183,8 @@ router.get(
     const { ticket_id } = req.params;
     try {
       const [ticketRows] = await pool.query(
-        `SELECT id, applicant_id, department, campus, status, assigned_je_id, current_desk_user_id
+        `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
+                is_mock, current_desk_user_id
            FROM tickets WHERE id = ?`,
         [ticket_id]
       );
@@ -269,7 +271,7 @@ router.get('/:ticket_id/details', async (req, res) => {
     }
 
     const [auditLogs] = await pool.query(
-      `SELECT a.action, a.remarks, a.created_at, a.user_id, a.visibility, a.from_desk, a.to_desk,
+      `SELECT a.action, a.remarks, a.created_at, a.user_id, a.visibility, a.from_desk, a.to_desk, a.is_self_action,
               u.name as actor_name, u.role as actor_role
          FROM audit_logs a JOIN users u ON a.user_id = u.id
         WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
@@ -298,6 +300,7 @@ router.get('/:ticket_id/details', async (req, res) => {
         }
         ticketData.desk_people = people;
       }
+      ticketData.assignees = await loadAssignees(pool, ticketRow, staffRole(viewer, ticketRow));
     } else {
       ticketData.available_actions = { desk: null, actions: [] };
     }

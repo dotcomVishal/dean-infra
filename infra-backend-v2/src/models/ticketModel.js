@@ -1,6 +1,7 @@
 /** tickets table access for the workflow. Rules live in config/workflow.js. */
 
-const COLUMNS = `id, status, department, campus, assigned_je_id, current_desk_user_id, open_change_request_id`;
+const COLUMNS = `id, status, department, campus, applicant_id, assigned_je_id, assigned_ae_id, assigned_se_id,
+  is_mock, current_desk_user_id, open_change_request_id`;
 
 export async function lockById(connection, ticketId) {
   const [rows] = await connection.query(`SELECT ${COLUMNS} FROM tickets WHERE id = ? FOR UPDATE`, [ticketId]);
@@ -22,14 +23,20 @@ export async function lockForJe(connection, ticketId, jeId) {
  */
 export async function applyTransition(connection, {
   ticketId, fromStatus, toStatus, currentDeskUserId, openChangeRequestId, assignedJeId,
+  assignedAeId, assignedSeId,
 }) {
   const setsAssignee = assignedJeId !== undefined;
+  const setsAe = assignedAeId !== undefined;
+  const setsSe = assignedSeId !== undefined;
   const [result] = await connection.query(
     `UPDATE tickets
         SET status = ?, current_desk_user_id = ?, open_change_request_id = ?, status_changed_at = NOW()
             ${setsAssignee ? ', assigned_je_id = ?, assigned_at = NOW()' : ''}
+            ${setsAe ? ', assigned_ae_id = ?' : ''}
+            ${setsSe ? ', assigned_se_id = ?' : ''}
       WHERE id = ? AND status = ?`,
-    [toStatus, currentDeskUserId, openChangeRequestId, ...(setsAssignee ? [assignedJeId] : []), ticketId, fromStatus]
+    [toStatus, currentDeskUserId, openChangeRequestId, ...(setsAssignee ? [assignedJeId] : []),
+      ...(setsAe ? [assignedAeId] : []), ...(setsSe ? [assignedSeId] : []), ticketId, fromStatus]
   );
   return result.affectedRows === 1;
 }
