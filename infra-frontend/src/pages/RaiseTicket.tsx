@@ -10,6 +10,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { toast } from '../store/toastStore';
+import { TICKET_CATEGORIES, findCategory } from '../config/ticketCategories';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -46,6 +47,14 @@ export default function RaiseTicket() {
   const [isLocating, setIsLocating] = useState(false);
 
   const campusCenter: [number, number] = [31.7754, 76.9861];
+
+  const categoryRule = findCategory(category);
+  const handleCategoryChange = (name: string) => {
+    setCategory(name);
+    const rule = findCategory(name);
+    if (rule?.department) setDepartment(rule.department);
+    if (rule?.campus) setCampus(rule.campus);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -89,7 +98,7 @@ export default function RaiseTicket() {
     if (!title.trim()) return setError('Enter a title.');
     if (!description.trim()) return setError('Enter a description.');
     if (!landmark.trim()) return setError('Enter a landmark.');
-    if (!category.trim()) return setError('Enter a category.');
+    if (!category) return setError('Select a category.');
     if (!contactPhone.trim()) return setError('Enter a contact phone number.');
     setIsSubmitting(true);
 
@@ -101,7 +110,7 @@ export default function RaiseTicket() {
     formData.append('campus', campus);
     formData.append('building', building.trim());
     formData.append('landmark', landmark.trim());
-    formData.append('category', category.trim());
+    formData.append('category', category);
     formData.append('contact_phone', contactPhone.trim());
     if (coordinates) {
       formData.append('lat', String(coordinates.lat));
@@ -155,14 +164,38 @@ export default function RaiseTicket() {
           />
         </div>
 
-        {/* 2. Department */}
+        {/* 2. Category (sets department / campus when the topic implies them) */}
         <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Department</label>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Category</label>
+          <select
+            required
+            className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white"
+            value={category}
+            onChange={(e) => handleCategoryChange(e.target.value)}
+          >
+            <option value="" disabled>Select a category</option>
+            {TICKET_CATEGORIES.map((c) => (
+              <option key={c.name} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+          {categoryRule?.manualJe && (
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              The Assistant Engineer will assign a Junior Engineer for this category.
+            </p>
+          )}
+        </div>
+
+        {/* 3. Department */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
+            Department{categoryRule?.department && <span className="ml-2 normal-case tracking-normal font-medium">Set by category</span>}
+          </label>
           <div className="grid grid-cols-3 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
             {['Civil', 'Electrical', 'Horticulture'].map(dept => (
               <button
                 key={dept} type="button" onClick={() => setDepartment(dept)}
-                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all ${department === dept ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                disabled={!!categoryRule?.department && categoryRule.department !== dept}
+                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${department === dept ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
               >
                 {dept}
               </button>
@@ -170,33 +203,21 @@ export default function RaiseTicket() {
           </div>
         </div>
 
-        {/* 3. Campus */}
+        {/* 4. Campus */}
         <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Campus</label>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
+            Campus{categoryRule?.campus && <span className="ml-2 normal-case tracking-normal font-medium">Set by category</span>}
+          </label>
           <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
             {(['NORTH', 'SOUTH'] as const).map(c => (
               <button
                 key={c} type="button" onClick={() => setCampus(c)}
-                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all ${campus === c ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                disabled={!!categoryRule?.campus && categoryRule.campus !== c}
+                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${campus === c ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
               >
                 {c}
               </button>
             ))}
-          </div>
-        </div>
-
-        {/* 4. Category */}
-        <div className="grid grid-cols-1 gap-4">
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Category</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. plumbing, wiring, road"
-              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            />
           </div>
         </div>
 

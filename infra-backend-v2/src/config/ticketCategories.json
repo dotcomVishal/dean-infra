@@ -1,0 +1,254 @@
+[
+  {
+    "name": "All Mess",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Beas Kund",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Carpentry Work",
+    "department": "Civil",
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Chandra Taal Hostel",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Classrooms - North Campus",
+    "department": null,
+    "campus": "NORTH",
+    "manualJe": false
+  },
+  {
+    "name": "Classrooms - South Campus",
+    "department": null,
+    "campus": "SOUTH",
+    "manualJe": false
+  },
+  {
+    "name": "Cultural Affairs",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Dashir",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Existing Sport Facility",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Finance & Accounts",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Gauri Kund",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "General Affairs",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Horticulture Maintenance in Campus",
+    "department": "Horticulture",
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Hostel Affairs",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Housekeeping",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Institute Carriage Vehicle",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Literary Affairs",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Maintenance Civil - North Campus",
+    "department": "Civil",
+    "campus": "NORTH",
+    "manualJe": false
+  },
+  {
+    "name": "Maintenance Civil - South Campus",
+    "department": "Civil",
+    "campus": "SOUTH",
+    "manualJe": false
+  },
+  {
+    "name": "Maintenance Electrical - Garpha",
+    "department": "Electrical",
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Maintenance Electrical - North Campus",
+    "department": "Electrical",
+    "campus": "NORTH",
+    "manualJe": false
+  },
+  {
+    "name": "Maintenance Electrical - South Campus",
+    "department": "Electrical",
+    "campus": "SOUTH",
+    "manualJe": false
+  },
+  {
+    "name": "Manimahesh",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Masonry Work",
+    "department": "Civil",
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Nako Hostel",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "New Facility",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "New Requests for Hostels",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Other",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Painting Work",
+    "department": "Civil",
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Plumbing Work",
+    "department": "Civil",
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Prashar Hostel",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Renuka Hostel",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Research Affairs",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Security Unit",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Sports Affairs",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Store and Purchase",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Student Gymkhana",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Support",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Suraj Taal",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Suvalsar Hostel",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  },
+  {
+    "name": "Technical Affairs",
+    "department": null,
+    "campus": null,
+    "manualJe": false
+  },
+  {
+    "name": "Waste Management",
+    "department": null,
+    "campus": null,
+    "manualJe": true
+  }
+]

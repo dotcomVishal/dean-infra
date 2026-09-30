@@ -743,7 +743,7 @@ export const createTestTicket = async (req, res) => {
     const [result] = await connection.query(
       `INSERT INTO tickets (applicant_id, assigned_je_id, current_desk_user_id, department, title, type, description,
          location, campus, landmark, category, priority, contact_phone, status, is_mock)
-       VALUES (?, ?, ?, ?, 'Test ticket', 'recurring', 'Test ticket for workflow checks.', 'Test', ?, 'Test', 'test', 'NORMAL',
+       VALUES (?, ?, ?, ?, 'Test ticket', 'recurring', 'Test ticket for workflow checks.', 'Test', ?, 'Test', 'Other', 'NORMAL',
          '0000000', 'ASSIGNED_TO_JE', TRUE)`,
       [adminId, adminId, adminId, department, campus]);
     const ticketId = result.insertId;

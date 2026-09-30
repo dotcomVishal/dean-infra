@@ -6,6 +6,8 @@ import {
 import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
 import { createTicketSchema, formatZodIssues } from '../validation/ticketValidation.js';
 import { assignTicket } from '../services/assignment.js';
+import { CATEGORY_RULES, resolveRouting } from '../config/ticketCategories.js';
+import { logger } from '../utils/logger.js';
 import * as ticketModel from '../models/ticketModel.js';
 import * as messageModel from '../models/messageModel.js';
 import * as deskModel from '../models/deskModel.js';
@@ -45,9 +47,12 @@ export const createTicket = async (req, res) => {
     });
   }
   const {
-    title, department, description, type,
-    campus, building, landmark, lat, lng, category, contact_phone,
+    title, description, type,
+    building, landmark, lat, lng, category, contact_phone,
   } = parsed.data;
+  // The zod check already rejects a department/campus that contradicts the
+  // category; this applies the forced values as defense in depth.
+  const { department, campus, manualJe } = resolveRouting(parsed.data);
 
   if (type === 'non-recurring' && req.user.role !== 'JE') {
     cleanupTempFiles(req.files);
@@ -85,7 +90,9 @@ export const createTicket = async (req, res) => {
         deskUser: { id: req.user.id, name: req.user.name, email: req.user.email },
       };
     } else {
-      assignment = await assignTicket(connection, { department, campus, applicantId: applicant_id });
+      assignment = await assignTicket(connection, {
+        department, campus, applicantId: applicant_id, skipJePick: manualJe,
+      });
     }
 
     // D2: no runtime DDL -- schema is owned by migrations only.
@@ -126,6 +133,9 @@ export const createTicket = async (req, res) => {
       ticketId: ticket_id, userId: assignment.currentDeskUserId, action: 'ASSIGNED',
       remarks: assignment.status === 'ASSIGNED_TO_JE'
         ? `Auto-assigned to ${assignment.deskUser.name} (${assignment.deskUser.email})`
+        : manualJe
+        ? `UNASSIGNED: category "${category}" needs manual JE selection. ` +
+          `Routed to AE ${assignment.deskUser.name} (${assignment.deskUser.email}).`
         : `UNASSIGNED: no available JE for ${department}/${campus} (pool exhausted or all on leave). ` +
           `Routed to AE ${assignment.deskUser.name} (${assignment.deskUser.email}) for manual assignment.`,
       isSelfAction: assignment.currentDeskUserId === applicant_id,
@@ -137,6 +147,11 @@ export const createTicket = async (req, res) => {
 
     await connection.commit();
     kickOutbox();
+
+    // Release 1 telemetry: counts stale clients still sending free text.
+    if (!CATEGORY_RULES.has(category)) {
+      logger.warn('legacy ticket category', { code: 'LEGACY_CATEGORY', ticketId: ticket_id, category });
+    }
 
     res.json({
       success: true,

@@ -8,6 +8,7 @@
 //  already-typed.
 // ============================================================
 import { z } from 'zod';
+import { CATEGORY_RULES } from '../config/ticketCategories.js';
 
 const CAMPUS_VALUES = ['NORTH', 'SOUTH'];
 const DEPARTMENT_VALUES = ['Civil', 'Electrical', 'Horticulture'];
@@ -42,6 +43,20 @@ export const createTicketSchema = z.object({
     .string()
     .trim()
     .regex(/^[0-9+\-\s()]{7,20}$/, 'contact_phone must be a valid phone number'),
+}).superRefine((data, ctx) => {
+  // A category can force department and/or campus; a submission that
+  // disagrees is rejected, not silently rewritten.
+  const rule = CATEGORY_RULES.get(data.category);
+  if (!rule) return;
+  for (const field of ['department', 'campus']) {
+    if (rule[field] && data[field] !== rule[field]) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [field],
+        message: `category_scope_mismatch: "${data.category}" requires ${field} ${rule[field]}`,
+      });
+    }
+  }
 });
 
 /** Flattens a ZodError into a stable, small shape for the HTTP response. */

@@ -388,7 +388,7 @@ async function raiseAsJe(je, type) {
   await createTicket({
     user: { id: je, role: 'JE', department: 'Civil', name: 'CI JE', email: 'je@test.local' },
     body: {
-      department: 'Civil', campus: 'NORTH', description: 'ci ticket', landmark: 'gate', category: 'test',
+      department: 'Civil', campus: 'NORTH', description: 'ci ticket', landmark: 'gate', category: 'Other',
       contact_phone: '9999999999', type,
     },
   }, res);
@@ -418,6 +418,86 @@ test('a JE proposal (non-recurring, own department) is self-assigned and flagged
     assert.equal(out.assigned_je_id, raiser);
     const assigned = (await auditFor(out.ticket_id)).find((a) => a.action === 'ASSIGNED');
     assert.equal(assigned.is_self_action, 1);
+  } finally {
+    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+  }
+});
+
+// ---- category-aware routing ---------------------------------------------------------------------------------------------
+async function raiseAsApplicant(applicant, { category, department = 'Civil', campus = 'NORTH' }) {
+  const res = fakeRes();
+  await createTicket({
+    user: { id: applicant, role: 'APPLICANT', name: 'CI Applicant', email: 'applicant@test.local' },
+    body: { department, campus, description: 'ci ticket', landmark: 'gate', category, contact_phone: '9999999999' },
+  }, res);
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  return res.body;
+}
+
+test('a category that forces the campus routes and stores that campus', async () => {
+  const applicant = await makeUser({ role: 'APPLICANT' });
+  const je = await makeUser({ role: 'JE' }); await civilScope(je, 'SOUTH');
+  const out = await raiseAsApplicant(applicant, { category: 'Maintenance Civil - South Campus', campus: 'SOUTH' });
+  try {
+    const t = await ticketRow(out.ticket_id);
+    assert.equal(t.campus, 'SOUTH');
+    assert.equal(t.category, 'Maintenance Civil - South Campus');
+    assert.equal(out.status, 'ASSIGNED_TO_JE');
+  } finally {
+    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+  }
+});
+
+test('a category that contradicts the campus is rejected with 400 and creates nothing', async () => {
+  const applicant = await makeUser({ role: 'APPLICANT' });
+  const res = fakeRes();
+  await createTicket({
+    user: { id: applicant, role: 'APPLICANT', name: 'CI Applicant', email: 'applicant@test.local' },
+    body: {
+      department: 'Civil', campus: 'SOUTH', description: 'ci ticket', landmark: 'gate',
+      category: 'Maintenance Civil - North Campus', contact_phone: '9999999999',
+    },
+  }, res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'VALIDATION_ERROR');
+});
+
+test('a manual-JE category skips the JE pick: UNASSIGNED at the AE, JE rotation untouched, then the AE assigns', async () => {
+  const applicant = await makeUser({ role: 'APPLICANT' });
+  const je = await makeUser({ role: 'JE' }); await civilScope(je);
+  const ae = await makeUser({ role: 'AE' }); await civilScope(ae);
+  const before = (await pool.query('SELECT last_assigned_at FROM users WHERE id = ?', [je]))[0][0].last_assigned_at;
+  const out = await raiseAsApplicant(applicant, { category: 'Beas Kund' });
+  try {
+    assert.equal(out.status, 'UNASSIGNED');
+    assert.equal(out.assigned_je_id, null);
+    const t = await ticketRow(out.ticket_id);
+    const expectedAe = (await resolveAeForScope(pool, { department: 'Civil', campus: 'NORTH' })).id;
+    assert.equal(t.current_desk_user_id, expectedAe);
+    const after = (await pool.query('SELECT last_assigned_at FROM users WHERE id = ?', [je]))[0][0].last_assigned_at;
+    assert.equal(String(after), String(before));
+    const assigned = (await auditFor(out.ticket_id)).find((a) => a.action === 'ASSIGNED');
+    assert.match(assigned.remarks, /Beas Kund/);
+    assert.match(assigned.remarks, /manual JE selection/);
+
+    const aeUser = await userRow(expectedAe);
+    const res = await act(aeUser, out.ticket_id, { action: 'ASSIGN_JE', assignee_id: je });
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.equal((await ticketRow(out.ticket_id)).status, 'ASSIGNED_TO_JE');
+  } finally {
+    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+  }
+});
+
+test('the UNASSIGNED mail for a manual-JE category says the AE assigns, not that no JE is available', async () => {
+  const applicant = await makeUser({ role: 'APPLICANT' });
+  const ae = await makeUser({ role: 'AE' });
+  await pool.query("INSERT INTO user_scopes (user_id, department, campus) VALUES (?, 'Electrical', 'BOTH')", [ae]);
+  const out = await raiseAsApplicant(applicant, { category: 'Maintenance Electrical - Garpha', department: 'Electrical' });
+  try {
+    const [rows] = await pool.query('SELECT subject, body FROM notifications WHERE ticket_id = ?', [out.ticket_id]);
+    assert.ok(rows.some((r) => /needs a JE/.test(r.subject)), JSON.stringify(rows.map((r) => r.subject)));
+    assert.ok(!rows.some((r) => /no JE available/.test(r.subject)));
   } finally {
     await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
   }

@@ -8,6 +8,7 @@
 //   - Staff mails may name people and quote the request; they go to people
 //     who are allowed to see that (visibility matrix).
 import { stageLabel } from './visibility.js';
+import { isManualJeCategory } from '../config/ticketCategories.js';
 
 const FOOTER = 'Deanery of Infrastructure, IIT Mandi\nThis is an automated operational notification.';
 
@@ -80,11 +81,16 @@ ${FOOTER}`,
 }
 
 export function unassignedEmail(t) {
+  const manual = isManualJeCategory(t.category);
   return {
-    subject: `[Deanery of Infrastructure] Ticket #${t.id} UNASSIGNED — no JE available: ${t.title}`,
+    subject: manual
+      ? `[Deanery of Infrastructure] Ticket #${t.id} needs a JE: ${t.title}`
+      : `[Deanery of Infrastructure] Ticket #${t.id} UNASSIGNED — no JE available: ${t.title}`,
     body: `Dear ${t.recipientName},
 
-No JE is available for ${t.department} / ${t.campus} campus (all are busy or on leave). Choose a JE for this ticket.
+${manual
+  ? `Category ${t.category} is assigned by the AE. Choose a JE for this ticket.`
+  : `No JE is available for ${t.department} / ${t.campus} campus (all are busy or on leave). Choose a JE for this ticket.`}
 
 ======================================================================
 TICKET INFORMATION
