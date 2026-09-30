@@ -2,7 +2,7 @@
 //  RAISE-TICKET VALIDATION (plan.md §4 Phase 3 item 4)
 //
 //  Strict backend validation for the new campus/building/landmark/category/
-//  priority/contact_phone fields, enforced with zod BEFORE any database
+//  contact_phone fields, enforced with zod BEFORE any database
 //  transaction begins. multer parses multipart fields as strings, so
 //  numeric/optional fields are pre-processed here rather than trusted as
 //  already-typed.
@@ -10,7 +10,6 @@
 import { z } from 'zod';
 
 const CAMPUS_VALUES = ['NORTH', 'SOUTH'];
-const PRIORITY_VALUES = ['LOW', 'NORMAL', 'URGENT'];
 const DEPARTMENT_VALUES = ['Civil', 'Electrical', 'Horticulture'];
 const TYPE_VALUES = ['recurring', 'non-recurring'];
 
@@ -39,7 +38,6 @@ export const createTicketSchema = z.object({
   lat: optionalCoordinate(-90, 90),
   lng: optionalCoordinate(-180, 180),
   category: z.string().trim().min(1, 'category is required').max(50),
-  priority: z.preprocess(blankToUndefined, z.enum(PRIORITY_VALUES).optional()).default('NORMAL'),
   contact_phone: z
     .string()
     .trim()

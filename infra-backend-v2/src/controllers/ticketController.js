@@ -46,7 +46,7 @@ export const createTicket = async (req, res) => {
   }
   const {
     title, department, description, type,
-    campus, building, landmark, lat, lng, category, priority, contact_phone,
+    campus, building, landmark, lat, lng, category, contact_phone,
   } = parsed.data;
 
   if (type === 'non-recurring' && req.user.role !== 'JE') {
@@ -97,7 +97,7 @@ export const createTicket = async (req, res) => {
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         applicant_id, assignment.assignedJeId, department, finalTitle, type, description, locationLabel,
-        campus, building ?? null, landmark, lat ?? null, lng ?? null, category, priority, contact_phone,
+        campus, building ?? null, landmark, lat ?? null, lng ?? null, category, 'NORMAL', contact_phone,
         assignment.currentDeskUserId,
         assignment.status === 'UNASSIGNED' ? (pinsFor('AE', assignment.deskUser).assignedAeId ?? null) : null,
         assignment.status,

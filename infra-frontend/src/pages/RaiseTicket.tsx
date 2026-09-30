@@ -39,7 +39,6 @@ export default function RaiseTicket() {
   const [campus, setCampus] = useState<'NORTH' | 'SOUTH'>('NORTH');
   const [building, setBuilding] = useState('');
   const [category, setCategory] = useState('');
-  const [priority, setPriority] = useState<'LOW' | 'NORMAL' | 'URGENT'>('NORMAL');
   const [contactPhone, setContactPhone] = useState('');
 
   const [coordinates, setCoordinates] = useState<{lat: number, lng: number} | null>(null);
@@ -103,7 +102,6 @@ export default function RaiseTicket() {
     formData.append('building', building.trim());
     formData.append('landmark', landmark.trim());
     formData.append('category', category.trim());
-    formData.append('priority', priority);
     formData.append('contact_phone', contactPhone.trim());
     if (coordinates) {
       formData.append('lat', String(coordinates.lat));
@@ -187,8 +185,8 @@ export default function RaiseTicket() {
           </div>
         </div>
 
-        {/* 4. Category & Priority */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* 4. Category */}
+        <div className="grid grid-cols-1 gap-4">
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Category</label>
             <input
@@ -199,19 +197,6 @@ export default function RaiseTicket() {
               value={category}
               onChange={(e) => setCategory(e.target.value)}
             />
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Priority</label>
-            <div className="grid grid-cols-3 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
-              {(['LOW', 'NORMAL', 'URGENT'] as const).map(p => (
-                <button
-                  key={p} type="button" onClick={() => setPriority(p)}
-                  className={`py-2.5 text-xs font-semibold rounded-lg transition-all ${priority === p ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
 
