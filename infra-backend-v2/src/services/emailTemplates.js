@@ -41,6 +41,21 @@ ${FOOTER}`,
   };
 }
 
+/** Work marked complete: nag the applicant to check it. Same contract as above: id (+ reminder number) only. */
+export function applicantVerifyEmail(ticketId, number = 1) {
+  return {
+    subject: `[ACTION REQUIRED]${number > 1 ? ` Reminder ${number} —` : ''} Ticket ${ticketRef(ticketId)}: please verify the completed work`,
+    body: `The work on your ticket ${ticketRef(ticketId)} has been marked complete.
+
+Please check the site, then confirm on the portal that the work is done, or tell us what is still pending.
+The ticket is closed only after you confirm. You will keep receiving this reminder until then.
+
+${portalUrl()}/ticket/${ticketId}
+
+${FOOTER}`,
+  };
+}
+
 // ---- staff ---------------------------------------------------------------------------
 const ist = () => new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { FileText, Loader2, ImageOff, X, Download } from 'lucide-react';
+import { FileText, Loader2, ImageOff, X, Download, Upload } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
-import { isImageFile } from '../../lib/ticketUi';
+import { isImageFile, errorMessage } from '../../lib/ticketUi';
 
 // Files are never addressed by path (S2): the API hands out an authenticated
 // /api/attachments/:id URL, and <img src> cannot send a bearer token, so every
@@ -159,6 +159,80 @@ export function AttachmentList({
           {docs.map((f) => <DocLink key={f.id} file={f} dark={dark} />)}
         </div>
       )}
+    </div>
+  );
+}
+
+// Who uploaded what, in words. The server picks the category from the uploader.
+const CATEGORY_LABEL: Record<string, string> = {
+  APPLICANT_EVIDENCE: 'Applicant', JE_SITE_PHOTO: 'JE site photo', JE_ESTIMATE_DOC: 'JE estimate',
+  WORK_DOC: 'JE work / completion', DESK_DOC: 'Approving officer', CLERK_TENDER_DOC: 'Tender (Clerical)',
+  FINANCE_SANCTION: 'Finance', AUTHORITY_REMARKS: 'Authority',
+};
+
+/** Files grouped by who uploaded them. */
+export function GroupedAttachments({ files, empty }: { files: Attachment[]; empty?: string }) {
+  if (files.length === 0) return empty ? <p className="text-xs text-slate-400">{empty}</p> : null;
+  const groups = new Map<string, Attachment[]>();
+  for (const f of files) {
+    const k = f.document_category ?? 'APPLICANT_EVIDENCE';
+    groups.set(k, [...(groups.get(k) ?? []), f]);
+  }
+  return (
+    <div className="space-y-3">
+      {[...groups].map(([k, list]) => (
+        <div key={k}>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{CATEGORY_LABEL[k] ?? k}</p>
+          <AttachmentList files={list} cols="grid-cols-3" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Add files to a ticket. POST /tickets/:id/attachments; the server decides who may read them. */
+export function UploadFiles({ ticketId, onDone, label = 'Add files' }: { ticketId: number; onDone: () => void; label?: string }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [inputKey, setInputKey] = useState(0);
+
+  const send = async () => {
+    if (files.length === 0) return;
+    const fd = new FormData();
+    files.forEach((f) => fd.append('files', f));
+    setBusy(true);
+    try {
+      await api.post(`/tickets/${ticketId}/attachments`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded.`);
+      setFiles([]);
+      setInputKey((k) => k + 1);
+      onDone();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Upload failed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <input
+        key={inputKey}
+        type="file"
+        multiple
+        accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.xlsx,.docx"
+        onChange={(e) => setFiles(Array.from(e.target.files ?? []).slice(0, 10))}
+        aria-label={label}
+        className="min-w-0 flex-1 text-xs text-slate-600 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-xs file:font-semibold dark:text-slate-300 dark:file:bg-slate-700 dark:file:text-slate-200"
+      />
+      <button
+        type="button"
+        onClick={send}
+        disabled={busy || files.length === 0}
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {label}
+      </button>
     </div>
   );
 }

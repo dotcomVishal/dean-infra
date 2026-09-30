@@ -72,6 +72,7 @@ export default function JeDashboard() {
       t.status === 'APPROVED_FOR_TENDERING' ||
       t.status === 'TENDER_PUBLISHED' ||
       t.status === 'WORK_IN_PROGRESS' ||
+      t.status === 'WORK_COMPLETED' ||
       t.status === 'CLOSED'
   );
 
@@ -144,6 +145,12 @@ export default function JeDashboard() {
         return (
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-sky-100 dark:bg-sky-900/30 text-sky-800 dark:text-sky-400 border-sky-200 dark:border-sky-800/50">
             Work In Progress
+          </span>
+        );
+      case 'WORK_COMPLETED':
+        return (
+          <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 border-amber-200 dark:border-amber-800/50">
+            Awaiting Applicant
           </span>
         );
       case 'CLOSED':
@@ -363,7 +370,8 @@ export default function JeDashboard() {
             const isTenderStage =
               ticket.status === 'APPROVED_FOR_TENDERING' ||
               ticket.status === 'TENDER_PUBLISHED' ||
-              ticket.status === 'WORK_IN_PROGRESS';
+              ticket.status === 'WORK_IN_PROGRESS' ||
+              ticket.status === 'WORK_COMPLETED';
 
             return (
               <div

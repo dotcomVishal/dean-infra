@@ -16,6 +16,8 @@ import {
   recordBill,
   updateBillPayment,
   getAccountantOverview,
+  uploadAttachments,
+  confirmCompletion,
 } from '../controllers/ticketController.js';
 import { performTicketAction } from '../controllers/actionController.js';
 import { getDeskBoard, getAssignableJes } from '../controllers/deskController.js';
@@ -83,6 +85,13 @@ router.post(
 
 // 4. JE Manual Tendering Milestone Update
 router.post('/:ticket_id/tender', requireRole(['JE']), updateTenderStatus);
+
+// 4.1 Files from any desk (applicant, JE, AE..Director, Clerical, Accountant).
+// The controller checks ticket access and picks the category from the uploader.
+router.post('/:ticket_id/attachments', upload.array('files', 10), uploadAttachments);
+
+// 4.2 Applicant confirms (closes) or disputes work the JE marked complete.
+router.post('/:ticket_id/confirm-completion', confirmCompletion);
 
 // 4.5 Desk actions (replaces /review): FORWARD, APPROVE, REQUEST_CHANGES,
 // REJECT, ASSIGN_JE. The route only gates the role; the state machine decides

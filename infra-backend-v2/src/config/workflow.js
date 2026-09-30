@@ -18,6 +18,7 @@ export const STATUS = Object.freeze({
   APPROVED_FOR_TENDERING:    'APPROVED_FOR_TENDERING',
   TENDER_PUBLISHED:          'TENDER_PUBLISHED',
   WORK_IN_PROGRESS:          'WORK_IN_PROGRESS',
+  WORK_COMPLETED:            'WORK_COMPLETED',
   RETURNED_TO_JE:            'RETURNED_TO_JE',
   DENIED:                    'DENIED',
   CLOSED:                    'CLOSED',
@@ -52,7 +53,7 @@ export const LOG_ACTION = Object.freeze({
   REMINDER_SENT: 'REMINDER_SENT', SUBMITTED: 'SUBMITTED', FORWARDED: 'FORWARDED',
   APPROVED: 'APPROVED', CHANGES_REQUESTED: 'CHANGES_REQUESTED', REJECTED: 'REJECTED',
   TENDER_PUBLISHED: 'TENDER_PUBLISHED', WORK_AWARDED: 'WORK_AWARDED',
-  WORK_COMPLETED: 'WORK_COMPLETED', BILL_RECORDED: 'BILL_RECORDED',
+  WORK_COMPLETED: 'WORK_COMPLETED', WORK_REOPENED: 'WORK_REOPENED', BILL_RECORDED: 'BILL_RECORDED',
   BILL_UPDATED: 'BILL_UPDATED', CLOSED: 'CLOSED', OVERRIDE: 'OVERRIDE',
 });
 
@@ -375,11 +376,12 @@ export function canReadMessage(viewer, message) {
 
 // ---- post-approval ladder (tender milestones) ---------------------------------
 
-// Tender milestones updated by JE post-approval
+// Tender milestones updated by JE post-approval. CLOSED is not one of them:
+// only the applicant closes, by confirming the work (resolveCompletionCheck).
 export const TENDER_MILESTONES = Object.freeze([
   STATUS.TENDER_PUBLISHED,
   STATUS.WORK_IN_PROGRESS,
-  STATUS.CLOSED,
+  STATUS.WORK_COMPLETED,
 ]);
 
 // W6: forward-only. CLOSED is terminal and deliberately absent from the
@@ -388,20 +390,21 @@ const TENDER_LADDER = [
   STATUS.APPROVED_FOR_TENDERING,
   STATUS.TENDER_PUBLISHED,
   STATUS.WORK_IN_PROGRESS,
+  STATUS.WORK_COMPLETED,
   STATUS.CLOSED,
 ];
 const TENDER_LOG_ACTION = Object.freeze({
   [STATUS.TENDER_PUBLISHED]: LOG_ACTION.TENDER_PUBLISHED,
   [STATUS.WORK_IN_PROGRESS]: LOG_ACTION.WORK_AWARDED,
-  [STATUS.CLOSED]:           LOG_ACTION.CLOSED,
+  [STATUS.WORK_COMPLETED]:   LOG_ACTION.WORK_COMPLETED,
 });
 
 /** Guard for the JE's tender endpoint — the S1 fix. */
 export function resolveTenderUpdate({ currentStatus, milestone }) {
   const currentIdx = TENDER_LADDER.indexOf(currentStatus);
-  if (currentIdx === -1 || currentStatus === STATUS.CLOSED) {
+  if (currentIdx === -1 || currentStatus === STATUS.CLOSED || currentStatus === STATUS.WORK_COMPLETED) {
     throw new WorkflowError(
-      `Tender milestones can only be set after approval and before closure (ticket is at ${currentStatus}).`,
+      `Tender milestones can only be set after approval and before the work is marked complete (ticket is at ${currentStatus}).`,
       { code: 'NOT_APPROVED_YET', status: 403 }
     );
   }
@@ -419,4 +422,24 @@ export function resolveTenderUpdate({ currentStatus, milestone }) {
     );
   }
   return { status: milestone, logAction: TENDER_LOG_ACTION[milestone] };
+}
+
+/**
+ * The applicant's answer once the JE marked the work complete.
+ * accepted -> CLOSED; not accepted -> back to WORK_IN_PROGRESS with a reason.
+ */
+export function resolveCompletionCheck({ currentStatus, accepted, remarks }) {
+  if (currentStatus !== STATUS.WORK_COMPLETED) {
+    throw new WorkflowError(
+      `Only work marked complete can be confirmed (ticket is at ${currentStatus}).`,
+      { code: 'NOT_COMPLETED_YET', status: 409 });
+  }
+  if (accepted === true) return { status: STATUS.CLOSED, logAction: LOG_ACTION.CLOSED };
+  if (accepted !== false) {
+    throw new WorkflowError('accepted must be true or false.', { code: 'VALIDATION_ERROR', status: 400 });
+  }
+  if (typeof remarks !== 'string' || remarks.trim() === '') {
+    throw new WorkflowError('Say what is still not done.', { code: 'MESSAGE_REQUIRED', status: 400 });
+  }
+  return { status: STATUS.WORK_IN_PROGRESS, logAction: LOG_ACTION.WORK_REOPENED };
 }

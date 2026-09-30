@@ -95,7 +95,7 @@ const MOVEMENT_LABEL: Record<string, string> = {
   CREATED: 'Ticket raised', ASSIGNED: 'Assigned to JE', REASSIGNED: 'Reassigned',
   SUBMITTED: 'JE report submitted', FORWARDED: 'Forwarded', APPROVED: 'Approved',
   CHANGES_REQUESTED: 'Changes requested', REJECTED: 'Rejected',
-  TENDER_PUBLISHED: 'Tender published', WORK_AWARDED: 'Work awarded', WORK_COMPLETED: 'Work completed',
+  TENDER_PUBLISHED: 'Tender published', WORK_AWARDED: 'Work awarded', WORK_COMPLETED: 'Work completed', WORK_REOPENED: 'Applicant: work not done',
   BILL_RECORDED: 'Bill recorded', BILL_UPDATED: 'Bill updated', CLOSED: 'Closed', OVERRIDE: 'Administrative update',
   PASSED: 'Forwarded', RETURNED: 'Returned to JE', DENIED: 'Rejected',
 };

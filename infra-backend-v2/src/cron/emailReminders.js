@@ -22,7 +22,7 @@ import * as notificationModel from '../models/notificationModel.js';
 import { findDeskOwner } from '../models/deskModel.js';
 import { insertAudit } from '../models/auditModel.js';
 import { reminderDueAt, copiesAe } from '../services/notifier.js';
-import { reminderEmail } from '../services/emailTemplates.js';
+import { reminderEmail, applicantVerifyEmail } from '../services/emailTemplates.js';
 
 export const MAX_ATTEMPTS = 5;
 const HOUR = 60 * 60 * 1000;
@@ -30,7 +30,7 @@ const backoffMs = (attempts) => Math.min(5 * 60 * 1000 * 2 ** (attempts - 1), 6 
 
 async function loadTicket(connection, ticketId) {
   const [rows] = await connection.query(
-    `SELECT id, title, status, department, campus, assigned_je_id, current_desk_user_id
+    `SELECT id, title, status, department, campus, applicant_id, assigned_je_id, current_desk_user_id
        FROM tickets WHERE id = ?`, [ticketId]);
   return rows[0] ?? null;
 }
@@ -40,7 +40,9 @@ function reminderStillApplies(row, ticket) {
   if (!ticket) return false;
   const stop = (row.stop_when_status_not_in ?? '').split(',').filter(Boolean);
   if (!stop.includes(ticket.status)) return false;
-  const holder = row.desk === 'JE' ? ticket.assigned_je_id : ticket.current_desk_user_id;
+  const holder = row.desk === 'JE' ? ticket.assigned_je_id
+    : row.desk === 'APPLICANT' ? ticket.applicant_id
+      : ticket.current_desk_user_id;
   return holder === row.to_user_id;
 }
 
@@ -63,7 +65,9 @@ async function sendOne(row, { now, send }) {
       await notificationModel.markCancelled(pool, row.id, 'stage left or recipient changed');
       return 'cancelled';
     }
-    if (number > 1) {
+    if (number > 1 && row.desk === 'APPLICANT') {
+      ({ subject, body } = applicantVerifyEmail(ticket.id, number));
+    } else if (number > 1) {
       ({ subject, body } = reminderEmail({
         ticketId: ticket.id, title: ticket.title, recipientName: row.to_name, desk: row.desk, number,
         hoursPending: Math.floor((now - new Date(row.anchor_at)) / HOUR),

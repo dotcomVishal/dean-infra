@@ -48,7 +48,7 @@ export const getAdminMetrics = async (req, res) => {
       FROM reports r
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
       JOIN tickets t ON t.id = r.ticket_id
-      WHERE t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED')
+      WHERE t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED')
         AND t.is_mock = FALSE
     `);
 
@@ -79,7 +79,7 @@ export const getAdminMetrics = async (req, res) => {
         pendingInspection += c;
       } else if (s.startsWith('PENDING_')) {
         awaitingApproval += c;
-      } else if (s === 'APPROVED_FOR_TENDERING' || s === 'TENDER_PUBLISHED' || s === 'WORK_IN_PROGRESS') {
+      } else if (s === 'APPROVED_FOR_TENDERING' || s === 'TENDER_PUBLISHED' || s === 'WORK_IN_PROGRESS' || s === 'WORK_COMPLETED') {
         inTendering += c;
       } else if (s === 'CLOSED') {
         closed += c;

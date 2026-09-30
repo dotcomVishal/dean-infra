@@ -30,8 +30,9 @@ const NODE_LABEL: Record<string, (a: AuditEntry) => string> = {
   DENIED: () => 'Rejected',
   TENDER_PUBLISHED: () => 'Tender published',
   WORK_AWARDED: () => 'Work awarded',
-  WORK_COMPLETED: () => 'Work completed',
-  CLOSED: () => 'Closed',
+  WORK_COMPLETED: () => 'Work marked complete',
+  WORK_REOPENED: () => 'Applicant: work not done',
+  CLOSED: () => 'Closed — applicant confirmed',
 };
 const STATE_OF: Record<string, StepState> = {
   CHANGES_REQUESTED: 'returned', RETURNED: 'returned', REJECTED: 'rejected', DENIED: 'rejected',
@@ -41,6 +42,7 @@ const CHAIN = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'];
 const POST = [
   { key: 'tender', label: 'Tendering' },
   { key: 'work', label: 'Work in progress' },
+  { key: 'verify', label: 'Applicant verifies' },
   { key: 'closed', label: 'Closed' },
 ];
 
@@ -50,7 +52,7 @@ function futureSteps(status: string, assignees?: TicketDetail['assignees']): Ste
   const push = (key: string, label: string, sub?: string) => out.push({ key: `f-${key}`, label, sub, state: 'future' });
   if (status === 'CLOSED' || status === 'DENIED') return out;
 
-  const postIdx: Record<string, number> = { APPROVED_FOR_TENDERING: 0, TENDER_PUBLISHED: 1, WORK_IN_PROGRESS: 2 };
+  const postIdx: Record<string, number> = { APPROVED_FOR_TENDERING: 0, TENDER_PUBLISHED: 1, WORK_IN_PROGRESS: 2, WORK_COMPLETED: 3 };
   if (status in postIdx) {
     POST.slice(postIdx[status] + 1).forEach((p) => push(p.key, p.label));
     return out;

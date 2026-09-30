@@ -13,13 +13,13 @@ export async function insertEmail(connection, { ticketId, toUserId, audience = '
 }
 
 export async function insertReminder(connection, {
-  ticketId, toUserId, desk, subject, body, anchor, dueAt, stopStatuses,
+  ticketId, toUserId, desk, subject, body, anchor, dueAt, stopStatuses, audience = 'STAFF',
 }) {
   const [r] = await connection.query(
     `INSERT INTO notifications
        (ticket_id, to_user_id, kind, audience, desk, subject, body, anchor_at, next_due_at, stop_when_status_not_in)
-     VALUES (?, ?, 'REMINDER', 'STAFF', ?, ?, ?, ?, ?, ?)`,
-    [ticketId, toUserId, desk, subject.slice(0, 255), body, anchor, dueAt, stopStatuses.join(',')]
+     VALUES (?, ?, 'REMINDER', ?, ?, ?, ?, ?, ?, ?)`,
+    [ticketId, toUserId, audience, desk, subject.slice(0, 255), body, anchor, dueAt, stopStatuses.join(',')]
   );
   return r.insertId;
 }

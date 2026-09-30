@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildViewer, canViewTicket, capabilities, canViewAttachment, filterMessages, filterAudit,
-  buildTicketDetails, redactQueueRow, stageLabel,
+  buildTicketDetails, redactQueueRow, stageLabel, uploadCategory,
 } from '../src/services/visibility.js';
 import { reminderDueAt, copiesAe } from '../src/services/notifier.js';
 import { applicantStageEmail } from '../src/services/emailTemplates.js';
@@ -58,7 +58,7 @@ test('staff who raised the ticket get the union of applicant and staff views', (
 const att = (document_category, extra = {}) => ({ document_category, uploaded_by: 10, uploader_role: 'JE', ...extra });
 test('canViewAttachment: category x viewer matrix', () => {
   const t = ticket({ status: 'WORK_IN_PROGRESS' });
-  const cats = ['APPLICANT_EVIDENCE', 'JE_SITE_PHOTO', 'JE_ESTIMATE_DOC', 'CLERK_TENDER_DOC', 'FINANCE_SANCTION', 'AUTHORITY_REMARKS'];
+  const cats = ['APPLICANT_EVIDENCE', 'JE_SITE_PHOTO', 'JE_ESTIMATE_DOC', 'CLERK_TENDER_DOC', 'FINANCE_SANCTION', 'AUTHORITY_REMARKS', 'DESK_DOC', 'WORK_DOC'];
   //                          applicant je     ae    se    dean  dir   clerk  acct   admin
   const want = {
     APPLICANT_EVIDENCE: [true,  true, true, true, true, true, true, true, true],
@@ -67,6 +67,8 @@ test('canViewAttachment: category x viewer matrix', () => {
     CLERK_TENDER_DOC:   [false, true, true, true, true, true, true, true, true],
     FINANCE_SANCTION:   [false, false, true, true, true, true, true, true, true],
     AUTHORITY_REMARKS:  [false, false, false, false, true, true, false, false, true], // uploaded by DEAN below
+    DESK_DOC:           [false, true, true, true, true, true, true, true, true],   // flows back to the JE
+    WORK_DOC:           [true,  true, true, true, true, true, true, true, true],   // applicant verifies against it
   };
   const viewers = [applicant, je, ae, se, dean, dir, clerk, acct, admin];
   for (const cat of cats) {
@@ -83,6 +85,23 @@ test('applicant cannot download JE site photos; unrelated JE cannot download any
   assert.equal(canViewAttachment(V(applicant, t), t, att('JE_SITE_PHOTO', { uploaded_by: 10 })), false);
   assert.equal(canViewAttachment(V(otherJe, t), t, att('APPLICANT_EVIDENCE', { uploaded_by: 100 })), false);
   assert.equal(canViewAttachment(V(applicant, t), t, att('APPLICANT_EVIDENCE', { uploaded_by: 100 })), true);
+});
+
+test('uploadCategory: decided by who uploads, refused on closed tickets and to outsiders', () => {
+  const wip = ticket({ status: 'WORK_IN_PROGRESS' });
+  const pre = ticket();
+  const cat = (u, t, facts = {}) => uploadCategory(V(u, t, facts), t);
+  assert.equal(cat(applicant, wip), 'APPLICANT_EVIDENCE');
+  assert.equal(cat(je, pre), 'JE_ESTIMATE_DOC');
+  assert.equal(cat(je, wip), 'WORK_DOC');
+  assert.equal(cat(ae, wip, { scopes: scopesNorthCivil }), 'DESK_DOC');
+  for (const u of [se, dean, dir, admin]) assert.equal(cat(u, wip), 'DESK_DOC');
+  assert.equal(cat(clerk, wip), 'CLERK_TENDER_DOC');
+  assert.equal(cat(acct, wip), 'FINANCE_SANCTION');
+  assert.equal(cat(clerk, pre), null);                    // Clerical cannot see a pre-approval ticket
+  assert.equal(cat(otherJe, wip), null);
+  assert.equal(cat(applicant, ticket({ status: 'CLOSED' })), null);
+  assert.equal(cat(dir, ticket({ status: 'DENIED' })), null);
 });
 
 const msg = (kind, vfr, o = {}) => ({ id: 1, kind, visible_from_rank: vfr, author_name: 'Dean Name', to_name: 'JE Name', body: 'x', ...o });

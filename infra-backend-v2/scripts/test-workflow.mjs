@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STATUS, ROLE, ACTION, WorkflowError, availableActions, resolveAction, planMessages,
-  nextOpenRequestId, canReadMessage, resolveTenderUpdate, deskForStatus,
+  nextOpenRequestId, canReadMessage, resolveTenderUpdate, resolveCompletionCheck, deskForStatus,
 } from '../src/config/workflow.js';
 
 const LIMITS = { SE_APPROVE: 50_000, DEAN_APPROVE: 500_000 };
@@ -290,9 +290,22 @@ test('tender ladder is forward-only and maps to the new audit actions', () => {
   assert.deepEqual(resolveTenderUpdate({ currentStatus: STATUS.APPROVED_FOR_TENDERING, milestone: STATUS.TENDER_PUBLISHED }),
     { status: STATUS.TENDER_PUBLISHED, logAction: 'TENDER_PUBLISHED' });
   assert.equal(resolveTenderUpdate({ currentStatus: STATUS.TENDER_PUBLISHED, milestone: STATUS.WORK_IN_PROGRESS }).logAction, 'WORK_AWARDED');
-  assert.equal(resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.CLOSED }).logAction, 'CLOSED');
+  assert.equal(resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.WORK_COMPLETED }).logAction, 'WORK_COMPLETED');
+  // Only the applicant closes: the JE can no longer pick CLOSED, nor move a completed ticket.
+  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.CLOSED }), 'INVALID_MILESTONE');
+  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_COMPLETED, milestone: STATUS.WORK_COMPLETED }), 'NOT_APPROVED_YET');
   throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.TENDER_PUBLISHED }), 'BACKWARD_TRANSITION');
   throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.CLOSED, milestone: STATUS.CLOSED }), 'NOT_APPROVED_YET');
   throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.ASSIGNED_TO_JE, milestone: STATUS.CLOSED }), 'NOT_APPROVED_YET');
   throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.APPROVED_FOR_TENDERING, milestone: 'BANANA' }), 'INVALID_MILESTONE');
+});
+
+test('applicant completion check: confirm closes, dispute reopens with a reason', () => {
+  const at = STATUS.WORK_COMPLETED;
+  assert.deepEqual(resolveCompletionCheck({ currentStatus: at, accepted: true }), { status: STATUS.CLOSED, logAction: 'CLOSED' });
+  assert.deepEqual(resolveCompletionCheck({ currentStatus: at, accepted: false, remarks: 'Tap still leaks' }),
+    { status: STATUS.WORK_IN_PROGRESS, logAction: 'WORK_REOPENED' });
+  throwsCode(() => resolveCompletionCheck({ currentStatus: at, accepted: false, remarks: '  ' }), 'MESSAGE_REQUIRED');
+  throwsCode(() => resolveCompletionCheck({ currentStatus: at, accepted: 'yes' }), 'VALIDATION_ERROR');
+  throwsCode(() => resolveCompletionCheck({ currentStatus: STATUS.WORK_IN_PROGRESS, accepted: true }), 'NOT_COMPLETED_YET');
 });

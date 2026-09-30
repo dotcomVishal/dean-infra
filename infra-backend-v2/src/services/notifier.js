@@ -16,7 +16,7 @@ import * as notificationModel from '../models/notificationModel.js';
 import { stageLabel } from './visibility.js';
 import {
   applicantStageEmail, jeAssignmentEmail, unassignedEmail,
-  changeRequestEmail, movementEmail,
+  changeRequestEmail, movementEmail, applicantVerifyEmail,
 } from './emailTemplates.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -26,6 +26,8 @@ export const AE_COPY_FROM = 4;
 
 export const JE_STAGE_STATUSES = Object.freeze([STATUS.ASSIGNED_TO_JE, STATUS.RETURNED_TO_JE]);
 export const AE_STAGE_STATUSES = Object.freeze([STATUS.UNASSIGNED]);
+export const APPLICANT_STAGE_STATUSES = Object.freeze([STATUS.WORK_COMPLETED]);
+const STOP_STATUSES = Object.freeze({ JE: JE_STAGE_STATUSES, AE: AE_STAGE_STATUSES, APPLICANT: APPLICANT_STAGE_STATUSES });
 
 /** When is reminder number `number` (1-based) due, for a reminder series anchored at `anchor`? */
 export function reminderDueAt(anchor, number) {
@@ -80,7 +82,7 @@ export async function startDeskReminders(connection, { ticketId, desk, user, ema
   return notificationModel.insertReminder(connection, {
     ticketId, toUserId: user.id, desk, subject: email.subject, body: email.body,
     anchor: now, dueAt: reminderDueAt(now, 1),
-    stopStatuses: desk === 'JE' ? JE_STAGE_STATUSES : AE_STAGE_STATUSES,
+    stopStatuses: STOP_STATUSES[desk], audience: desk === 'APPLICANT' ? 'APPLICANT' : 'STAFF',
   });
 }
 
@@ -166,7 +168,11 @@ export async function notifyTransition(connection, {
   await notifyApplicantStage(connection, { ticketId, applicantId: t.applicant_id, fromStatus, toStatus, now });
 }
 
-/** Tender / award / closure (Clerical or JE milestone): tell the JE and the AE, and the applicant if the stage moved. */
+/**
+ * Tender / award / completion / closure: tell the JE and the AE, and the
+ * applicant if the stage moved. WORK_COMPLETED instead starts the applicant's
+ * verification reminders (instant, +12h, +24h, +72h, then daily until they answer).
+ */
 export async function notifyPostApproval(connection, { ticketId, fromStatus, toStatus, headline, now = new Date() }) {
   const t = await loadTicketBrief(connection, ticketId);
   if (t.is_mock) return;
@@ -179,6 +185,15 @@ export async function notifyPostApproval(connection, { ticketId, fromStatus, toS
       ticketId, toUserId: user.id, now,
       email: movementEmail({ ticketId, title: t.title, recipientName: user.name, desk, headline }),
     });
+  }
+  if (toStatus === STATUS.WORK_COMPLETED) {
+    const applicant = await loadUser(connection, t.applicant_id);
+    if (applicant) {
+      await startDeskReminders(connection, {
+        ticketId, desk: 'APPLICANT', user: applicant, email: applicantVerifyEmail(ticketId), now,
+      });
+    }
+    return;
   }
   await notifyApplicantStage(connection, { ticketId, applicantId: t.applicant_id, fromStatus, toStatus, now });
 }

@@ -25,12 +25,16 @@ const rejects = async (p, code) => { try { await p; } catch (e) { eq(e.code, cod
                                      throw new Error(`expected ${code}, nothing thrown`); };
 
 console.log('\n=== happy path ===');
-await t('approved ticket + CLOSED -> commits and writes an audit row', async () => {
+await t('approved ticket + WORK_COMPLETED -> commits and writes an audit row', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.APPROVED_FOR_TENDERING }] });
-  const next = await applyTenderUpdate(c, { ticketId: 7, jeId: 3, milestone: STATUS.CLOSED });
-  eq(next, STATUS.CLOSED, 'next status');
+  const next = await applyTenderUpdate(c, { ticketId: 7, jeId: 3, milestone: STATUS.WORK_COMPLETED });
+  eq(next, STATUS.WORK_COMPLETED, 'next status');
   if (!ran(c, 'INSERT INTO audit_logs')) throw new Error('no audit row written');
-  eq(c.calls.find(x => x.sql.includes('INSERT')).params[2], 'CLOSED', 'audit action');
+  eq(c.calls.find(x => x.sql.includes('INSERT')).params[2], 'WORK_COMPLETED', 'audit action');
+});
+await t('JE can no longer close: CLOSED is the applicant\'s call', async () => {
+  const c = mock({ selectRows: [{ id: 7, status: STATUS.WORK_IN_PROGRESS }] });
+  await rejects(applyTenderUpdate(c, { ticketId: 7, jeId: 3, milestone: STATUS.CLOSED }), 'INVALID_MILESTONE');
 });
 
 console.log('\n=== S1: the JE self-approve attack ===');
@@ -62,14 +66,14 @@ await t('ticket belongs to a different JE -> 404, not a fake success', async () 
 });
 await t('concurrent edit: CAS affectedRows=0 -> 409, and NO audit row', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.APPROVED_FOR_TENDERING }], affectedRows: 0 });
-  await rejects(applyTenderUpdate(c, { ticketId: 7, jeId: 3, milestone: STATUS.CLOSED }), 'CONFLICT');
+  await rejects(applyTenderUpdate(c, { ticketId: 7, jeId: 3, milestone: STATUS.WORK_COMPLETED }), 'CONFLICT');
   if (ran(c, 'INSERT INTO audit_logs')) throw new Error('audit row written for a write that never happened');
 });
 
 console.log('\n=== ownership + locking ===');
 await t('the locking SELECT binds assigned_je_id and uses FOR UPDATE', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.APPROVED_FOR_TENDERING }] });
-  await applyTenderUpdate(c, { ticketId: 7, jeId: 42, milestone: STATUS.CLOSED });
+  await applyTenderUpdate(c, { ticketId: 7, jeId: 42, milestone: STATUS.WORK_COMPLETED });
   eq(c.calls[0].params[1], 42, 'jeId bound into SELECT');
   if (!c.calls[0].sql.includes('FOR UPDATE')) throw new Error('row is not locked');
 });

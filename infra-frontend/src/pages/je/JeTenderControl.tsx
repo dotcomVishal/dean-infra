@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
+import { GroupedAttachments, UploadFiles } from '../../components/ticket/Attachments';
 
 interface TicketSummary {
   id: number;
@@ -49,6 +50,7 @@ export default function JeTenderControl() {
           t.status === 'APPROVED_FOR_TENDERING' ||
           t.status === 'TENDER_PUBLISHED' ||
           t.status === 'WORK_IN_PROGRESS' ||
+          t.status === 'WORK_COMPLETED' ||
           t.status === 'CLOSED'
       );
       setTickets(tenderEligible);
@@ -88,7 +90,7 @@ export default function JeTenderControl() {
         const current = res.data.ticket?.status;
         if (current === 'APPROVED_FOR_TENDERING') setSelectedMilestone('TENDER_PUBLISHED');
         else if (current === 'TENDER_PUBLISHED') setSelectedMilestone('WORK_IN_PROGRESS');
-        else if (current === 'WORK_IN_PROGRESS') setSelectedMilestone('CLOSED');
+        else if (current === 'WORK_IN_PROGRESS') setSelectedMilestone('WORK_COMPLETED');
         else setSelectedMilestone('');
       } catch (err) {
         console.error('Failed to fetch ticket details:', err);
@@ -156,9 +158,17 @@ export default function JeTenderControl() {
       bg: 'bg-sky-500/10',
     },
     {
+      key: 'WORK_COMPLETED',
+      title: '4. Work Completed',
+      desc: 'JE marks the work done and uploads completion photos. The applicant is e-mailed until they verify it.',
+      icon: CheckCircle2,
+      color: 'text-amber-600 dark:text-amber-400',
+      bg: 'bg-amber-500/10',
+    },
+    {
       key: 'CLOSED',
-      title: '4. Completed & Closed',
-      desc: 'Work verified on site by JE. Completion certificate filed and ticket formally closed.',
+      title: '5. Verified & Closed',
+      desc: 'Applicant confirmed the work on site. Ticket formally closed. If they report it not done, it returns to Work In Progress.',
       icon: CheckCheck,
       color: 'text-slate-700 dark:text-slate-300',
       bg: 'bg-slate-500/10',
@@ -409,7 +419,28 @@ export default function JeTenderControl() {
                 </div>
 
                 {/* Milestone Update Form */}
-                {ticketDetails.status !== 'CLOSED' && (
+                {/* Files: officers' documents flow back here; JE adds work / completion photos. */}
+                <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl p-6 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-4">
+                  <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Documents
+                  </h3>
+                  <GroupedAttachments files={ticketDetails.attachments ?? []} empty="No documents yet." />
+                  {ticketDetails.status !== 'CLOSED' && (
+                    <UploadFiles
+                      ticketId={ticketDetails.id}
+                      label="Upload work photos / docs"
+                      onDone={() => api.get(`/tickets/${ticketDetails.id}/details`).then((r) => setTicketDetails(r.data.ticket))}
+                    />
+                  )}
+                </div>
+
+                {ticketDetails.status === 'WORK_COMPLETED' && (
+                  <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 text-xs font-semibold">
+                    Waiting for the applicant to verify the work. They are e-mailed until they confirm or send it back.
+                  </div>
+                )}
+
+                {!['WORK_COMPLETED', 'CLOSED'].includes(ticketDetails.status) && (
                   <form
                     onSubmit={handleMilestoneUpdate}
                     className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl p-6 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-4"
@@ -447,8 +478,8 @@ export default function JeTenderControl() {
                               WORK_IN_PROGRESS (Work Order Issued & Site Work Active)
                             </option>
                           )}
-                          <option value="CLOSED">
-                            CLOSED (Work Fully Completed & Inspected on Site)
+                          <option value="WORK_COMPLETED">
+                            WORK_COMPLETED (Work done — upload completion photos first)
                           </option>
                         </select>
                       </div>

@@ -18,7 +18,8 @@ import { DESK_RANK, STATUS, canReadMessage } from '../config/workflow.js';
 const AUTHORITY_MIN_RANK = DESK_RANK.SE;
 
 export const POST_APPROVAL_STATUSES = Object.freeze([
-  STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.WORK_IN_PROGRESS, STATUS.CLOSED,
+  STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.WORK_IN_PROGRESS,
+  STATUS.WORK_COMPLETED, STATUS.CLOSED,
 ]);
 
 // ---- stage in plain words (what an applicant may know) -------------------------
@@ -33,6 +34,7 @@ const STAGE_LABEL = Object.freeze({
   [STATUS.APPROVED_FOR_TENDERING]:    'Approved — tendering',
   [STATUS.TENDER_PUBLISHED]:          'Approved — tendering',
   [STATUS.WORK_IN_PROGRESS]:          'Work in progress',
+  [STATUS.WORK_COMPLETED]:            'Work done — please verify',
   [STATUS.CLOSED]:                    'Completed',
   [STATUS.DENIED]:                    'Rejected',
 });
@@ -138,7 +140,10 @@ export function canViewAttachment(viewer, ticket, att) {
     case 'JE_SITE_PHOTO':
     case 'JE_ESTIMATE_DOC':
     case 'CLERK_TENDER_DOC':
+    case 'DESK_DOC': // approval-chain files: flow back down to the JE, never to the applicant
       return caps.staff !== null;
+    case 'WORK_DOC': // execution / completion proof: the applicant verifies against it
+      return caps.applicantView || caps.staff !== null;
     case 'FINANCE_SANCTION':
       return caps.bills;
     case 'AUTHORITY_REMARKS':
@@ -147,6 +152,22 @@ export function canViewAttachment(viewer, ticket, att) {
         || (caps.rank >= DESK_RANK.AE && caps.rank >= (DESK_RANK[att.uploader_role] ?? Infinity));
     default:
       return false;
+  }
+}
+
+/**
+ * Category a file uploaded through POST /tickets/:id/attachments is stored
+ * under, from WHO uploads it (never from the client). null = may not upload.
+ */
+export function uploadCategory(viewer, ticket) {
+  if (!canViewTicket(viewer, ticket)) return null;
+  if ([STATUS.CLOSED, STATUS.DENIED].includes(ticket.status)) return null;
+  switch (staffRole(viewer, ticket)) {
+    case null:         return 'APPLICANT_EVIDENCE';
+    case 'JE':         return POST_APPROVAL_STATUSES.includes(ticket.status) ? 'WORK_DOC' : 'JE_ESTIMATE_DOC';
+    case 'CLERICAL':   return 'CLERK_TENDER_DOC';
+    case 'ACCOUNTANT': return 'FINANCE_SANCTION';
+    default:           return 'DESK_DOC'; // AE / SE / Dean / Director / Sysadmin
   }
 }
 
@@ -169,14 +190,15 @@ const NEUTRAL_AUDIT = Object.freeze({
   REMINDER_SENT: 'Reminder sent', SUBMITTED: 'Report submitted', FORWARDED: 'Forwarded for review',
   APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REJECTED: 'Rejected',
   TENDER_PUBLISHED: 'Tender published', WORK_AWARDED: 'Work awarded', WORK_COMPLETED: 'Work completed',
+  WORK_REOPENED: 'Applicant reports work not done',
   BILL_RECORDED: 'Bill recorded', BILL_UPDATED: 'Bill updated', CLOSED: 'Closed', OVERRIDE: 'Administrative update',
   PASSED: 'Forwarded for review', RETURNED: 'Returned to JE', DENIED: 'Rejected',
 });
 // Free text a JE may read: their own, and system lines that carry no authority remark.
-const JE_READABLE_REMARK_ACTIONS = new Set(['CREATED', 'ASSIGNED', 'SUBMITTED', 'REMINDER_SENT']);
+const JE_READABLE_REMARK_ACTIONS = new Set(['CREATED', 'ASSIGNED', 'SUBMITTED', 'REMINDER_SENT', 'WORK_REOPENED', 'CLOSED']);
 // Post-approval trail, the only part of the audit log Clerical/Accountant see.
 const FINANCE_AUDIT_ACTIONS = new Set([
-  'APPROVED', 'TENDER_PUBLISHED', 'WORK_AWARDED', 'WORK_COMPLETED', 'BILL_RECORDED', 'BILL_UPDATED', 'CLOSED',
+  'APPROVED', 'TENDER_PUBLISHED', 'WORK_AWARDED', 'WORK_COMPLETED', 'WORK_REOPENED', 'BILL_RECORDED', 'BILL_UPDATED', 'CLOSED',
 ]);
 
 /**

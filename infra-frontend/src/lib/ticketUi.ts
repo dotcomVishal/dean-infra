@@ -47,6 +47,7 @@ const STAFF_STATUS: Record<string, string> = {
   APPROVED_FOR_TENDERING: 'Approved — awaiting tender',
   TENDER_PUBLISHED: 'Tender published',
   WORK_IN_PROGRESS: 'Work in progress',
+  WORK_COMPLETED: 'Work done — awaiting applicant confirmation',
   CLOSED: 'Closed',
   DENIED: 'Rejected',
 };
@@ -65,6 +66,7 @@ const APPLICANT_STAGE: Record<string, string> = {
   APPROVED_FOR_TENDERING: 'Approved — tendering',
   TENDER_PUBLISHED: 'Approved — tendering',
   WORK_IN_PROGRESS: 'Work in progress',
+  WORK_COMPLETED: 'Work done — please verify',
   CLOSED: 'Completed',
   DENIED: 'Rejected',
 };
@@ -107,7 +109,7 @@ export const formatAge = (hours: number) => {
 };
 
 export const isPostApproval = (status: string) =>
-  ['APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED'].includes(status);
+  ['APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED'].includes(status);
 
 export const mapsHref = (t: { lat?: number | string | null; lng?: number | string | null; location?: string }) => {
   let q = encodeURIComponent(t.location || '');

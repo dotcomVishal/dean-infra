@@ -1,6 +1,6 @@
 import pool from '../config/db.js';
 import {
-  ACTION, resolveAction, resolveTenderUpdate, planMessages, nextOpenRequestId,
+  ACTION, resolveAction, resolveTenderUpdate, resolveCompletionCheck, planMessages, nextOpenRequestId,
   WorkflowError, deskForStatus,
 } from '../config/workflow.js';
 import { moveFile, cleanupTempFiles } from '../utils/fileManager.js';
@@ -17,7 +17,7 @@ import { pinsFor, isSelfAction } from './actionController.js';
 import { testPrefix } from '../middleware/testRole.js';
 import { notifyTicketCreated, notifyTransition, notifyPostApproval } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
-import { redactQueueRow } from '../services/visibility.js';
+import { redactQueueRow, loadViewer, uploadCategory } from '../services/visibility.js';
 import { sendServerError } from '../utils/httpError.js';
 
 // D2: no runtime DDL. Schema is owned by migrations only -- ALTER TABLE inside
@@ -250,7 +250,7 @@ export const getQueue = async (req, res) => {
     if (tab === 'pending') {
       whereClauses.push("t.status = 'PENDING_DIRECTOR_APPROVAL'");
     } else if (tab === 'capex') {
-      whereClauses.push("t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED')");
+      whereClauses.push("t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED')");
     }
   } else if (role === 'CLERICAL') {
     if (tab === 'awaiting_nit' || tab === 'pending') {
@@ -258,17 +258,17 @@ export const getQueue = async (req, res) => {
     } else if (tab === 'published') {
       whereClauses.push("t.status = 'TENDER_PUBLISHED'");
     } else if (tab === 'in_progress') {
-      whereClauses.push("t.status = 'WORK_IN_PROGRESS'");
+      whereClauses.push("t.status IN ('WORK_IN_PROGRESS', 'WORK_COMPLETED')");
     } else {
-      whereClauses.push("t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED')");
+      whereClauses.push("t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED')");
     }
   } else if (role === 'ACCOUNTANT') {
     if (tab === 'wip') {
-      whereClauses.push("t.status = 'WORK_IN_PROGRESS'");
+      whereClauses.push("t.status IN ('WORK_IN_PROGRESS', 'WORK_COMPLETED')");
     } else if (tab === 'closed') {
       whereClauses.push("t.status = 'CLOSED'");
     } else {
-      whereClauses.push("t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED')");
+      whereClauses.push("t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED')");
     }
   } else if (role !== 'SYSADMIN') {
     return res.status(403).json({ success: false, message: 'Unauthorized role for queue.' });
@@ -300,7 +300,9 @@ const MAX_ESTIMATE = 99_999_999.99;
 const POST_APPROVAL_HEADLINE = Object.freeze({
   TENDER_PUBLISHED: 'Tender published',
   WORK_IN_PROGRESS: 'Work awarded — work in progress',
-  CLOSED: 'Closed',
+  WORK_COMPLETED: 'Work marked complete — awaiting applicant confirmation',
+  WORK_REOPENED: 'Applicant reports the work is not done — back in progress',
+  CLOSED: 'Closed — applicant confirmed the work',
 });
 
 export async function applyReportSubmission(
@@ -895,7 +897,7 @@ export const getAccountantOverview = async (req, res) => {
       FROM reports r
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
       JOIN tickets t ON t.id = r.ticket_id
-      WHERE t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'CLOSED')
+      WHERE t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED')
         AND t.is_mock = FALSE
     `);
 
@@ -928,5 +930,112 @@ export const getAccountantOverview = async (req, res) => {
     });
   } catch (error) {
     return sendServerError(req, res, error, 'getAccountantOverview error');
+  }
+};
+// -------------------------------------------------------------
+// FILES FROM ANY DESK: POST /:ticket_id/attachments
+// -------------------------------------------------------------
+// Anyone who can see the ticket may add files while it is open. The category
+// (and so who may read the file) comes from WHO uploads, never from the client:
+// see visibility.uploadCategory.
+const UPLOAD_FOLDER = Object.freeze({
+  APPLICANT_EVIDENCE: 'applicant_evidence', JE_ESTIMATE_DOC: 'je_reports/estimate_docs',
+  WORK_DOC: 'work_docs', DESK_DOC: 'desk_docs', CLERK_TENDER_DOC: 'tender_docs',
+  FINANCE_SANCTION: 'finance_docs',
+});
+
+export const uploadAttachments = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  const files = req.files ?? [];
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    cleanupTempFiles(files);
+    return res.status(400).json({ success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
+  }
+  if (files.length === 0) {
+    return res.status(400).json({ success: false, code: 'NO_FILES', message: 'Attach at least one file.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT * FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+    const ticket = rows[0];
+    const viewer = ticket ? await loadViewer(connection, req.user, ticket) : null;
+    const category = ticket ? uploadCategory(viewer, ticket) : null;
+    if (!category) {
+      throw new WorkflowError('You cannot add files to this ticket (not yours, or already closed).',
+        { code: 'UPLOAD_NOT_ALLOWED', status: 403 });
+    }
+    const ids = [];
+    for (const file of files) {
+      const fileUrl = await moveFile(file, ticketId, UPLOAD_FOLDER[category]);
+      const [r] = await connection.query(
+        'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+        [ticketId, fileUrl, req.user.id, category]);
+      ids.push(r.insertId);
+    }
+    await connection.commit();
+    res.status(201).json({ success: true, category, attachment_ids: ids });
+  } catch (error) {
+    await connection.rollback();
+    cleanupTempFiles(files);
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
+    return sendServerError(req, res, error, 'uploadAttachments');
+  } finally {
+    connection.release();
+  }
+};
+
+// -------------------------------------------------------------
+// APPLICANT CLOSES: POST /:ticket_id/confirm-completion { accepted, remarks }
+// -------------------------------------------------------------
+export const confirmCompletion = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({ success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
+  }
+  const { accepted, remarks } = req.body ?? {};
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    // Ownership in the SELECT: only the person who raised the ticket may answer.
+    const [rows] = await connection.query(
+      'SELECT id, status FROM tickets WHERE id = ? AND applicant_id = ? FOR UPDATE', [ticketId, req.user.id]);
+    if (rows.length === 0) {
+      throw new WorkflowError(`Ticket ${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
+    }
+    const fromStatus = rows[0].status;
+    const { status, logAction } = resolveCompletionCheck({ currentStatus: fromStatus, accepted, remarks });
+
+    const [upd] = await connection.query(
+      'UPDATE tickets SET status = ? WHERE id = ? AND status = ?', [status, ticketId, fromStatus]);
+    if (upd.affectedRows !== 1) {
+      throw new WorkflowError('This ticket changed while you were working on it. Reload and try again.',
+        { code: 'CONFLICT', status: 409 });
+    }
+    const note = typeof remarks === 'string' ? remarks.trim() : '';
+    await insertAudit(connection, {
+      ticketId, userId: req.user.id, action: logAction,
+      remarks: testPrefix(req) + (accepted ? `Applicant confirmed the work is done${note ? `: ${note}` : ''}` : `Applicant: work not done — ${note}`),
+      fromStatus, toStatus: status,
+    });
+    await notifyPostApproval(connection, {
+      ticketId, fromStatus, toStatus: status,
+      headline: POST_APPROVAL_HEADLINE[accepted ? 'CLOSED' : 'WORK_REOPENED'],
+    });
+    await connection.commit();
+    kickOutbox();
+    res.json({ success: true, status, message: accepted ? 'Thank you. Ticket closed.' : 'Sent back to the engineer.' });
+  } catch (error) {
+    await connection.rollback();
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
+    return sendServerError(req, res, error, 'confirmCompletion');
+  } finally {
+    connection.release();
   }
 };

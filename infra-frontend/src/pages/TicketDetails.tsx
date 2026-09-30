@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Building2, Image as ImageIcon, Loader2, Mail, MapPin, Phone, User, FileText, ExternalLink } from 'lucide-react';
+import { Building2, Image as ImageIcon, Loader2, Mail, MapPin, Phone, User, FileText, ExternalLink, Paperclip } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
 import { errorMessage, mapsHref } from '../lib/ticketUi';
@@ -13,7 +13,7 @@ import { ChangeRequestBanner, MessagesTimeline } from '../components/ticket/Mess
 import { DecisionBrief, ReportCard } from '../components/ticket/Brief';
 import PostApproval from '../components/ticket/PostApproval';
 import ApplicantView from '../components/ticket/ApplicantView';
-import { AttachmentList } from '../components/ticket/Attachments';
+import { AttachmentList, GroupedAttachments, UploadFiles } from '../components/ticket/Attachments';
 
 // Roles that get the Decision Brief (AE and above).
 const BRIEF_ROLES = ['AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN'];
@@ -61,12 +61,16 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
   // Applicant lockdown: an APPLICANT account, or any viewer whose payload has no
   // staff view (the staff payload always carries applicant_id).
   if (role === 'APPLICANT' || ticket.applicant_id === undefined) {
-    return <ApplicantView ticket={ticket} />;
+    return <ApplicantView ticket={ticket} onChanged={load} />;
   }
 
   const myDesk = ticket.available_actions?.desk ?? (['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'].includes(role) ? role : null);
   const hasBrief = BRIEF_ROLES.includes(role);
   const applicantPhotos = ticket.attachments.filter((a) => !a.document_category || a.document_category === 'APPLICANT_EVIDENCE');
+  // Everything not shown elsewhere: officers' files, tender/finance docs, JE work photos.
+  const deskFiles = ticket.attachments.filter(
+    (a) => a.document_category && a.document_category !== 'APPLICANT_EVIDENCE' && a.report_id == null);
+  const open = ticket.status !== 'CLOSED' && ticket.status !== 'DENIED';
   const phone = ticket.applicant_phone || ticket.contact_phone;
 
   return (
@@ -135,6 +139,11 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
 
           <Card title="Photos" icon={<ImageIcon size={14} />}>
             <AttachmentList files={applicantPhotos} empty="No photos." cols="grid-cols-2" />
+          </Card>
+
+          <Card title="Documents" icon={<Paperclip size={14} />}>
+            <GroupedAttachments files={deskFiles} empty="No documents yet." />
+            {open && <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-700/60"><UploadFiles ticketId={ticket.id} onDone={load} /></div>}
           </Card>
         </div>
       </div>
