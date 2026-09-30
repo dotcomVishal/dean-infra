@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
+import { testRoleFor } from '../store/testModeStore';
 
 const baseURL = import.meta.env.VITE_API_URL || '/api';
 
@@ -19,6 +20,9 @@ api.interceptors.request.use(async (config) => {
   if (token) {
     config.headers.Authorization = 'Bearer ' + token;
   }
+  // Sysadmin test mode: only for the chosen test ticket (see store/testModeStore).
+  const actAs = testRoleFor(config.url);
+  if (actAs) config.headers['X-Test-Role'] = actAs;
   return config;
 });
 

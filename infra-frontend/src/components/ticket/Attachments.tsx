@@ -115,7 +115,7 @@ export function DocLink({ file, dark = false }: { file: Attachment; dark?: boole
       a.remove();
       setTimeout(() => URL.revokeObjectURL(href), 10_000);
     } catch {
-      toast.error('Could not download this file. It may no longer be available to you.');
+      toast.error('Could not download this file.');
     } finally {
       setBusy(false);
     }

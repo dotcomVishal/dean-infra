@@ -128,7 +128,7 @@ export default function AdminUsers() {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserData.email || !newUserData.full_name) {
-      toast.error('Please fill out email and full name.');
+      toast.error('Enter an e-mail and a name.');
       return;
     }
 
@@ -142,7 +142,7 @@ export default function AdminUsers() {
         department: newUserData.department
       });
       if (res.data.success) {
-        toast.success('User account created successfully.');
+        toast.success('User created.');
         setCreateUserModalOpen(false);
         setNewUserData({
           email: '',
@@ -154,7 +154,7 @@ export default function AdminUsers() {
       }
     } catch (err: any) {
       console.error('Create user error:', err);
-      toast.error(err.response?.data?.message || 'Failed to create user account.');
+      toast.error(err.response?.data?.message || 'Could not create the user.');
     } finally {
       setIsSaving(false);
     }
@@ -189,13 +189,13 @@ export default function AdminUsers() {
 
       const res = await api.put(`/admin/users/${selectedUser.id}`, payload);
       if (res.data.success) {
-        toast.success('User account updated successfully.');
+        toast.success('User updated.');
         setEditUserModalOpen(false);
         fetchUsers();
       }
     } catch (err: any) {
       console.error('Update user error:', err);
-      toast.error(err.response?.data?.message || 'Failed to update user.');
+      toast.error(err.response?.data?.message || 'Could not update the user.');
     } finally {
       setIsSaving(false);
     }
@@ -234,10 +234,10 @@ export default function AdminUsers() {
             </span>
             <div>
               <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">
-                User Account Management
+                Users
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Role provisioning, engineering wing assignments, and institutional access control
+                Roles, departments and access.
               </p>
             </div>
           </div>

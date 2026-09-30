@@ -8,7 +8,7 @@ import { findDeskOwner, loadAssignees, resolveAeForScope } from '../../src/model
 import { pickAvailableJe } from '../../src/services/assignment.js';
 import { performTicketAction, pinsFor, isSelfAction } from '../../src/controllers/actionController.js';
 import { overrideTicketStatus, getStaff, getAdminMetrics, getMasterAuditLogs } from '../../src/controllers/adminController.js';
-import { getQueue } from '../../src/controllers/ticketController.js';
+import { getQueue, createTicket } from '../../src/controllers/ticketController.js';
 import { notifyTicketCreated } from '../../src/services/notifier.js';
 import { checkSingleHolders } from '../../src/services/deskHealth.js';
 import { processDueNotifications } from '../../src/cron/emailReminders.js';
@@ -380,4 +380,45 @@ test('self_only returns only flagged audit rows', async () => {
   const res = fakeRes();
   await getMasterAuditLogs({ query: { ticket_id: String(id), self_only: '1' } }, res);
   assert.deepEqual(res.body.logs.map((l) => l.action), ['FORWARDED']);
+});
+
+// ---- JEs raising tickets ------------------------------------------------------------------------------------------
+async function raiseAsJe(je, type) {
+  const res = fakeRes();
+  await createTicket({
+    user: { id: je, role: 'JE', department: 'Civil', name: 'CI JE', email: 'je@test.local' },
+    body: {
+      department: 'Civil', campus: 'NORTH', description: 'ci ticket', landmark: 'gate', category: 'test',
+      contact_phone: '9999999999', type,
+    },
+  }, res);
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  return res.body;
+}
+
+test('a JE raising a normal ticket goes through fair assignment: another JE gets it, not the raiser', async () => {
+  const raiser = await makeUser({ role: 'JE', campus: 'NORTH' }); await civilScope(raiser);
+  const other = await makeUser({ role: 'JE', campus: 'NORTH' }); await civilScope(other);
+  const out = await raiseAsJe(raiser, 'recurring');
+  try {
+    assert.notEqual(out.assigned_je_id, raiser);
+    assert.equal(out.status, 'ASSIGNED_TO_JE');
+    const flagged = (await auditFor(out.ticket_id)).filter((a) => a.is_self_action);
+    assert.equal(flagged.length, 0);
+  } finally {
+    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+  }
+});
+
+test('a JE proposal (non-recurring, own department) is self-assigned and flagged', async () => {
+  const raiser = await makeUser({ role: 'JE', campus: 'NORTH' }); await civilScope(raiser);
+  await makeUser({ role: 'JE', campus: 'NORTH' });
+  const out = await raiseAsJe(raiser, 'non-recurring');
+  try {
+    assert.equal(out.assigned_je_id, raiser);
+    const assigned = (await auditFor(out.ticket_id)).find((a) => a.action === 'ASSIGNED');
+    assert.equal(assigned.is_self_action, 1);
+  } finally {
+    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+  }
 });

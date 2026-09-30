@@ -23,18 +23,18 @@ function meta(a: AvailableAction) {
   switch (a.action) {
     case 'FORWARD': {
       const to = deskLabel(a.targets?.[0]);
-      return { label: `Forward to ${to}`, hint: `${to} desk decides next`, tone: 'blue' as const, Icon: ArrowRight };
+      return { label: `Forward to ${to}`, hint: `Goes to the ${to} desk`, tone: 'blue' as const, Icon: ArrowRight };
     }
     case 'APPROVE':
-      return { label: 'Approve', hint: 'Sanction the work and release it for tendering', tone: 'emerald' as const, Icon: CheckCircle2 };
+      return { label: 'Approve', hint: 'Approve the work for tendering', tone: 'emerald' as const, Icon: CheckCircle2 };
     case 'REQUEST_CHANGES':
-      return { label: 'Request changes', hint: 'Send it back to a lower desk with a message', tone: 'amber' as const, Icon: CornerUpLeft };
+      return { label: 'Request changes', hint: 'Send it back with a message', tone: 'amber' as const, Icon: CornerUpLeft };
     case 'REJECT':
       return { label: 'Reject', hint: 'Close the ticket as rejected', tone: 'rose' as const, Icon: XCircle };
     case 'ASSIGN_JE':
-      return { label: 'Assign a JE', hint: 'Nobody was free — choose who inspects this', tone: 'blue' as const, Icon: UserCheck };
+      return { label: 'Assign JE', hint: 'No JE was free. Choose one.', tone: 'blue' as const, Icon: UserCheck };
     default:
-      return { label: 'Submit inspection report', hint: 'File findings and estimate for the AE', tone: 'blue' as const, Icon: ClipboardCheck };
+      return { label: 'Inspection Report', hint: 'Enter findings and an estimate for the AE', tone: 'blue' as const, Icon: ClipboardCheck };
   }
 }
 
@@ -93,17 +93,17 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
     if (!current) return;
     const payload: Record<string, unknown> = { action: current.action };
     if (current.action === 'REQUEST_CHANGES') {
-      if (!toDesk) return toast.error('Choose who to send this to.');
-      if (!message.trim()) return toast.error('Write what needs to change.');
+      if (!toDesk) return toast.error('Choose a desk.');
+      if (!message.trim()) return toast.error('Enter what needs to change.');
       payload.to_desk = toDesk; payload.message = message.trim();
     }
     if (current.action === 'REJECT') {
-      if (!message.trim()) return toast.error('Give the reason for rejecting.');
+      if (!message.trim()) return toast.error('Enter a reason.');
       payload.message = message.trim();
       if (publicNote.trim()) payload.public_note = publicNote.trim();
     }
     if (current.action === 'FORWARD' && replying) {
-      if (!message.trim()) return toast.error('Reply to the change request before you forward.');
+      if (!message.trim()) return toast.error('Reply to the request first.');
       payload.message = message.trim();
     }
     if (current.action === 'ASSIGN_JE') {
@@ -115,7 +115,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
     setBusy(true);
     try {
       const res = await api.post(`/tickets/${ticket.id}/actions`, payload);
-      toast.success(res.data?.message || 'Done.');
+      toast.success(res.data?.message || 'Ticket updated.');
       onDone();
     } catch (err) {
       toast.error(errorMessage(err, 'Could not complete this action.'));
@@ -128,14 +128,14 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
 
   return (
     <section
-      aria-label="Your decision"
+      aria-label="Action"
       className="rounded-2xl border-2 border-blue-500/30 bg-white p-4 shadow-sm dark:bg-slate-800 md:p-6"
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Your decision · {deskLabel(desk)} desk</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">{deskLabel(desk)} desk</p>
           <h2 className="mt-0.5 flex items-center gap-2 text-base font-bold text-slate-900 dark:text-white">
-            <Gavel size={16} /> What do you want to do?
+            <Gavel size={16} /> Action
           </h2>
         </div>
         {limit?.can_approve && (
@@ -258,7 +258,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
             <div>
               <label htmlFor="internal" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Internal remark (optional)</label>
               <textarea id="internal" rows={2} value={internal} onChange={(e) => setInternal(e.target.value)} className={`${fieldCls} resize-none`}
-                placeholder="Only your desk and higher can read this." />
+                placeholder="Read by your desk and above." />
               <VisibleTo desks={visibleDesks(myRank)} />
             </div>
           )}
@@ -270,7 +270,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
             className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-sm transition disabled:opacity-60 ${tone.btn}`}
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-            Confirm — {meta(current).label}
+            {meta(current).label}
           </button>
         </div>
       )}

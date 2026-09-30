@@ -72,13 +72,13 @@ export default function RaiseTicket() {
         },
         (err) => {
           console.error("GPS Error:", err);
-          toast.error("Could not fetch location. Ensure location services are enabled.");
+          toast.error("Could not get your location. Turn on location services.");
           setIsLocating(false);
         },
         { enableHighAccuracy: true, timeout: 10000 }
       );
     } else {
-      toast.error("Geolocation is not supported by your browser");
+      toast.error("Location is not supported by this browser.");
       setIsLocating(false);
     }
   };
@@ -86,11 +86,11 @@ export default function RaiseTicket() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!title.trim()) return setError('Please provide a descriptive title for the ticket.');
-    if (!description.trim()) return setError('Please provide a description of the issue.');
-    if (!landmark.trim()) return setError('Please specify a landmark.');
-    if (!category.trim()) return setError('Please specify a category for the issue (e.g. plumbing, electrical fault).');
-    if (!contactPhone.trim()) return setError('Please provide a contact phone number.');
+    if (!title.trim()) return setError('Enter a title.');
+    if (!description.trim()) return setError('Enter a description.');
+    if (!landmark.trim()) return setError('Enter a landmark.');
+    if (!category.trim()) return setError('Enter a category.');
+    if (!contactPhone.trim()) return setError('Enter a contact phone number.');
     setIsSubmitting(true);
 
     const formData = new FormData();
@@ -119,7 +119,7 @@ export default function RaiseTicket() {
       const validationErrors = err.response?.data?.errors as { path: string; message: string }[] | undefined;
       const message = validationErrors?.length
         ? validationErrors.map((issue) => issue.message).join(' ')
-        : err.response?.data?.message || 'Failed to submit the ticket. Please try again.';
+        : err.response?.data?.message || 'Could not submit the ticket. Try again.';
       setError(message);
       setIsSubmitting(false);
     }
@@ -132,7 +132,7 @@ export default function RaiseTicket() {
   return (
     <div className="max-w-5xl mx-auto w-full">
       <div className="md:hidden flex items-center justify-center mb-6">
-        <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">New Ticket Entry</h2>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">New Ticket</h2>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6 bg-white dark:bg-slate-800 md:p-10 md:rounded-3xl md:shadow-sm md:border border-gray-200/60 dark:border-slate-700">
@@ -145,14 +145,14 @@ export default function RaiseTicket() {
 
         {/* 1. Photos */}
         <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Evidence / Photos</label>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Photos</label>
           {previewUrls.length === 0 ? (
             <label className="border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer group">
               <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-105 transition-transform border dark:border-slate-700">
                 <ImagePlus size={28} className="text-slate-400 dark:text-slate-300 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors" />
               </div>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Upload Photos</span>
-              <span className="text-xs text-slate-400 dark:text-slate-500 mt-1">Tap to select up to 5 images</span>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Add Photos</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500 mt-1">Up to 5 images</span>
               <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
             </label>
           ) : (
@@ -212,7 +212,7 @@ export default function RaiseTicket() {
             <input
               type="text"
               required
-              placeholder="e.g., plumbing, electrical fault, road"
+              placeholder="e.g. plumbing, wiring, road"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
@@ -235,11 +235,11 @@ export default function RaiseTicket() {
 
         {/* 2.5 Title */}
         <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Ticket Title</label>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Title</label>
           <input 
             type="text" 
             required
-            placeholder="Brief summary of the issue (e.g., Water leakage in Lab B2-104)"
+            placeholder="Short summary, e.g. Water leak in Lab B2-104"
             className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -248,20 +248,20 @@ export default function RaiseTicket() {
 
         {/* 3. Description */}
         <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Issue Details</label>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Description</label>
           <textarea 
             className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all resize-none bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-            rows={4} placeholder="Describe the problem, exact floor, or equipment involved..." value={description} onChange={(e) => setDescription(e.target.value)} required
+            rows={4} placeholder="What is wrong, and where" value={description} onChange={(e) => setDescription(e.target.value)} required
           />
         </div>
 
         {/* 4. Location */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-3 tracking-wider uppercase">Location Data</label>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-3 tracking-wider uppercase">Location</label>
           <div className="space-y-3">
             <input
               type="text"
-              placeholder="Building (optional, e.g., Hostel B3)"
+              placeholder="Building (optional)"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
               value={building}
               onChange={(e) => setBuilding(e.target.value)}
@@ -292,7 +292,7 @@ export default function RaiseTicket() {
             <input 
               type="text" 
               required
-              placeholder="Enter a landmark (e.g., Near A1 Main Gate) *Required*" 
+              placeholder="Landmark, e.g. near A1 Main Gate *" 
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
               value={landmark}
               onChange={(e) => setLandmark(e.target.value)}
@@ -300,7 +300,7 @@ export default function RaiseTicket() {
             <input
               type="tel"
               required
-              placeholder="Contact phone number *Required*"
+              placeholder="Contact phone *"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
@@ -311,7 +311,7 @@ export default function RaiseTicket() {
         {/* 5. Sticky Submit */}
         <div className="fixed bottom-[4.5rem] md:static left-0 right-0 p-4 md:p-0 bg-white/80 dark:bg-slate-900/80 md:bg-transparent backdrop-blur-md md:backdrop-blur-none border-t border-slate-200 dark:border-slate-700 md:border-none z-40 md:pt-4">
           <button type="submit" disabled={isSubmitting} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-            {isSubmitting ? <><Loader2 size={20} className="animate-spin" /> Processing...</> : <><Send size={20} /> Submit Ticket</>}
+            {isSubmitting ? <><Loader2 size={20} className="animate-spin" /> Submitting…</> : <><Send size={20} /> Submit</>}
           </button>
         </div>
       </form>

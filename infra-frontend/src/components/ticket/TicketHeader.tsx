@@ -3,7 +3,7 @@ import { ArrowLeft, FileSpreadsheet } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { TicketDetail } from './types';
 import {
-  formatAge, hoursSince, isPostApproval, SLA_CLASS, slaOf, staffStatusLabel, STATUS_DESK, ticketNo,
+  deskLabel, formatAge, hoursSince, isPostApproval, SLA_CLASS, slaOf, staffStatusLabel, STATUS_DESK, ticketNo,
 } from '../../lib/ticketUi';
 
 const PRIORITY: Record<string, string> = {
@@ -35,6 +35,11 @@ export default function TicketHeader({ ticket, role }: { ticket: TicketDetail; r
           <p className={`mt-1 text-sm font-semibold ${ticket.status === 'DENIED' ? 'text-rose-600' : 'text-slate-700 dark:text-slate-200'}`}>
             {staffStatusLabel(ticket.status)}
           </p>
+          {ticket.assignees?.current && (
+            <p className="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+              With: {ticket.assignees.current.name ? `${ticket.assignees.current.name} (${deskLabel(ticket.assignees.current.desk)})` : deskLabel(ticket.assignees.current.desk)}
+            </p>
+          )}
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
             <span>Raised {format(new Date(ticket.created_at), 'd MMM yyyy, HH:mm')}</span>
             <span>Age {formatAge(hoursSince(ticket.created_at))}</span>

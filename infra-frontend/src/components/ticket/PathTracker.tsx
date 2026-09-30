@@ -45,7 +45,7 @@ const POST = [
 ];
 
 /** Steps still ahead of the ticket, drawn dashed. Desks past the current one are "if required": any of SE/Dean/Director may approve. */
-function futureSteps(status: string): Step[] {
+function futureSteps(status: string, assignees?: TicketDetail['assignees']): Step[] {
   const out: Step[] = [];
   const push = (key: string, label: string, sub?: string) => out.push({ key: `f-${key}`, label, sub, state: 'future' });
   if (status === 'CLOSED' || status === 'DENIED') return out;
@@ -57,7 +57,11 @@ function futureSteps(status: string): Step[] {
   }
   const deskNow = STATUS_DESK[status];
   const fromIdx = status === 'UNASSIGNED' ? 0 : CHAIN.indexOf(deskNow) + 1;
-  CHAIN.slice(fromIdx).forEach((d) => push(d, `${deskLabel(d)} desk`, d === 'JE' || d === 'AE' ? undefined : 'if required'));
+  CHAIN.slice(fromIdx).forEach((d) => {
+    const name = assignees?.[d as 'JE']?.name;
+    const note = d === 'JE' || d === 'AE' ? undefined : 'if required';
+    push(d, `${deskLabel(d)} desk`, [name, note].filter(Boolean).join(' · ') || undefined);
+  });
   POST.forEach((p) => push(p.key, p.label));
   return out;
 }
@@ -95,11 +99,11 @@ function buildSteps(ticket: TicketDetail, now = Date.now()): Step[] {
       key: 'now',
       label: desk ? `${deskLabel(desk)} desk` : ticket.status === 'APPROVED_FOR_TENDERING' ? 'Tendering'
         : ticket.status === 'TENDER_PUBLISHED' ? 'Tender open' : 'Work in progress',
-      sub: `Here ${formatAge(hoursSince(since, now))}`,
+      sub: [ticket.assignees?.current?.name, `Here ${formatAge(hoursSince(since, now))}`].filter(Boolean).join(' · '),
       state: 'current',
     });
   }
-  return [...steps, ...futureSteps(ticket.status)];
+  return [...steps, ...futureSteps(ticket.status, ticket.assignees)];
 }
 
 const NODE: Record<StepState, string> = {
@@ -120,7 +124,7 @@ export default function PathTracker({ ticket }: { ticket: TicketDetail }) {
   }, [ticket.id, ticket.status]);
 
   return (
-    <Card title="Path tracker">
+    <Card title="Progress">
       <ol className="-mx-1 flex snap-x items-start gap-0 overflow-x-auto px-1 pb-2">
         {steps.map((s, i) => {
           const future = s.state === 'future';

@@ -18,6 +18,7 @@ import { insertAudit } from '../models/auditModel.js';
 import { notifyTransition } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { sendServerError } from '../utils/httpError.js';
+import { testPrefix } from '../middleware/testRole.js';
 
 const neutralRemark = (t, actorName) => {
   switch (t.action) {
@@ -125,7 +126,7 @@ export const performTicketAction = async (req, res) => {
     }
 
     const auditId = await insertAudit(connection, {
-      ticketId, userId: user.id, action: t.logAction, remarks: neutralRemark(t, req.user.name),
+      ticketId, userId: user.id, action: t.logAction, remarks: testPrefix(req) + neutralRemark(t, req.user.name),
       fromStatus: t.fromStatus, toStatus: t.toStatus, fromDesk: t.fromDesk, toDesk: t.toDesk,
       visibility: opensNewRequest ? 'INTERNAL' : 'ALL',
       isSelfAction: isSelfAction(row, user.id),

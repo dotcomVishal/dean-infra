@@ -11,17 +11,18 @@ import RaiseTicket from './pages/RaiseTicket';
 import MyTickets from './pages/MyTickets';
 import TicketDetails from './pages/TicketDetails';
 
-// Junior Engineer (JE) Micro-Frontend Pages
+// JE pages
 import JeDashboard from './pages/je/JeDashboard';
 import JeRaiseTicket from './pages/je/JeRaiseTicket';
 import JeTenderControl from './pages/je/JeTenderControl';
-// Master System Admin Micro-Frontend Pages
+// Sysadmin pages
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminTickets from './pages/admin/AdminTickets';
 import AdminTicketDetails from './pages/admin/AdminTicketDetails';
 import AdminUsers from './pages/admin/AdminUsers';
 import AdminAuditLogs from './pages/admin/AdminAuditLogs';
-// Authority, Clerical, and Finance Micro-Frontends
+import AdminTestTicket from './pages/admin/AdminTestTicket';
+// Approvals, tenders and bills
 import AuthorityDashboard from './pages/authority/AuthorityDashboard';
 import ClericalDashboard from './pages/clerical/ClericalDashboard';
 import AccountantDashboard from './pages/finance/AccountantDashboard';
@@ -82,12 +83,12 @@ export default function App() {
             } 
           />
 
-          {/* Raise Ticket: Non-recurring proposal form for JE, standard recurring ticket for Applicants */}
+          {/* New ticket: the same form for every role. A JE's proposal form is at /je/raise. */}
           <Route 
             path="/raise" 
             element={
               <Layout>
-                {isJe ? <JeRaiseTicket /> : <RaiseTicket />}
+                <RaiseTicket />
               </Layout>
             } 
           />
@@ -111,7 +112,7 @@ export default function App() {
             } 
           />
 
-          {/* 4. DEDICATED JE MICRO-FRONTEND ROUTES (Strict RBAC Guard) */}
+          {/* 4. JE routes */}
           <Route element={<ProtectedRoute allowedRoles={['JE']} />}>
             <Route 
               path="/je" 
@@ -152,7 +153,7 @@ export default function App() {
             />
           </Route>
 
-          {/* 5. MASTER SYSTEM ADMIN CONSOLE (Strict SYSADMIN RBAC Guard) */}
+          {/* 5. Sysadmin routes */}
           <Route element={<ProtectedRoute allowedRoles={['SYSADMIN']} />}>
             <Route 
               path="/admin" 
@@ -190,9 +191,17 @@ export default function App() {
                 </Layout>
               } 
             />
+            <Route 
+              path="/admin/test" 
+              element={
+                <Layout>
+                  <AdminTestTicket />
+                </Layout>
+              } 
+            />
           </Route>
 
-          {/* 6. AUTHORITY APPROVAL DESK (AE, SE, DEAN, DIRECTOR) */}
+          {/* 6. Approvals (AE, SE, Dean, Director) */}
           <Route element={<ProtectedRoute allowedRoles={['AE', 'SE', 'DEAN', 'DIRECTOR']} />}>
             <Route 
               path="/approvals" 
@@ -204,7 +213,7 @@ export default function App() {
             />
           </Route>
 
-          {/* 7. CLERICAL TENDER DESK (GeM/CPP NIT & Award Management) */}
+          {/* 7. Tenders (Clerical) */}
           <Route element={<ProtectedRoute allowedRoles={['CLERICAL', 'SYSADMIN']} />}>
             <Route 
               path="/clerical" 
@@ -216,7 +225,7 @@ export default function App() {
             />
           </Route>
 
-          {/* 8. ACCOUNTANT CAPEX AUDIT DESK (Bills & PFMS Disbursements) */}
+          {/* 8. Bills (Accountant, Dean, Director) */}
           <Route element={<ProtectedRoute allowedRoles={['ACCOUNTANT', 'SYSADMIN', 'DEAN', 'DIRECTOR']} />}>
             <Route 
               path="/finance" 

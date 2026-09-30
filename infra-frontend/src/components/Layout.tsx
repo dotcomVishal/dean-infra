@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { 
   LayoutDashboard, PlusCircle, ClipboardList, 
-  CheckSquare, ShieldAlert, Menu, Sun, Moon, X, LogOut,
+  CheckSquare, FlaskConical, FilePlus2, Menu, Sun, Moon, X, LogOut,
   FileSpreadsheet, IndianRupee, Users, History
 } from 'lucide-react';
 import PwaInstallPrompt from './PwaInstallPrompt';
@@ -34,53 +34,38 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     const base = [{ name: 'Dashboard', path: '/', icon: LayoutDashboard }];
     
     if (role === 'APPLICANT') {
-      base.push(
-        { name: 'My Tickets', path: '/tickets', icon: ClipboardList },
-        { name: 'Raise Ticket', path: '/raise', icon: PlusCircle }
-      );
+      base.push({ name: 'My Tickets', path: '/tickets', icon: ClipboardList });
     } else if (role === 'JE') {
       base.push(
-        { name: 'Ticket Directory', path: '/tickets', icon: ClipboardList },
-        { name: 'Raise Proposal', path: '/je/raise', icon: PlusCircle },
-        { name: 'Tender Control', path: '/je/tender', icon: FileSpreadsheet }
+        { name: 'Tickets', path: '/tickets', icon: ClipboardList },
+        { name: 'Tenders', path: '/je/tender', icon: FileSpreadsheet }
       );
-    } else if (['AE', 'SE'].includes(role)) {
+    } else if (['AE', 'SE', 'DEAN', 'DIRECTOR'].includes(role)) {
       base.push(
-        { name: 'Engineering Reviews', path: '/approvals', icon: CheckSquare },
-        { name: 'Department Works', path: '/tickets', icon: ClipboardList }
-      );
-    } else if (role === 'DEAN') {
-      base.push(
-        { name: 'Deanery Sanctions', path: '/approvals', icon: CheckSquare },
-        { name: 'All Campus Works', path: '/tickets', icon: ClipboardList }
-      );
-    } else if (role === 'DIRECTOR') {
-      base.push(
-        { name: 'Director Sanctions', path: '/approvals', icon: CheckSquare },
-        { name: 'Global CapEx Overview', path: '/tickets', icon: ShieldAlert }
+        { name: 'Approvals', path: '/approvals', icon: CheckSquare },
+        { name: 'Tickets', path: '/tickets', icon: ClipboardList }
       );
     } else if (role === 'CLERICAL') {
       base.push(
-        { name: 'Tender Desk', path: '/clerical', icon: FileSpreadsheet },
-        { name: 'Sanctioned Directory', path: '/tickets', icon: ClipboardList }
+        { name: 'Tenders', path: '/clerical', icon: FileSpreadsheet },
+        { name: 'Tickets', path: '/tickets', icon: ClipboardList }
       );
     } else if (role === 'ACCOUNTANT') {
       base.push(
-        { name: 'Finance & Bills', path: '/finance', icon: IndianRupee },
-        { name: 'Sanctioned Ledger', path: '/tickets', icon: ClipboardList }
+        { name: 'Bills', path: '/finance', icon: IndianRupee },
+        { name: 'Tickets', path: '/tickets', icon: ClipboardList }
       );
     } else if (role === 'SYSADMIN') {
       base.push(
-        { name: 'Master Tickets', path: '/admin/tickets', icon: ClipboardList },
-        { name: 'User Directory', path: '/admin/users', icon: Users },
-        { name: 'System Audit', path: '/admin/audit', icon: History }
+        { name: 'Tickets', path: '/admin/tickets', icon: ClipboardList },
+        { name: 'Users', path: '/admin/users', icon: Users },
+        { name: 'Audit Log', path: '/admin/audit', icon: History },
+        { name: 'Test Ticket', path: '/admin/test', icon: FlaskConical }
       );
     }
-    // Anybody can raise a ticket, whatever their role (W15/F9). Applicants and
-    // JEs already have their own entry above.
-    if (!['APPLICANT', 'JE', 'SYSADMIN'].includes(role)) {
-      base.push({ name: 'Raise Ticket', path: '/raise', icon: PlusCircle });
-    }
+    // Every role can raise a ticket (W15/F9). A JE also keeps the proposal form.
+    base.push({ name: 'New Ticket', path: '/raise', icon: PlusCircle });
+    if (role === 'JE') base.push({ name: 'New Proposal', path: '/je/raise', icon: FilePlus2 });
     return base;
   };
   const navLinks = getNavLinks();
@@ -181,7 +166,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 w-full flex flex-col">
           {children}
           <footer className="mt-auto pt-12 pb-4 text-center text-xs font-medium text-slate-400 dark:text-slate-500">
-            © {new Date().getFullYear()} IIT Mandi. Deanery of Infrastructure Internal Operations.
+            © {new Date().getFullYear()} IIT Mandi · Deanery of Infrastructure
           </footer>
         </main>
       </div>

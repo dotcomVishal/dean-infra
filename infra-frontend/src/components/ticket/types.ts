@@ -38,6 +38,7 @@ export interface AuditEntry {
   created_at: string;
   actor_role: string;
   actor_name?: string;
+  is_self_action?: boolean;
   from_desk: string | null;
   to_desk: string | null;
 }
@@ -109,4 +110,16 @@ export interface TicketDetail {
   available_actions?: AvailableActions;
   approval_limit?: ApprovalLimit;
   desk_people?: Record<string, string>;
+  assignees?: Assignees;
+}
+
+export interface DeskHolder { id: number; name: string }
+/** Staff only. A JE gets only their own desk and the desk now holding the ticket, without names. */
+export interface Assignees {
+  JE: DeskHolder | null;
+  AE: DeskHolder | null;
+  SE: DeskHolder | null;
+  DEAN: DeskHolder | null;
+  DIRECTOR: DeskHolder | null;
+  current: { desk: string; id?: number; name?: string } | null;
 }

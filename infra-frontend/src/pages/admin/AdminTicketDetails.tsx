@@ -9,8 +9,12 @@ import {
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
 import { DocLink } from '../../components/ticket/Attachments';
+import ReassignFields from '../../components/admin/ReassignFields';
+import { NO_REASSIGN, reassignBody, type ReassignValue } from '../../lib/reassign';
+import { deskLabel, staffStatusLabel } from '../../lib/ticketUi';
 
 const ALL_STATUSES = [
+  'UNASSIGNED',
   'ASSIGNED_TO_JE',
   'PENDING_AE_APPROVAL',
   'PENDING_SE_APPROVAL',
@@ -34,10 +38,9 @@ export default function AdminTicketDetails() {
   
   // Override state
   const [overrideStatus, setOverrideStatus] = useState('');
-  const [overrideJeId, setOverrideJeId] = useState('');
+  const [reassign, setReassign] = useState<ReassignValue>(NO_REASSIGN);
   const [overrideRemarks, setOverrideRemarks] = useState('');
   const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
-  const [jes, setJes] = useState<any[]>([]);
 
   const fetchDetails = async () => {
     setLoading(true);
@@ -57,26 +60,14 @@ export default function AdminTicketDetails() {
     }
   };
 
-  const fetchJes = async () => {
-    try {
-      const res = await api.get('/admin/jes');
-      if (res.data.success) {
-        setJes(res.data.jes || []);
-      }
-    } catch (err) {
-      console.error('Failed to load JEs:', err);
-    }
-  };
-
   useEffect(() => {
     fetchDetails();
-    fetchJes();
   }, [id]);
 
   const handleExecuteOverride = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!overrideRemarks.trim()) {
-      toast.error('Administrative justification remarks are strictly required.');
+      toast.error('Enter a reason.');
       return;
     }
 
@@ -84,17 +75,18 @@ export default function AdminTicketDetails() {
     try {
       const res = await api.post(`/admin/tickets/${id}/override`, {
         new_status: overrideStatus !== ticket.status ? overrideStatus : undefined,
-        new_assigned_je_id: overrideJeId ? parseInt(overrideJeId, 10) : undefined,
+        reassign: reassignBody(reassign),
         remarks: overrideRemarks.trim(),
       });
       if (res.data.success) {
-        toast.success('Ticket state and audit record updated successfully.');
+        toast.success('Ticket updated.');
         setOverrideRemarks('');
+        setReassign(NO_REASSIGN);
         fetchDetails();
       }
     } catch (err: any) {
       console.error('Override error:', err);
-      toast.error(err.response?.data?.message || 'Failed to execute override.');
+      toast.error(err.response?.data?.message || 'Could not update the ticket.');
     } finally {
       setIsSubmittingOverride(false);
     }
@@ -111,13 +103,13 @@ export default function AdminTicketDetails() {
   if (error || !ticket) {
     return (
       <div className="bg-red-50 text-red-600 p-6 rounded-2xl border border-red-200 max-w-3xl mx-auto mt-10 font-medium text-center">
-        <p className="text-base font-bold mb-2">Error Loading Ticket</p>
+        <p className="text-base font-bold mb-2">Could not load the ticket</p>
         <p className="text-sm">{error || 'Ticket not found.'}</p>
         <button
           onClick={() => navigate('/admin/tickets')}
           className="mt-4 px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-xl"
         >
-          Return to Master Tickets
+          Back to Tickets
         </button>
       </div>
     );
@@ -136,14 +128,14 @@ export default function AdminTicketDetails() {
           to="/admin/tickets"
           className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition"
         >
-          <ArrowLeft size={16} /> Back to Master Directory
+          <ArrowLeft size={16} /> Back to Tickets
         </Link>
 
         <button
           onClick={fetchDetails}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 transition"
         >
-          <RefreshCw size={13} /> Refresh Details
+          <RefreshCw size={13} /> Refresh
         </button>
       </div>
 
@@ -155,15 +147,15 @@ export default function AdminTicketDetails() {
               #TKT-{ticket.id.toString().padStart(4, '0')}
             </span>
             <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-              {ticket.status.replace(/_/g, ' ')}
+              {staffStatusLabel(ticket.status)}
             </span>
             <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-              {ticket.type === 'non-recurring' ? 'Non-Recurring Proposal' : 'Recurring Maintenance'}
+              {ticket.type === 'non-recurring' ? 'Proposal' : 'Recurring'}
             </span>
           </div>
 
           <span className="text-xs text-slate-400">
-            Reported on {format(new Date(ticket.created_at), 'PPP · p')}
+            Raised {format(new Date(ticket.created_at), 'PPP · p')}
           </span>
         </div>
 
@@ -182,7 +174,7 @@ export default function AdminTicketDetails() {
         <div className="flex flex-wrap gap-4 pt-2 text-xs">
           <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 px-3 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
             <Building2 size={15} className="text-slate-400" />
-            <span>Wing: <strong className="text-slate-800 dark:text-slate-100">{ticket.department}</strong></span>
+            <span>Department: <strong className="text-slate-800 dark:text-slate-100">{ticket.department}</strong></span>
           </div>
           <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 px-3 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
             <MapPin size={15} className="text-slate-400" />
@@ -201,7 +193,7 @@ export default function AdminTicketDetails() {
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <FileCheck size={18} className="text-blue-600" /> Junior Engineer Inspection Report
+                <FileCheck size={18} className="text-blue-600" /> Inspection Report
               </h2>
               {latestReport && (
                 <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
@@ -213,14 +205,14 @@ export default function AdminTicketDetails() {
             {latestReport ? (
               <div className="space-y-3 text-xs">
                 <div>
-                  <span className="font-bold text-slate-400 uppercase tracking-wider block mb-1">Nature of Work</span>
+                  <span className="font-bold text-slate-400 uppercase tracking-wider block mb-1">Findings</span>
                   <p className="text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
                     {latestReport.nature_of_work}
                   </p>
                 </div>
                 {latestReport.remarks && (
                   <div>
-                    <span className="font-bold text-slate-400 uppercase tracking-wider block mb-1">Engineering Remarks</span>
+                    <span className="font-bold text-slate-400 uppercase tracking-wider block mb-1">Remarks</span>
                     <p className="text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-700/60 italic">
                       "{latestReport.remarks}"
                     </p>
@@ -232,12 +224,12 @@ export default function AdminTicketDetails() {
               </div>
             ) : (
               <div className="text-xs text-slate-400 text-center py-6 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
-                Site inspection pending. No report filed by Junior Engineer yet.
+                No report filed yet.
               </div>
             )}
           </div>
 
-          {/* Master Override Controls */}
+          {/* Override */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-amber-500/30 dark:border-amber-500/20 space-y-4">
             <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-700">
               <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
@@ -245,55 +237,40 @@ export default function AdminTicketDetails() {
               </span>
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                  Administrative Override Desk
+                  Override
                 </h2>
-                <p className="text-xs text-slate-500">Unrestricted authority intervention & ticket routing</p>
+                <p className="text-xs text-slate-500">Change the status or reassign any desk.</p>
               </div>
             </div>
 
             <form onSubmit={handleExecuteOverride} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Override Status</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Status</label>
                   <select
                     value={overrideStatus}
                     onChange={(e) => setOverrideStatus(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                   >
                     {ALL_STATUSES.map((s) => (
-                      <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+                      <option key={s} value={s}>{staffStatusLabel(s)}</option>
                     ))}
                   </select>
                 </div>
 
-                <div>
-                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Reassign Responsible JE <span className="font-normal text-slate-400">(Optional)</span>
-                  </label>
-                  <select
-                    value={overrideJeId}
-                    onChange={(e) => setOverrideJeId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  >
-                    <option value="">Keep current ({ticket.assigned_je_name || 'None'})</option>
-                    {jes.map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.name} ({j.department}) — {j.email}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
+
+              <ReassignFields department={ticket.department} campus={ticket.campus} value={reassign} onChange={setReassign} />
 
               <div>
                 <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Audit Justification / Remarks <span className="text-rose-500">*</span>
+                  Reason <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   rows={2}
                   value={overrideRemarks}
                   onChange={(e) => setOverrideRemarks(e.target.value)}
-                  placeholder="Specify official reason for administrative intervention..."
+                  placeholder="Why is this change needed?"
                   required
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
@@ -305,16 +282,16 @@ export default function AdminTicketDetails() {
                   disabled={isSubmittingOverride}
                   className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition shadow-sm disabled:opacity-50"
                 >
-                  {isSubmittingOverride ? 'Executing Override...' : 'Apply Administrative Override'}
+                  {isSubmittingOverride ? 'Applying…' : 'Apply'}
                 </button>
               </div>
             </form>
           </div>
 
-          {/* Master Audit Log Stream */}
+          {/* Audit log */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-4">
             <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <History size={18} className="text-purple-600" /> Complete Unredacted Audit Trail
+              <History size={18} className="text-purple-600" /> Audit Log
             </h2>
 
             <div className="space-y-3 relative before:absolute before:inset-0 before:left-3.5 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-700">
@@ -325,7 +302,10 @@ export default function AdminTicketDetails() {
                   </div>
                   <div className="flex-1 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-slate-900 dark:text-white">{log.action}</span>
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        {log.action}
+                        {log.is_self_action ? <span title="The actor raised this ticket" className="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">Self</span> : null}
+                      </span>
                       <span className="text-[10px] text-slate-400">
                         {format(new Date(log.created_at), 'dd MMM · HH:mm')}
                       </span>
@@ -352,7 +332,7 @@ export default function AdminTicketDetails() {
           {/* Applicant Info Card */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <User size={15} /> Initiator / Applicant
+              <User size={15} /> Raised by
             </h3>
             <div>
               <p className="font-bold text-slate-900 dark:text-white text-sm">{ticket.applicant_name}</p>
@@ -371,22 +351,24 @@ export default function AdminTicketDetails() {
             </div>
 
             <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60">
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned Junior Engineer</h4>
-              {ticket.assigned_je_name ? (
-                <div>
-                  <p className="font-bold text-slate-900 dark:text-white text-xs">{ticket.assigned_je_name}</p>
-                  <p className="text-[11px] text-slate-500">{ticket.assigned_je_email}</p>
-                </div>
-              ) : (
-                <p className="text-xs text-slate-400 italic">No engineer assigned</p>
-              )}
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Desk holders</h4>
+              <ul className="space-y-1 text-xs">
+                {(['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'] as const).map((d) => (
+                  <li key={d} className="flex justify-between gap-2">
+                    <span className="text-slate-500">{deskLabel(d)}</span>
+                    <span className={`truncate font-semibold ${ticket.assignees?.current?.desk === d ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                      {ticket.assignees?.[d]?.name ?? '—'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
 
           {/* Attachments Gallery */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <ImageIcon size={15} /> All Uploaded Files ({attachments.length})
+              <ImageIcon size={15} /> Files ({attachments.length})
             </h3>
 
             {attachments.length > 0 ? (
@@ -410,7 +392,7 @@ export default function AdminTicketDetails() {
               </div>
             ) : (
               <div className="text-xs text-slate-400 text-center py-4 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
-                No attachments uploaded.
+                No files.
               </div>
             )}
           </div>

@@ -12,6 +12,7 @@ import * as deskModel from '../models/deskModel.js';
 import * as reportModel from '../models/reportModel.js';
 import { insertAudit } from '../models/auditModel.js';
 import { pinsFor, isSelfAction } from './actionController.js';
+import { testPrefix } from '../middleware/testRole.js';
 import { notifyTicketCreated, notifyTransition, notifyPostApproval } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { redactQueueRow } from '../services/visibility.js';
@@ -64,11 +65,12 @@ export const createTicket = async (req, res) => {
     await connection.beginTransaction();
 
     let assignment;
-    // If a JE is proposing work in their own department, they inspect it
-    // themselves -- this is a distinct, pre-existing feature (JE-initiated
-    // non-recurring proposals), not part of the fair-assignment pool.
-    // Every other ticket goes through the fair auto-assignment engine.
-    if (req.user.role === 'JE' && req.user.department === department) {
+    // If a JE is proposing NON-RECURRING work in their own department, they
+    // inspect it themselves -- a distinct, pre-existing feature (JE-initiated
+    // proposals), not part of the fair-assignment pool. Every other ticket,
+    // including a normal ticket raised by a JE, goes through the fair
+    // auto-assignment engine (which ranks the raiser last).
+    if (req.user.role === 'JE' && type === 'non-recurring' && req.user.department === department) {
       assignment = {
         status: 'ASSIGNED_TO_JE',
         assignedJeId: req.user.id,
@@ -277,7 +279,7 @@ const POST_APPROVAL_HEADLINE = Object.freeze({
 });
 
 export async function applyReportSubmission(
-  connection, { ticketId, jeId, role, natureOfWork, estimate, remarks }
+  connection, { ticketId, jeId, role, natureOfWork, estimate, remarks, remarkPrefix = '' }
 ) {
   const ticket = await ticketModel.lockForJe(connection, ticketId, jeId);
   if (!ticket) {
@@ -379,7 +381,7 @@ export async function applyReportSubmission(
 
   const auditId = await insertAudit(connection, {
     ticketId, userId: jeId, action: t.logAction,
-    remarks: `Report v${version} filed, estimate INR ${amount}`,
+    remarks: `${remarkPrefix}Report v${version} filed, estimate INR ${amount}`,
     fromStatus: t.fromStatus, toStatus: t.toStatus, fromDesk: t.fromDesk, toDesk: t.toDesk,
     isSelfAction: isSelfAction(ticket, jeId),
   });
@@ -411,6 +413,7 @@ export const submitReport = async (req, res) => {
       natureOfWork: req.body.nature_of_work,
       estimate: req.body.estimated_amount,
       remarks: req.body.remarks,
+      remarkPrefix: testPrefix(req),
     });
 
     // Handle uploaded files (site_photos and estimate_docs)

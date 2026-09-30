@@ -59,7 +59,9 @@ export function buildViewer(user, ticket, facts = {}) {
   return {
     id: user.id,
     role,
-    isApplicant: ticket.applicant_id === user.id,
+    // Sysadmin acting as staff on a mock ticket must see what that role sees, not the union with the applicant view.
+    isApplicant: ticket.applicant_id === user.id && !(user.isTest && role !== 'APPLICANT'),
+    isTest: user.isTest === true,
     isAssignedJe: role === 'JE' && ticket.assigned_je_id === user.id,
     wasJe: role === 'JE' && facts.filedReport === true,
     aeInScope,
@@ -128,7 +130,8 @@ export function capabilities(viewer, ticket) {
 export function canViewAttachment(viewer, ticket, att) {
   if (!canViewTicket(viewer, ticket)) return false;
   const caps = capabilities(viewer, ticket);
-  if (att.uploaded_by === viewer.id) return true;
+  // Test mode: every upload was made by the one Sysadmin, so "own upload" would bypass the category rules.
+  if (att.uploaded_by === viewer.id && !viewer.isTest) return true;
   switch (att.document_category) {
     case 'APPLICANT_EVIDENCE':
       return caps.applicantView || caps.staff !== null;

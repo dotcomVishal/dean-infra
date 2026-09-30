@@ -19,13 +19,16 @@ import { AttachmentList } from '../components/ticket/Attachments';
 const BRIEF_ROLES = ['AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN'];
 
 /**
- * The one ticket page for every role. What renders is decided by the role token
+ * The one ticket page for every role. The test page passes ticketId and roleOverride to show it as another role. What renders is decided by the role token
  * AND by what the API actually returned: the API already redacts per viewer, so
  * a section without data simply does not appear.
  */
-export default function TicketDetails() {
-  const { id } = useParams();
-  const role = useAuthStore((s) => s.user?.role) ?? 'APPLICANT';
+export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: number; roleOverride?: string } = {}) {
+  const params = useParams();
+  const id = ticketId ?? params.id;
+  const authRole = useAuthStore((s) => s.user?.role) ?? 'APPLICANT';
+  // roleOverride is only ever passed by the Sysadmin test page.
+  const role = roleOverride ?? authRole;
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -79,7 +82,7 @@ export default function TicketDetails() {
           {hasBrief ? <DecisionBrief ticket={ticket} /> : <ReportCard ticket={ticket} />}
           <PathTracker ticket={ticket} />
 
-          <Card title="Issue description" icon={<FileText size={14} />}>
+          <Card title="Description" icon={<FileText size={14} />}>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-900 dark:text-slate-100 md:text-base">{ticket.description}</p>
             <div className="mt-5 grid gap-4 border-t border-slate-100 pt-4 dark:border-slate-700/60 sm:grid-cols-2">
               <div>
@@ -130,8 +133,8 @@ export default function TicketDetails() {
             </Card>
           )}
 
-          <Card title="Applicant photos" icon={<ImageIcon size={14} />}>
-            <AttachmentList files={applicantPhotos} empty="No photos attached to this ticket." cols="grid-cols-2" />
+          <Card title="Photos" icon={<ImageIcon size={14} />}>
+            <AttachmentList files={applicantPhotos} empty="No photos." cols="grid-cols-2" />
           </Card>
         </div>
       </div>

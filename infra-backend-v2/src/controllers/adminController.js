@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import pool from '../config/db.js';
 import { STATUS, WorkflowError, deskForStatus } from '../config/workflow.js';
 import { resolveDeskOwner, loadAssignees } from '../models/deskModel.js';
@@ -132,7 +134,7 @@ export const getAllTickets = async (req, res) => {
 
   let query = `
     SELECT 
-      t.id, t.title, t.department, t.type, t.description, t.location, t.status, t.created_at, t.is_mock,
+      t.id, t.title, t.department, t.campus, t.type, t.description, t.location, t.status, t.created_at, t.is_mock,
       u_hold.name as current_holder_name,
       u_app.name as applicant_name, u_app.email as applicant_email, u_app.phone as applicant_phone,
       u_je.name as je_name, u_je.email as je_email,
@@ -607,5 +609,142 @@ export const getActiveJes = async (req, res) => {
     res.json({ success: true, jes });
   } catch (error) {
     return sendServerError(req, res, error, 'getActiveJes error');
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Sysadmin mock testing (plan2.md F5). Test tickets are raised by the Sysadmin,
+// carry is_mock = TRUE, and sit at the Sysadmin's own desk at every stage. They
+// are excluded from every report, list and mail path.
+// ---------------------------------------------------------------------------
+const MAX_TEST_ESTIMATE = 99_999_999.99;
+
+const removeTicketFiles = (ticketId) => {
+  if (!Number.isInteger(ticketId) || ticketId <= 0) return;
+  fs.rmSync(path.join(process.cwd(), 'uploads', 'tickets', String(ticketId)), { recursive: true, force: true });
+};
+
+// Locks a ticket and refuses anything that is not a test ticket.
+async function lockMockTicket(connection, ticketId) {
+  const [rows] = await connection.query('SELECT id, is_mock FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+  if (rows.length === 0) throw new WorkflowError(`Ticket #${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
+  if (!rows[0].is_mock) {
+    throw new WorkflowError('Only test tickets can be changed here.', { code: 'NOT_A_TEST_TICKET', status: 403 });
+  }
+}
+
+async function insertStubReport(connection, ticketId, adminId, estimate) {
+  await connection.query(
+    `INSERT INTO reports (ticket_id, je_id, version, nature_of_work, estimated_amount, remarks)
+     VALUES (?, ?, 1, 'Test report', ?, NULL)`,
+    [ticketId, adminId, estimate]);
+}
+
+const testAudit = (connection, ticketId, adminId, remarks) => insertAudit(connection, {
+  ticketId, userId: adminId, action: 'CREATED', remarks, toStatus: STATUS.ASSIGNED_TO_JE, toDesk: 'JE',
+});
+
+export const listTestTickets = async (req, res) => {
+  try {
+    const [tickets] = await pool.query(
+      `SELECT id, title, department, campus, status, created_at FROM tickets WHERE is_mock = TRUE ORDER BY id DESC LIMIT 50`);
+    res.json({ success: true, tickets });
+  } catch (error) {
+    return sendServerError(req, res, error, 'listTestTickets error');
+  }
+};
+
+export const createTestTicket = async (req, res) => {
+  const { department, campus } = req.body;
+  const estimate = req.body.estimate;
+  if (!['Civil', 'Electrical', 'Horticulture'].includes(department)) {
+    return res.status(400).json({ success: false, message: 'Choose a department.' });
+  }
+  if (!['NORTH', 'SOUTH'].includes(campus)) {
+    return res.status(400).json({ success: false, message: 'Choose a campus.' });
+  }
+  let amount = null;
+  if (estimate !== undefined && estimate !== null && estimate !== '') {
+    amount = Number(estimate);
+    if (!Number.isFinite(amount) || amount < 0 || amount > MAX_TEST_ESTIMATE) {
+      return res.status(400).json({ success: false, message: 'Estimate is not a valid amount.' });
+    }
+  }
+  const adminId = req.user.id;
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [result] = await connection.query(
+      `INSERT INTO tickets (applicant_id, assigned_je_id, current_desk_user_id, department, title, type, description,
+         location, campus, landmark, category, priority, contact_phone, status, is_mock)
+       VALUES (?, ?, ?, ?, 'Test ticket', 'recurring', 'Test ticket for workflow checks.', 'Test', ?, 'Test', 'test', 'NORMAL',
+         '0000000', 'ASSIGNED_TO_JE', TRUE)`,
+      [adminId, adminId, adminId, department, campus]);
+    const ticketId = result.insertId;
+    if (amount !== null) await insertStubReport(connection, ticketId, adminId, amount);
+    await testAudit(connection, ticketId, adminId, '[TEST] Test ticket created');
+    await connection.commit();
+    res.json({ success: true, ticket_id: ticketId });
+  } catch (error) {
+    await connection.rollback();
+    return sendServerError(req, res, error, 'createTestTicket error');
+  } finally {
+    connection.release();
+  }
+};
+
+// Back to the JE stage: keeps the ticket, clears everything the walk-through produced.
+export const resetTestTicket = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  const adminId = req.user.id;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await lockMockTicket(connection, ticketId);
+    const [[stub]] = await connection.query(
+      'SELECT estimated_amount FROM reports WHERE ticket_id = ? AND version = 1 AND nature_of_work = ?', [ticketId, 'Test report']);
+    // Order matters: reports point at messages, messages point at audit rows.
+    for (const table of ['bills', 'tenders', 'attachments', 'notifications', 'reports', 'ticket_messages', 'audit_logs']) {
+      await connection.query(`DELETE FROM ${table} WHERE ticket_id = ?`, [ticketId]);
+    }
+    await connection.query(
+      `UPDATE tickets SET status = 'ASSIGNED_TO_JE', assigned_je_id = ?, assigned_ae_id = NULL, assigned_se_id = NULL,
+              current_desk_user_id = ?, open_change_request_id = NULL, status_changed_at = NOW() WHERE id = ?`,
+      [adminId, adminId, ticketId]);
+    if (stub) await insertStubReport(connection, ticketId, adminId, stub.estimated_amount);
+    await testAudit(connection, ticketId, adminId, '[TEST] Test ticket reset');
+    await connection.commit();
+    removeTicketFiles(ticketId);
+    res.json({ success: true, status: STATUS.ASSIGNED_TO_JE });
+  } catch (error) {
+    await connection.rollback();
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
+    return sendServerError(req, res, error, 'resetTestTicket error');
+  } finally {
+    connection.release();
+  }
+};
+
+export const deleteTestTicket = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await lockMockTicket(connection, ticketId);
+    await connection.query('DELETE FROM tickets WHERE id = ? AND is_mock = TRUE', [ticketId]); // children cascade
+    await connection.commit();
+    removeTicketFiles(ticketId);
+    res.json({ success: true });
+  } catch (error) {
+    await connection.rollback();
+    if (error instanceof WorkflowError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
+    return sendServerError(req, res, error, 'deleteTestTicket error');
+  } finally {
+    connection.release();
   }
 };

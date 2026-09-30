@@ -166,7 +166,7 @@ export default function AccountantDashboard() {
   const handleSubmitBill = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTicket || !billData.bill_number || !billData.agency_name || !billData.net_amount) {
-      toast.error('Please fill out all mandatory bill parameters.');
+      toast.error('Fill in all required fields.');
       return;
     }
 
@@ -174,14 +174,14 @@ export default function AccountantDashboard() {
     try {
       const res = await api.post(`/tickets/${selectedTicket.id}/bills`, billData);
       if (res.data.success) {
-        toast.success('Bill & Voucher recorded in financial accounts ledger.');
+        toast.success('Bill recorded.');
         setBillModalOpen(false);
         fetchTickets();
         fetchOverview();
       }
     } catch (err: any) {
       console.error('Record bill error:', err);
-      toast.error(err.response?.data?.message || 'Failed to record bill.');
+      toast.error(err.response?.data?.message || 'Could not record the bill.');
     } finally {
       setSubmittingBill(false);
     }
@@ -216,7 +216,7 @@ export default function AccountantDashboard() {
         payment_date: format(new Date(), 'yyyy-MM-dd')
       });
       if (res.data.success) {
-        toast.success('Payment status updated successfully.');
+        toast.success('Payment updated.');
         if (selectedTicket) {
           const bRes = await api.get(`/tickets/${selectedTicket.id}/bills`);
           setTicketBills(bRes.data.bills || []);
@@ -226,7 +226,7 @@ export default function AccountantDashboard() {
       }
     } catch (err: any) {
       console.error('Update payment error:', err);
-      toast.error(err.response?.data?.message || 'Failed to update payment.');
+      toast.error(err.response?.data?.message || 'Could not update the payment.');
     }
   };
 
@@ -241,11 +241,11 @@ export default function AccountantDashboard() {
               <Landmark size={22} />
             </span>
             <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">
-              Finance & Accounts Audit Desk
+              Bills
             </h1>
           </div>
           <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Capital Expenditure Verification · Running Account (RA) Bills · Voucher Ledger & PFMS Disbursements
+            Bills, vouchers and payments.
           </p>
         </div>
 
@@ -264,7 +264,7 @@ export default function AccountantDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
           <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1 flex items-center gap-1">
-            <Landmark size={13} className="text-blue-500" /> Total Sanctioned Outlay
+            <Landmark size={13} className="text-blue-500" /> Total Approved Amount
           </span>
           <p className="text-xl md:text-2xl font-black text-slate-900 dark:text-white font-mono">
             ₹{(summary?.totalSanctioned || 0).toLocaleString('en-IN')}
@@ -313,7 +313,7 @@ export default function AccountantDashboard() {
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
-          <Landmark size={16} /> Sanctioned Works Ledger
+          <Landmark size={16} /> Approved Works
         </button>
 
         <button
@@ -387,7 +387,7 @@ export default function AccountantDashboard() {
                   <th className="py-3 px-4">Ticket</th>
                   <th className="py-3 px-4">Work Description</th>
                   <th className="py-3 px-4">Department</th>
-                  <th className="py-3 px-4">Sanctioned Outlay</th>
+                  <th className="py-3 px-4">Approved Amount</th>
                   <th className="py-3 px-4">Agency & Contract</th>
                   <th className="py-3 px-4">Billed Amount</th>
                   <th className="py-3 px-4 text-right">Accounts Actions</th>
@@ -667,7 +667,7 @@ export default function AccountantDashboard() {
 
             <div className="grid grid-cols-3 gap-3 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl">
               <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Sanctioned Outlay</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Approved Amount</span>
                 <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                   ₹{parseFloat(String(selectedTicket.estimated_amount || 0)).toLocaleString('en-IN')}
                 </span>
@@ -687,7 +687,7 @@ export default function AccountantDashboard() {
             </div>
 
             <div>
-              <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">Processed Bills Ledger</h4>
+              <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">Bills</h4>
               {loadingBills ? (
                 <div className="p-6 text-center text-slate-400">Loading bills...</div>
               ) : ticketBills.length === 0 ? (

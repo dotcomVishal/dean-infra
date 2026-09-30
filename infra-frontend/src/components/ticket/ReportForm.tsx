@@ -11,7 +11,7 @@ const DOC_ACCEPT = '.pdf,.xlsx,.docx';
 const inputCls =
   'w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
 
-/** JE's SUBMIT_REPORT action: site inspection + estimate. Also answers an open change request. */
+/** JE's SUBMIT_REPORT action: findings + estimate. Also answers an open change request. */
 export default function ReportForm({ ticketId, previous, request, onDone }: {
   ticketId: number;
   previous?: Report | null;
@@ -35,9 +35,9 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const n = parseFloat(amount);
-    if (!nature.trim()) return toast.error('Describe the nature of work and your inspection findings.');
-    if (!n || n <= 0) return toast.error('Enter an estimate greater than 0.');
-    if (request && !remarks.trim()) return toast.error('Reply to the change request before you resubmit.');
+    if (!nature.trim()) return toast.error('Enter your findings.');
+    if (!n || n <= 0) return toast.error('Enter an estimate above 0.');
+    if (request && !remarks.trim()) return toast.error('Reply to the request first.');
 
     const fd = new FormData();
     fd.append('nature_of_work', nature.trim());
@@ -49,7 +49,7 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
     setBusy(true);
     try {
       const res = await api.post(`/tickets/${ticketId}/report`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success(res.data?.message || 'Report submitted to the AE.');
+      toast.success(res.data?.message || 'Report submitted.');
       onDone();
     } catch (err) {
       toast.error(errorMessage(err, 'Could not submit the report.'));
@@ -62,15 +62,15 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
     <form onSubmit={submit} className="space-y-4">
       <div>
         <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-          Nature of work &amp; findings <span className="text-rose-500">*</span>
+          Findings <span className="text-rose-500">*</span>
         </label>
         <textarea rows={4} value={nature} onChange={(e) => setNature(e.target.value)} className={`${inputCls} resize-none`}
-          placeholder="Scope, materials, structural findings, repair procedure…" />
+          placeholder="Work required, materials, quantities" />
       </div>
 
       <div>
         <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-          Estimate (INR) <span className="text-rose-500">*</span>
+          Estimate (₹) <span className="text-rose-500">*</span>
         </label>
         <div className="relative">
           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-slate-400">₹</span>
@@ -84,7 +84,7 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
           {request ? <>Reply to {request.author_desk} <span className="text-rose-500">*</span></> : 'Remarks (optional)'}
         </label>
         <textarea rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} className={`${inputCls} resize-none`}
-          placeholder={request ? 'What did you change, and why?' : 'Urgency, warranty, vendor availability…'} />
+          placeholder={request ? 'What did you change?' : 'Anything the AE should know'} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -112,7 +112,7 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
 
         <div className="space-y-2 rounded-xl border border-dashed border-slate-300 p-3 dark:border-slate-600">
           <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300"><UploadCloud size={14} /> Estimate docs ({docs.length})</span>
+            <span className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300"><UploadCloud size={14} /> Documents ({docs.length})</span>
             <label className="cursor-pointer rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-slate-900 dark:bg-slate-600">
               Add
               <input type="file" multiple accept={DOC_ACCEPT} className="hidden"
@@ -131,7 +131,7 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
       <button type="submit" disabled={busy}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-blue-700 disabled:opacity-60">
         {busy ? <Loader2 size={18} className="animate-spin" /> : <ClipboardCheck size={18} />}
-        {request ? 'Reply & resubmit report to AE' : 'Submit report to AE'}
+        {request ? 'Resubmit to AE' : 'Submit to AE'}
       </button>
     </form>
   );

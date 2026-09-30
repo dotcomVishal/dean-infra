@@ -43,7 +43,7 @@ export default function ApplicantView({ ticket }: { ticket: TicketDetail }) {
       </div>
 
       <Card>
-        <Label>Where it stands</Label>
+        <Label>Status</Label>
         <p className={`flex items-center gap-2 text-2xl font-black ${rejected ? 'text-rose-600' : 'text-slate-900 dark:text-white'}`}>
           {rejected ? <XCircle size={26} /> : <CheckCircle2 size={26} className="text-emerald-500" />} {stage}
         </p>

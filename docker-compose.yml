@@ -40,6 +40,8 @@ services:
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
+      # Sysadmin test tickets. Kill switch: set false in .env to disable.
+      MOCK_TESTING_ENABLED: ${MOCK_TESTING_ENABLED:-true}
       GOOGLE_APPLICATION_CREDENTIALS: /app/certs/serviceAccountKey.json
     volumes:
       - ./infra-backend-v2/uploads:/app/backend/uploads

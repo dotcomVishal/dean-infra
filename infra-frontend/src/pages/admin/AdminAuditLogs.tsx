@@ -20,6 +20,7 @@ interface AuditLogItem {
   actor_name: string;
   actor_email: string;
   actor_role: string;
+  is_self_action?: number | boolean;
 }
 
 export default function AdminAuditLogs() {
@@ -28,6 +29,7 @@ export default function AdminAuditLogs() {
   const [ticketIdQuery, setTicketIdQuery] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('ALL');
+  const [selfOnly, setSelfOnly] = useState(false);
   const [page, setPage] = useState(1);
   const limit = 50;
 
@@ -35,6 +37,7 @@ export default function AdminAuditLogs() {
     setLoading(true);
     try {
       const params: any = { page, limit };
+      if (selfOnly) params.self_only = '1';
       if (ticketIdQuery.trim()) {
         params.ticket_id = ticketIdQuery.trim();
       }
@@ -51,7 +54,7 @@ export default function AdminAuditLogs() {
 
   useEffect(() => {
     fetchLogs();
-  }, [page, ticketIdQuery]);
+  }, [page, ticketIdQuery, selfOnly]);
 
   const filteredLogs = logs.filter(log => {
     if (actionFilter !== 'ALL' && log.action !== actionFilter) return false;
@@ -124,9 +127,9 @@ export default function AdminAuditLogs() {
               <History size={24} />
             </span>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Master System Audit Trail</h1>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Audit Log</h1>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Immutable, real-time chronicle of all authority reviews, tender milestones, billings, and administrative overrides
+                All workflow actions and overrides.
               </p>
             </div>
           </div>
@@ -138,7 +141,7 @@ export default function AdminAuditLogs() {
           className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold transition"
         >
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          Refresh Stream
+          Refresh
         </button>
       </div>
 
@@ -149,7 +152,7 @@ export default function AdminAuditLogs() {
           <div className="md:col-span-3 relative">
             <input
               type="number"
-              placeholder="Filter by Ticket #ID..."
+              placeholder="Ticket number"
               value={ticketIdQuery}
               onChange={(e) => {
                 setTicketIdQuery(e.target.value);
@@ -176,27 +179,29 @@ export default function AdminAuditLogs() {
               className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
             >
               <option value="ALL">All Actions</option>
-              <option value="APPROVED">APPROVED / REVIEWED</option>
-              <option value="RETURNED">RETURNED</option>
-              <option value="DENIED">DENIED</option>
-              <option value="SUBMITTED">SUBMITTED</option>
-              <option value="TENDER_PUBLISHED">TENDER_PUBLISHED</option>
-              <option value="TENDER_AWARDED">TENDER_AWARDED</option>
-              <option value="BILL_PROCESSED">BILL_PROCESSED</option>
+              {['SUBMITTED', 'FORWARDED', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED', 'REASSIGNED', 'OVERRIDE',
+                'TENDER_PUBLISHED', 'WORK_AWARDED', 'BILL_RECORDED'].map((a) => (
+                <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>
+              ))}
             </select>
           </div>
 
           {/* Search Term */}
-          <div className="md:col-span-6 relative">
+          <div className="md:col-span-4 relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search actors, emails, or remarks..."
+              placeholder="Search name, e-mail or remarks"
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
             />
           </div>
+
+          <label className="md:col-span-2 flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" checked={selfOnly} onChange={(e) => { setSelfOnly(e.target.checked); setPage(1); }} className="h-4 w-4 rounded" />
+            Self actions only
+          </label>
         </div>
       </div>
 
@@ -205,13 +210,13 @@ export default function AdminAuditLogs() {
         {loading ? (
           <div className="py-20 text-center">
             <RefreshCw className="animate-spin text-indigo-500 mx-auto mb-3" size={32} />
-            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Loading master audit records...</p>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Loading…</p>
           </div>
         ) : filteredLogs.length === 0 ? (
           <div className="py-20 text-center">
             <History size={40} className="text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-            <p className="text-base font-semibold text-slate-700 dark:text-slate-300">No audit logs found</p>
-            <p className="text-sm text-slate-400">No logs match the selected filter criteria.</p>
+            <p className="text-base font-semibold text-slate-700 dark:text-slate-300">No entries</p>
+            <p className="text-sm text-slate-400">Nothing matches these filters.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -221,8 +226,8 @@ export default function AdminAuditLogs() {
                   <th className="py-3.5 px-4">Ticket</th>
                   <th className="py-3.5 px-4">Actor</th>
                   <th className="py-3.5 px-4">Action</th>
-                  <th className="py-3.5 px-4 min-w-[280px]">Remarks / Audit Details</th>
-                  <th className="py-3.5 px-4 whitespace-nowrap">Timestamp</th>
+                  <th className="py-3.5 px-4 min-w-[280px]">Details</th>
+                  <th className="py-3.5 px-4 whitespace-nowrap">Time</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60 text-sm">
@@ -267,16 +272,19 @@ export default function AdminAuditLogs() {
 
                       <td className="py-3.5 px-4 align-top whitespace-nowrap">
                         {getActionBadge(log.action)}
+                        {log.is_self_action ? (
+                          <span title="The actor raised this ticket" className="ml-1.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">Self</span>
+                        ) : null}
                       </td>
 
                       <td className="py-3.5 px-4 align-top text-slate-700 dark:text-slate-300">
                         {isOverride && (
                           <div className="inline-flex items-center gap-1 mb-1 text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-2 py-0.5 rounded">
-                            <ShieldAlert size={12} /> Administrative Override
+                            <ShieldAlert size={12} /> Override
                           </div>
                         )}
                         <p className="whitespace-pre-wrap text-xs md:text-sm font-sans leading-relaxed">
-                          {log.remarks || <span className="text-slate-400 italic">No explicit remarks recorded</span>}
+                          {log.remarks || <span className="text-slate-400 italic">No remarks</span>}
                         </p>
                       </td>
 
@@ -294,7 +302,7 @@ export default function AdminAuditLogs() {
 
         {/* Pagination Footer */}
         <div className="p-4 border-t border-gray-100 dark:border-slate-700/60 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-          <span>Showing {filteredLogs.length} entries (Page {page})</span>
+          <span>{filteredLogs.length} entries · Page {page}</span>
           <div className="flex gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}

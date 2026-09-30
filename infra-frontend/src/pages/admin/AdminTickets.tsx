@@ -7,8 +7,12 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
+import ReassignFields from '../../components/admin/ReassignFields';
+import { NO_REASSIGN, reassignBody, type ReassignValue } from '../../lib/reassign';
+import { staffStatusLabel } from '../../lib/ticketUi';
 
 const ALL_STATUSES = [
+  'UNASSIGNED',
   'ASSIGNED_TO_JE',
   'PENDING_AE_APPROVAL',
   'PENDING_SE_APPROVAL',
@@ -28,6 +32,7 @@ interface TicketItem {
   id: number;
   title: string | null;
   department: string;
+  campus?: string | null;
   type: string;
   description: string;
   location: string | null;
@@ -38,16 +43,10 @@ interface TicketItem {
   applicant_phone?: string;
   je_name: string | null;
   je_email: string | null;
+  current_holder_name?: string | null;
   estimated_amount: number | null;
   nature_of_work: string | null;
   attachment_count: number;
-}
-
-interface JEItem {
-  id: number;
-  name: string;
-  email: string;
-  department: string;
 }
 
 export default function AdminTickets() {
@@ -65,10 +64,9 @@ export default function AdminTickets() {
   const [selectedTicket, setSelectedTicket] = useState<TicketItem | null>(null);
   const [overrideModalOpen, setOverrideModalOpen] = useState(false);
   const [overrideStatus, setOverrideStatus] = useState('');
-  const [overrideJeId, setOverrideJeId] = useState('');
+  const [reassign, setReassign] = useState<ReassignValue>(NO_REASSIGN);
   const [overrideRemarks, setOverrideRemarks] = useState('');
   const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
-  const [jes, setJes] = useState<JEItem[]>([]);
 
   const fetchTickets = async () => {
     setLoading(true);
@@ -91,29 +89,14 @@ export default function AdminTickets() {
     }
   };
 
-  const fetchJes = async () => {
-    try {
-      const res = await api.get('/admin/jes');
-      if (res.data.success) {
-        setJes(res.data.jes || []);
-      }
-    } catch (err) {
-      console.error('Failed to load JEs directory:', err);
-    }
-  };
-
   useEffect(() => {
     fetchTickets();
   }, [page, statusFilter, deptFilter, typeFilter]);
 
-  useEffect(() => {
-    fetchJes();
-  }, []);
-
   const handleOpenOverride = (t: TicketItem) => {
     setSelectedTicket(t);
     setOverrideStatus(t.status);
-    setOverrideJeId('');
+    setReassign(NO_REASSIGN);
     setOverrideRemarks('');
     setOverrideModalOpen(true);
   };
@@ -122,7 +105,7 @@ export default function AdminTickets() {
     e.preventDefault();
     if (!selectedTicket) return;
     if (!overrideRemarks.trim()) {
-      toast.error('Administrative justification remarks are strictly mandatory.');
+      toast.error('Enter a reason.');
       return;
     }
 
@@ -130,17 +113,17 @@ export default function AdminTickets() {
     try {
       const res = await api.post(`/admin/tickets/${selectedTicket.id}/override`, {
         new_status: overrideStatus !== selectedTicket.status ? overrideStatus : undefined,
-        new_assigned_je_id: overrideJeId ? parseInt(overrideJeId, 10) : undefined,
+        reassign: reassignBody(reassign),
         remarks: overrideRemarks.trim(),
       });
       if (res.data.success) {
-        toast.success('Ticket state and audit trail updated successfully.');
+        toast.success('Ticket updated.');
         setOverrideModalOpen(false);
         fetchTickets();
       }
     } catch (err: any) {
       console.error('Override error:', err);
-      toast.error(err.response?.data?.message || 'Failed to execute override.');
+      toast.error(err.response?.data?.message || 'Could not update the ticket.');
     } finally {
       setIsSubmittingOverride(false);
     }
@@ -170,10 +153,10 @@ export default function AdminTickets() {
             </span>
             <div>
               <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">
-                Master Tickets Directory
+                Tickets
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Centralized oversight and administrative override controls across all campus works
+                All tickets, with overrides.
               </p>
             </div>
           </div>
@@ -201,7 +184,7 @@ export default function AdminTickets() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && { setPage: 1, fetchTickets }}
-              placeholder="Search by ticket ID, title, description, applicant, location..."
+              placeholder="Search by ID, title, applicant or location"
               className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs md:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -233,9 +216,9 @@ export default function AdminTickets() {
             onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
             className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 focus:outline-none"
           >
-            <option value="">All Work Types</option>
-            <option value="recurring">Recurring Maintenance</option>
-            <option value="non-recurring">Non-Recurring Proposals</option>
+            <option value="">All Types</option>
+            <option value="recurring">Recurring</option>
+            <option value="non-recurring">Proposals</option>
           </select>
 
           <button
@@ -250,10 +233,10 @@ export default function AdminTickets() {
       {/* Tickets List / Table */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
         {loading ? (
-          <div className="p-12 text-center text-slate-400">Loading tickets...</div>
+          <div className="p-12 text-center text-slate-400">Loading…</div>
         ) : tickets.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
-            No tickets match your search or filter criteria.
+            No tickets found.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -261,9 +244,10 @@ export default function AdminTickets() {
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-900/30 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                   <th className="py-3 px-4">Ticket</th>
-                  <th className="py-3 px-4">Work Scope & Location</th>
+                  <th className="py-3 px-4">Work</th>
                   <th className="py-3 px-4">Applicant</th>
-                  <th className="py-3 px-4">Assigned JE</th>
+                  <th className="py-3 px-4">JE</th>
+                  <th className="py-3 px-4">With</th>
                   <th className="py-3 px-4">Estimate</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4 text-right">Actions</th>
@@ -300,12 +284,15 @@ export default function AdminTickets() {
                         <span className="text-slate-400 italic">Unassigned</span>
                       )}
                     </td>
+                    <td className="py-3 px-4 whitespace-nowrap text-slate-700 dark:text-slate-300">
+                      {t.current_holder_name || <span className="text-slate-400">—</span>}
+                    </td>
                     <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
                       {t.estimated_amount ? `₹${parseFloat(String(t.estimated_amount)).toLocaleString('en-IN')}` : '—'}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusBadge(t.status)}`}>
-                        {t.status.replace(/_/g, ' ')}
+                        {staffStatusLabel(t.status)}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap space-x-2">
@@ -331,7 +318,7 @@ export default function AdminTickets() {
 
         {/* Pagination Controls */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs text-slate-500">
-          <span>Showing page {page} of {totalPages} ({total} tickets total)</span>
+          <span>Page {page} of {totalPages} · {total} tickets</span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -358,7 +345,7 @@ export default function AdminTickets() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <ShieldAlert className="text-amber-500" size={18} /> Administrative Override
+                  <ShieldAlert className="text-amber-500" size={18} /> Override
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">Ticket #TKT-{selectedTicket.id.toString().padStart(4, '0')}</p>
               </div>
@@ -372,7 +359,7 @@ export default function AdminTickets() {
 
             <form onSubmit={handleExecuteOverride} className="space-y-4 text-xs">
               <div>
-                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Force Status Transition</label>
+                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">New status</label>
                 <select
                   value={overrideStatus}
                   onChange={(e) => setOverrideStatus(e.target.value)}
@@ -384,33 +371,17 @@ export default function AdminTickets() {
                 </select>
               </div>
 
-              <div>
-                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Reassign Responsible Junior Engineer <span className="font-normal text-slate-400">(Optional)</span>
-                </label>
-                <select
-                  value={overrideJeId}
-                  onChange={(e) => setOverrideJeId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">Keep currently assigned JE ({selectedTicket.je_name || 'None'})</option>
-                  {jes.map((j) => (
-                    <option key={j.id} value={j.id}>
-                      {j.name} ({j.department} Wing) — {j.email}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <ReassignFields department={selectedTicket.department} campus={selectedTicket.campus} value={reassign} onChange={setReassign} />
 
               <div>
                 <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Mandatory Audit Justification / Remarks <span className="text-rose-500">*</span>
+                  Reason <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   rows={3}
                   value={overrideRemarks}
                   onChange={(e) => setOverrideRemarks(e.target.value)}
-                  placeholder="Specify official reason for administrative intervention (e.g. emergency requisition, authority delegation, technical reassignment)..."
+                  placeholder="Why is this change needed?"
                   required
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
@@ -429,7 +400,7 @@ export default function AdminTickets() {
                   disabled={isSubmittingOverride}
                   className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition disabled:opacity-50"
                 >
-                  {isSubmittingOverride ? 'Executing...' : 'Commit Override'}
+                  {isSubmittingOverride ? 'Applying…' : 'Apply'}
                 </button>
               </div>
             </form>

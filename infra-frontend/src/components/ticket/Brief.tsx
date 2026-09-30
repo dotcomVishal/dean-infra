@@ -9,7 +9,7 @@ import { DESK_RANK, deskLabel, mapsHref } from '../../lib/ticketUi';
 function ReportBody({ ticket }: { ticket: TicketDetail }) {
   const [more, setMore] = useState(false);
   const r = ticket.report;
-  if (!r) return <p className="text-sm text-slate-400">The JE has not filed a report yet.</p>;
+  if (!r) return <p className="text-sm text-slate-400">No report filed yet.</p>;
   const photos = ticket.attachments.filter((a) => a.document_category === 'JE_SITE_PHOTO');
   const docs = ticket.attachments.filter((a) => a.document_category === 'JE_ESTIMATE_DOC');
   const long = r.nature_of_work.length > 240;
@@ -26,7 +26,7 @@ function ReportBody({ ticket }: { ticket: TicketDetail }) {
         <p className="text-[11px] text-slate-400">Filed {format(new Date(r.created_at), 'd MMM yyyy, HH:mm')}</p>
       </div>
       <div>
-        <Label>Nature of work</Label>
+        <Label>Findings</Label>
         <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700 dark:text-slate-200 ${long && !more ? 'line-clamp-4' : ''}`}>
           {r.nature_of_work}
         </p>
@@ -37,10 +37,10 @@ function ReportBody({ ticket }: { ticket: TicketDetail }) {
         )}
       </div>
       {photos.length > 0 && (
-        <div><Label>Inspection photos ({photos.length})</Label><AttachmentList files={photos} cols="grid-cols-4 sm:grid-cols-6" /></div>
+        <div><Label>Site photos ({photos.length})</Label><AttachmentList files={photos} cols="grid-cols-4 sm:grid-cols-6" /></div>
       )}
       {docs.length > 0 && (
-        <div><Label>Estimate documents ({docs.length})</Label><AttachmentList files={docs} /></div>
+        <div><Label>Documents ({docs.length})</Label><AttachmentList files={docs} /></div>
       )}
     </div>
   );
@@ -57,7 +57,7 @@ function lastWordPerDesk(messages: TicketMessage[]) {
 export function DecisionBrief({ ticket }: { ticket: TicketDetail }) {
   const words = lastWordPerDesk(ticket.messages ?? []);
   return (
-    <Card title="Decision brief" icon={<ClipboardList size={14} />} className="border-blue-200 dark:border-blue-900/60">
+    <Card title="Summary" icon={<ClipboardList size={14} />} className="border-blue-200 dark:border-blue-900/60">
       <div className="space-y-4">
         <div>
           <Label>The issue</Label>
@@ -77,7 +77,7 @@ export function DecisionBrief({ ticket }: { ticket: TicketDetail }) {
         <div className="border-t border-slate-100 pt-4 dark:border-slate-700"><ReportBody ticket={ticket} /></div>
         {words.length > 0 && (
           <div className="border-t border-slate-100 pt-4 dark:border-slate-700">
-            <Label>Last word from each desk</Label>
+            <Label>Latest from each desk</Label>
             <ul className="space-y-1.5">
               {words.map((m) => (
                 <li key={m.id} className="rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-900/50">
@@ -99,5 +99,5 @@ export function DecisionBrief({ ticket }: { ticket: TicketDetail }) {
 /** For desks without the brief (JE, Clerical, Accountant): just the filed report. */
 export function ReportCard({ ticket }: { ticket: TicketDetail }) {
   if (!ticket.report) return null;
-  return <Card title="Inspection report" icon={<ClipboardList size={14} />}><ReportBody ticket={ticket} /></Card>;
+  return <Card title="Inspection Report" icon={<ClipboardList size={14} />}><ReportBody ticket={ticket} /></Card>;
 }

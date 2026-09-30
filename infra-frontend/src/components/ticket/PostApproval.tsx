@@ -13,7 +13,7 @@ export default function PostApproval({ ticket }: { ticket: TicketDetail }) {
   return (
     <>
       {tenders.length > 0 && (
-        <Card title="Tendering & award" icon={<FileText size={14} />}>
+        <Card title="Tender" icon={<FileText size={14} />}>
           <div className="space-y-2">
             {tenders.map((tn) => (
               <div key={tn.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
@@ -35,7 +35,7 @@ export default function PostApproval({ ticket }: { ticket: TicketDetail }) {
       )}
       {bills.length > 0 && (
         <Card
-          title="Bills & payments"
+          title="Bills"
           icon={<IndianRupee size={14} />}
           right={<span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">Disbursed {inr(disbursed)}</span>}
         >

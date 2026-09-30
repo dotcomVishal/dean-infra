@@ -65,7 +65,7 @@ export function ChangeRequestBanner({ ticket, myDesk }: { ticket: TicketDetail; 
         <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-            {forMe ? 'Open change request — needs your reply' : 'Open change request'}
+            {forMe ? 'Change request — reply needed' : 'Change request'}
           </p>
           <p className="mt-0.5 text-sm font-bold text-slate-900 dark:text-white">
             {who(head.author_desk, head.author_name)} → {who(head.to_desk, head.to_name)}
@@ -109,7 +109,7 @@ export function MessagesTimeline({ ticket }: { ticket: TicketDetail }) {
   if (messages.length === 0 && trail.length === 0 && reminders.length === 0) return null;
 
   return (
-    <Card title="Messages & timeline" icon={<MessageSquare size={14} />}>
+    <Card title="Messages" icon={<MessageSquare size={14} />}>
       {messages.length > 0 && <ul className="mb-5 space-y-2.5">{messages.map((m) => <MessageItem key={m.id} m={m} />)}</ul>}
 
       {trail.length > 0 && (
@@ -121,6 +121,9 @@ export function MessagesTimeline({ ticket }: { ticket: TicketDetail }) {
                 <span className="text-xs font-bold text-slate-900 dark:text-white">
                   {MOVEMENT_LABEL[a.action] ?? a.action}
                   {a.from_desk && a.to_desk ? ` · ${deskLabel(a.from_desk)} → ${deskLabel(a.to_desk)}` : ''}
+                  {a.is_self_action && (
+                    <span title="The actor raised this ticket" className="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">Self</span>
+                  )}
                 </span>
                 <span className="text-[10px] font-medium text-slate-400">{format(new Date(a.created_at), 'd MMM yyyy, HH:mm')}</span>
               </div>

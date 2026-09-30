@@ -124,7 +124,7 @@ export default function JeTenderControl() {
       }
     } catch (err: any) {
       console.error('Failed to update tender milestone:', err);
-      toast.error(err.response?.data?.message || 'Milestone update failed.');
+      toast.error(err.response?.data?.message || 'Could not update the milestone.');
     } finally {
       setIsUpdating(false);
     }
@@ -133,8 +133,8 @@ export default function JeTenderControl() {
   const milestonesList = [
     {
       key: 'APPROVED_FOR_TENDERING',
-      title: '1. Sanctioned for Tendering',
-      desc: 'Sanctioned by authorities. Forwarded to Clerical Staff for GeM / CPP Portal tender publication.',
+      title: '1. Approved for Tendering',
+      desc: 'Approved. Sent to Clerical for tender publication.',
       icon: ShieldCheck,
       color: 'text-emerald-600 dark:text-emerald-400',
       bg: 'bg-emerald-500/10',
@@ -191,10 +191,10 @@ export default function JeTenderControl() {
           <div>
             <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2">
               <FileSpreadsheet className="text-emerald-600 dark:text-emerald-400" size={24} />
-              Tender & Execution Milestone Control
+              Tenders
             </h1>
             <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">
-              Track external CPP / GeM tendering, physical progress, and formal closure
+              Tender, work progress and closure.
             </p>
           </div>
         </div>
@@ -222,7 +222,7 @@ export default function JeTenderControl() {
           {/* TICKET SELECTOR SIDEBAR (4 COLS) */}
           <div className="lg:col-span-4 space-y-3">
             <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1">
-              Sanctioned Tickets ({tickets.length})
+              Approved Tickets ({tickets.length})
             </h3>
             <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
               {tickets.map((t) => {
@@ -252,7 +252,7 @@ export default function JeTenderControl() {
                         }`}
                       >
                         {t.status === 'APPROVED_FOR_TENDERING'
-                          ? 'Sanctioned'
+                          ? 'Approved'
                           : t.status === 'TENDER_PUBLISHED'
                           ? 'GeM/CPP Published'
                           : t.status === 'WORK_IN_PROGRESS'

@@ -80,13 +80,13 @@ export default function JeRaiseTicket() {
         },
         (err) => {
           console.error('GPS Error:', err);
-          toast.error('Could not fetch location. Ensure location services are enabled.');
+          toast.error('Could not get your location. Turn on location services.');
           setIsLocating(false);
         },
         { enableHighAccuracy: true, timeout: 10000 }
       );
     } else {
-      toast.error('Geolocation is not supported by your browser');
+      toast.error('Location is not supported by this browser.');
       setIsLocating(false);
     }
   };
@@ -96,19 +96,19 @@ export default function JeRaiseTicket() {
     setError('');
 
     if (!title.trim()) {
-      return setError('Please provide a descriptive title for the proposal.');
+      return setError('Enter a title.');
     }
     if (!description.trim()) {
-      return setError('Please provide the scope of the non-recurring work.');
+      return setError('Enter the scope of work.');
     }
     if (!landmark.trim()) {
-      return setError('Please specify a landmark or precise campus location.');
+      return setError('Enter a landmark.');
     }
     if (!category.trim()) {
-      return setError('Please specify a category for this proposal (e.g. structural, electrical fault).');
+      return setError('Enter a category.');
     }
     if (!contactPhone.trim()) {
-      return setError('Please provide a contact phone number.');
+      return setError('Enter a contact phone number.');
     }
 
     setIsSubmitting(true);
@@ -143,7 +143,7 @@ export default function JeRaiseTicket() {
       const validationErrors = err.response?.data?.errors as { path: string; message: string }[] | undefined;
       const message = validationErrors?.length
         ? validationErrors.map((issue) => issue.message).join(' ')
-        : err.response?.data?.message || 'Failed to submit the non-recurring proposal.';
+        : err.response?.data?.message || 'Could not submit the proposal. Try again.';
       setError(message);
       setIsSubmitting(false);
     }
@@ -166,10 +166,10 @@ export default function JeRaiseTicket() {
         </button>
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
-            Non-Recurring Work Proposal
+            New Proposal
           </h1>
           <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">
-            Initiate major infrastructure maintenance, renovation, or capital work proposals
+            Repair, renovation or capital works.
           </p>
         </div>
       </div>
@@ -239,7 +239,7 @@ export default function JeRaiseTicket() {
             <input
               type="text"
               required
-              placeholder="e.g., structural, electrical fault"
+              placeholder="e.g. structural, wiring"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
@@ -276,7 +276,7 @@ export default function JeRaiseTicket() {
           <input
             type="text"
             required
-            placeholder="e.g., Replacement of Main Substation Circuit Breakers"
+            placeholder="Short title"
             className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -286,12 +286,12 @@ export default function JeRaiseTicket() {
         {/* 3. Scope of Work */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
-            Scope & Technical Justification
+            Scope of Work
           </label>
           <textarea
             className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all resize-none bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
             rows={5}
-            placeholder="Detailed engineering scope of proposed work, technical justification, estimated material specs..."
+            placeholder="Work required, materials, quantities"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             required
@@ -380,7 +380,7 @@ export default function JeRaiseTicket() {
 
             <input
               type="text"
-              placeholder="Building (optional, e.g., Hostel B3)"
+              placeholder="Building (optional)"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
               value={building}
               onChange={(e) => setBuilding(e.target.value)}
@@ -388,7 +388,7 @@ export default function JeRaiseTicket() {
             <input
               type="text"
               required
-              placeholder="Exact building, wing, room number, or outdoor landmark"
+              placeholder="Landmark or room"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
               value={landmark}
               onChange={(e) => setLandmark(e.target.value)}
@@ -396,7 +396,7 @@ export default function JeRaiseTicket() {
             <input
               type="tel"
               required
-              placeholder="Contact phone number *Required*"
+              placeholder="Contact phone *"
               className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
@@ -419,7 +419,7 @@ export default function JeRaiseTicket() {
             ) : (
               <>
                 <Send size={16} />
-                Submit Non-Recurring Work Proposal
+                Submit Proposal
               </>
             )}
           </button>

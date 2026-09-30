@@ -6,7 +6,7 @@ import { api } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { toast } from '../store/toastStore';
 import {
-  applicantStage, errorMessage, formatAge, hoursSince, inr, SLA_CLASS, slaOf, staffStatusLabel, ticketNo,
+  applicantStage, deskLabel, errorMessage, formatAge, hoursSince, inr, SLA_CLASS, slaOf, staffStatusLabel, ticketNo,
 } from '../lib/ticketUi';
 
 interface Row {
@@ -23,6 +23,8 @@ interface Row {
   estimated_amount?: number | string | null;
   on_my_desk?: boolean;
   applicant_name?: string;
+  current_holder_name?: string | null;
+  current_desk?: string | null;
 }
 interface Board {
   my_desk: Row[];
@@ -64,6 +66,7 @@ function TicketRow({ t, mode, now }: { t: Row; mode: TabKey; now: number }) {
           <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
             {mode === 'mine' ? applicantStage(t.status, t.stage_label) : staffStatusLabel(t.status)}
             {mode !== 'mine' && t.estimated_amount != null && <> · <span className="font-mono">{inr(t.estimated_amount)}</span></>}
+            {mode !== 'mine' && t.current_holder_name && <> · With {t.current_holder_name}{t.current_desk ? ` (${deskLabel(t.current_desk)})` : ''}</>}
             {t.applicant_name && mode === 'all' && <> · {t.applicant_name}</>}
             {foreign && ' · with another AE'}
           </p>

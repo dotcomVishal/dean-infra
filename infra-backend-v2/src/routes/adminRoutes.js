@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
+import { requireMockTesting } from '../middleware/testRole.js';
 import {
   getAdminMetrics,
   getAllTickets,
@@ -12,6 +13,10 @@ import {
   getMasterAuditLogs,
   getActiveJes,
   getStaff,
+  listTestTickets,
+  createTestTicket,
+  resetTestTicket,
+  deleteTestTicket,
 } from '../controllers/adminController.js';
 
 const router = express.Router();
@@ -42,5 +47,11 @@ router.get('/jes', getActiveJes);
 
 // Staff directory for any desk (override form)
 router.get('/staff', getStaff);
+
+// Sysadmin mock testing (404 when MOCK_TESTING_ENABLED=false)
+router.get('/test-tickets', requireMockTesting, listTestTickets);
+router.post('/test-tickets', requireMockTesting, createTestTicket);
+router.post('/test-tickets/:ticket_id/reset', requireMockTesting, resetTestTicket);
+router.delete('/test-tickets/:ticket_id', requireMockTesting, deleteTestTicket);
 
 export default router;

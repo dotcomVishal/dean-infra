@@ -48,33 +48,33 @@ export function jeAssignmentEmail(t) {
     subject: `[Deanery of Infrastructure] New Ticket #${t.id} Assigned: ${t.title}`,
     body: `Dear ${t.recipientName},
 
-A new infrastructure maintenance/work ticket has been assigned to your desk for site inspection.
+A ticket has been assigned to you for inspection.
 
 ======================================================================
 TICKET INFORMATION
 ======================================================================
 • Ticket ID:      ${ticketRef(t.id)}
 • Title:          ${t.title}
-• Department:     ${t.department} Engineering
+• Department:     ${t.department}
 • Category:       ${t.category}
 • Priority:       ${t.priority}
-• Work Type:      ${t.type === 'non-recurring' ? 'Non-Recurring Proposal' : 'Recurring Maintenance'}
+• Work Type:      ${t.type === 'non-recurring' ? 'Proposal' : 'Recurring'}
 • Reported By:    ${t.reporterLine}
 • Contact Phone:  ${t.contactPhone}
 • Location:       ${t.locationBlock}
 • Date & Time:    ${ist()}
 
 ======================================================================
-ISSUE DESCRIPTION
+DESCRIPTION
 ======================================================================
 ${t.description}
 
 ======================================================================
 ACTION REQUIRED
 ======================================================================
-Please inspect the physical site, evaluate technical requirements, and file your inspection report with the estimated financial sanction on the Deanery portal:
+Inspect the site, then submit your findings and estimate on the portal:
 
-🔗 Review & File Report: ${linkForDesk('JE', t.id)}
+Open the ticket: ${linkForDesk('JE', t.id)}
 
 ${FOOTER}`,
   };
@@ -85,14 +85,14 @@ export function unassignedEmail(t) {
     subject: `[Deanery of Infrastructure] Ticket #${t.id} UNASSIGNED — no JE available: ${t.title}`,
     body: `Dear ${t.recipientName},
 
-No Junior Engineer is currently available for ${t.department} / ${t.campus} campus (the pool is exhausted or everyone is on leave). This ticket needs a JE chosen manually.
+No JE is available for ${t.department} / ${t.campus} campus (all are busy or on leave). Choose a JE for this ticket.
 
 ======================================================================
 TICKET INFORMATION
 ======================================================================
 • Ticket ID:      ${ticketRef(t.id)}
 • Title:          ${t.title}
-• Department:     ${t.department} Engineering
+• Department:     ${t.department}
 • Category:       ${t.category}
 • Priority:       ${t.priority}
 • Reported By:    ${t.reporterLine}
@@ -101,16 +101,16 @@ TICKET INFORMATION
 • Date & Time:    ${ist()}
 
 ======================================================================
-ISSUE DESCRIPTION
+DESCRIPTION
 ======================================================================
 ${t.description}
 
 ======================================================================
 ACTION REQUIRED
 ======================================================================
-Review the ticket and choose a JE from the Deanery portal:
+Choose a JE on the portal:
 
-🔗 Review: ${linkForDesk('AE', t.id)}
+Open the ticket: ${linkForDesk('AE', t.id)}
 
 ${FOOTER}`,
   };
@@ -152,8 +152,8 @@ ${FOOTER}`,
 /** Reminder #2 onwards. `escalated` = the AE is copied (4th reminder onwards). */
 export function reminderEmail({ ticketId, title, recipientName, desk, number, hoursPending, escalated }) {
   const what = desk === 'AE'
-    ? 'This ticket still has no JE assigned. Choose a JE from the portal.'
-    : 'Please submit your site inspection findings and estimated amount as soon as possible.';
+    ? 'This ticket still has no JE. Choose one on the portal.'
+    : 'Submit your findings and estimate as soon as possible.';
   return {
     subject: `[ACTION REQUIRED] Reminder ${number} — Ticket #${ticketId}: ${title}`,
     body: `Dear ${recipientName},

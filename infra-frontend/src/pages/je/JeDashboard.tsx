@@ -131,7 +131,7 @@ export default function JeDashboard() {
       case 'APPROVED_FOR_TENDERING':
         return (
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 border-green-200 dark:border-green-800/50">
-            Sanctioned (Tendering)
+            Approved (Tendering)
           </span>
         );
       case 'TENDER_PUBLISHED':
@@ -182,10 +182,10 @@ export default function JeDashboard() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
-            Junior Engineer Operations
+            JE Dashboard
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 font-medium">
-            {user?.name} · {user?.department} Department
+            {user?.name} · {user?.department}
           </p>
         </div>
 
@@ -210,7 +210,7 @@ export default function JeDashboard() {
       {/* Desk board: My desk (SLA ageing), Watching, My tickets */}
       <DeskBoard />
 
-      <h2 className="pt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">All my works</h2>
+      <h2 className="pt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">All my tickets</h2>
 
       {/* STAT CARDS (Matches Clean Dashboard Cards) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -272,7 +272,7 @@ export default function JeDashboard() {
             {activeTenders.length}
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-2 font-medium">
-            Sanctioned & milestone tracking
+            Approved tickets and milestones
           </div>
         </div>
       </div>
@@ -345,7 +345,7 @@ export default function JeDashboard() {
             >
               <option value="all">All Types</option>
               <option value="recurring">Recurring</option>
-              <option value="non-recurring">Non-Recurring</option>
+              <option value="non-recurring">Proposals</option>
             </select>
           </div>
         </div>

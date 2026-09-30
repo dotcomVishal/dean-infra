@@ -103,13 +103,13 @@ export default function ClericalDashboard() {
     try {
       const res = await api.post(`/tickets/${selectedTicket.id}/tenders`, nitData);
       if (res.data.success) {
-        toast.success(`Tender notice published on ${nitData.portal_type}. Status updated to TENDER_PUBLISHED.`);
+        toast.success(`Tender published on ${nitData.portal_type}.`);
         setPublishModalOpen(false);
         fetchTickets();
       }
     } catch (err: any) {
       console.error('Publish tender error:', err);
-      toast.error(err.response?.data?.message || 'Failed to publish tender.');
+      toast.error(err.response?.data?.message || 'Could not publish the tender.');
     } finally {
       setSubmitting(false);
     }
@@ -135,13 +135,13 @@ export default function ClericalDashboard() {
     try {
       const res = await api.post(`/tickets/${selectedTicket.id}/tenders/award`, awardData);
       if (res.data.success) {
-        toast.success('Work contract awarded successfully. Ticket moved to WORK_IN_PROGRESS.');
+        toast.success('Work awarded.');
         setAwardModalOpen(false);
         fetchTickets();
       }
     } catch (err: any) {
       console.error('Award tender error:', err);
-      toast.error(err.response?.data?.message || 'Failed to award contract.');
+      toast.error(err.response?.data?.message || 'Could not award the work.');
     } finally {
       setSubmitting(false);
     }
@@ -175,11 +175,11 @@ export default function ClericalDashboard() {
               <FileSpreadsheet size={22} />
             </span>
             <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">
-              Clerical Tender & Contracts Cell
+              Tenders
             </h1>
           </div>
           <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            NIT Notice Publication · GeM & CPP Portal Procurement · Contract Execution Tracking
+            Publish tenders and award work.
           </p>
         </div>
 
@@ -201,7 +201,7 @@ export default function ClericalDashboard() {
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
-          <Clock size={16} /> Awaiting Tender Notice (Sanctioned)
+          <Clock size={16} /> Awaiting Tender Notice
         </button>
 
         <button
@@ -275,7 +275,7 @@ export default function ClericalDashboard() {
                   <th className="py-3 px-4">Ticket</th>
                   <th className="py-3 px-4">Title & Scope</th>
                   <th className="py-3 px-4">Department</th>
-                  <th className="py-3 px-4">Sanctioned Cost</th>
+                  <th className="py-3 px-4">Approved Amount</th>
                   <th className="py-3 px-4">Tender / Award Status</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -521,7 +521,7 @@ export default function ClericalDashboard() {
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  Sanctioned Estimate: ₹{parseFloat(String(selectedTicket.estimated_amount || 0)).toLocaleString('en-IN')}
+                  Estimate: ₹{parseFloat(String(selectedTicket.estimated_amount || 0)).toLocaleString('en-IN')}
                 </span>
               </div>
 
@@ -585,7 +585,7 @@ export default function ClericalDashboard() {
                     <span className="font-semibold text-slate-800 dark:text-slate-200">{ticketDetails.department}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Sanctioned Amount</span>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Approved Amount</span>
                     <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
                       ₹{parseFloat(String(ticketDetails.report?.estimated_amount || 0)).toLocaleString('en-IN')}
                     </span>

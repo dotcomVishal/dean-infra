@@ -3,6 +3,7 @@ import pool from '../config/db.js';
 import { upload } from '../middleware/upload.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
+import { testRoleForTicketParam, rejectStrayTestRole } from '../middleware/testRole.js';
 
 // Import actual controllers
 import {
@@ -31,6 +32,10 @@ const router = express.Router();
 
 // EVERY route below this line requires a valid token
 router.use(requireAuth);
+
+// Sysadmin "act as" on mock tickets only (plan2.md F5). Runs before any route-level requireRole.
+router.use(rejectStrayTestRole);
+router.param('ticket_id', testRoleForTicketParam);
 
 // 1.5 Applicant Dashboard (Fetch tickets created by this specific user)
 // W15: "My tickets" is open to every authenticated, active role -- being the
