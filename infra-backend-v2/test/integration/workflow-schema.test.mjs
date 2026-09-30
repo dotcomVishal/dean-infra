@@ -41,14 +41,14 @@ test('every desk in the approval chain is a valid role', async () => {
 
 test('all migrations are recorded as applied', async () => {
   const [rows] = await pool.query('SELECT filename FROM schema_migrations ORDER BY filename');
-  assert.ok(rows.length >= 7, `expected >= 7 applied migrations, got ${rows.length}`);
+  assert.ok(rows.length >= 8, `expected >= 8 applied migrations, got ${rows.length}`);
 });
 
-// ---- Migration 007 (plan2.md Phase 1) ----------------------------------------
-const M007 = new URL('../../migrations/007_desk_assignees_and_mock.sql', import.meta.url);
-const sql007 = fs.readFileSync(M007, 'utf8');
+// ---- Migration 008 (plan2.md Phase 1) ----------------------------------------
+const M008 = new URL('../../migrations/008_desk_assignees_and_mock.sql', import.meta.url);
+const sql008 = fs.readFileSync(M008, 'utf8');
 // Slice the DML sections so they can run inside a rolled-back transaction.
-const section = (from, to) => sql007.slice(sql007.indexOf(from), sql007.indexOf(to));
+const section = (from, to) => sql008.slice(sql008.indexOf(from), sql008.indexOf(to));
 const BACKFILL_SQL = section('-- 3. Backfill', '-- 4. Single');
 const PLACEHOLDER_SQL = section('-- 4. Single', '-- PROVE IT WORKED');
 
@@ -81,7 +81,7 @@ async function withTx(fn) {
 const activeHolders = async (conn, role) => (await conn.query(
   `SELECT email FROM users WHERE role = ? AND is_active = TRUE`, [role]))[0];
 
-test('007: running migrations again is a no-op', async () => {
+test('008: running migrations again is a no-op', async () => {
   const [before] = await pool.query('SELECT COUNT(*) AS n FROM schema_migrations');
   await runMigrations();
   await runMigrations();
@@ -89,11 +89,11 @@ test('007: running migrations again is a no-op', async () => {
   assert.equal(after_[0].n, before[0].n);
 });
 
-test('007: the SQL file is safe to re-run after it was applied', async () => {
-  await withTx(async (conn) => { await conn.query(sql007); await conn.query(sql007); });
+test('008: the SQL file is safe to re-run after it was applied', async () => {
+  await withTx(async (conn) => { await conn.query(sql008); await conn.query(sql008); });
 });
 
-test('007: new columns exist with the expected type and default', async () => {
+test('008: new columns exist with the expected type and default', async () => {
   for (const c of ['assigned_ae_id', 'assigned_se_id']) {
     const info = await columnInfo('tickets', c);
     assert.ok(info, `tickets.${c} missing`);
@@ -107,7 +107,7 @@ test('007: new columns exist with the expected type and default', async () => {
   assert.equal(self.nullable, 'NO');
 });
 
-test('007: foreign keys and indexes exist', async () => {
+test('008: foreign keys and indexes exist', async () => {
   const [fks] = await pool.query(
     `SELECT CONSTRAINT_NAME AS n FROM information_schema.TABLE_CONSTRAINTS
       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tickets' AND CONSTRAINT_TYPE = 'FOREIGN KEY'`);
@@ -120,7 +120,7 @@ test('007: foreign keys and indexes exist', async () => {
   for (const n of ['idx_assigned_ae', 'idx_assigned_se', 'idx_is_mock']) assert.ok(ix.includes(n), n);
 });
 
-test('007: backfill pins AE and SE for tickets sitting at that desk, only once', async () => {
+test('008: backfill pins AE and SE for tickets sitting at that desk, only once', async () => {
   await withTx(async (conn) => {
     const mk = async (role) => (await conn.query(
       `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
@@ -149,7 +149,7 @@ test('007: backfill pins AE and SE for tickets sitting at that desk, only once',
 });
 
 for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 'director@placeholder.invalid']]) {
-  test(`007: no active ${role} -> exactly one placeholder, stable on re-run`, async () => {
+  test(`008: no active ${role} -> exactly one placeholder, stable on re-run`, async () => {
     await withTx(async (conn) => {
       await conn.query(`UPDATE users SET is_active = FALSE WHERE role = ?`, [role]);
       await conn.query(`DELETE FROM users WHERE email = ?`, [email]);
@@ -160,7 +160,7 @@ for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 
     });
   });
 
-  test(`007: real active ${role} -> no placeholder inserted`, async () => {
+  test(`008: real active ${role} -> no placeholder inserted`, async () => {
     await withTx(async (conn) => {
       await conn.query(`DELETE FROM users WHERE email = ?`, [email]);
       await conn.query(`UPDATE users SET is_active = FALSE WHERE role = ?`, [role]);
@@ -174,7 +174,7 @@ for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 
     });
   });
 
-  test(`007: inactive ${role} placeholder is reactivated when no holder is active`, async () => {
+  test(`008: inactive ${role} placeholder is reactivated when no holder is active`, async () => {
     await withTx(async (conn) => {
       await conn.query(`UPDATE users SET is_active = FALSE WHERE role = ?`, [role]);
       await conn.query(`DELETE FROM users WHERE email = ?`, [email]);

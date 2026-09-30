@@ -4,6 +4,7 @@ import app from './src/app.js';
 import pool from './src/config/db.js'; // This triggers the database connection confirmation
 import { runMigrations } from './src/config/migrate.js';
 import { logDeskHealth } from './src/services/deskHealth.js';
+import { reconcileDeskOwners } from './src/models/deskModel.js';
 import { startEmailWorker } from './src/cron/emailReminders.js';
 import logger, { errorFields } from './src/utils/logger.js';
 
@@ -15,6 +16,8 @@ const PORT = process.env.PORT || 5000;
 (async () => {
   try {
     await runMigrations();
+    const fixed = await reconcileDeskOwners(pool); // A3: heal stale desk owners
+    if (fixed) logger.info('reconciled stale desk owners', { fixed });
   } catch (err) {
     logger.error('migration startup failed', errorFields(err));
     process.exit(1);

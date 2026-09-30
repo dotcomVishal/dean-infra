@@ -1,5 +1,5 @@
 // Dean and Director are single-holder desks (plan2.md decision 3): exactly one
-// active user each. Migration 007 creates a `.invalid` placeholder when a desk
+// active user each. Migration 008 creates a `.invalid` placeholder when a desk
 // has nobody; the Sysadmin later swaps in the real e-mail. This reports the
 // state so the boot log and the admin dashboard can warn about it.
 import logger from '../utils/logger.js';

@@ -6,6 +6,7 @@ export interface AvailableAction {
   code?: string;
   reason?: string;
   targets?: string[];
+  escalates_to?: string;
 }
 
 export interface AvailableActions {

@@ -1,6 +1,4 @@
 import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
-dotenv.config();
 
 // SMTP_PORT arrives as a string from the environment.
 const port = Number(process.env.SMTP_PORT) || 465;

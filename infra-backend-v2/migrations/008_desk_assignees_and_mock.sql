@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration 007 — pinned AE/SE desk holders, mock-ticket flag, self-action
+-- Migration 008 — pinned AE/SE desk holders, mock-ticket flag, self-action
 -- audit flag, single Dean/Director placeholders (plan2.md, Phase 1).
 --
 --   tickets.assigned_ae_id / assigned_se_id  pinned desk holders (nullable;

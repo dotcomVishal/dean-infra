@@ -65,12 +65,19 @@ export const createTicket = async (req, res) => {
     await connection.beginTransaction();
 
     let assignment;
-    // If a JE is proposing NON-RECURRING work in their own department, they
-    // inspect it themselves -- a distinct, pre-existing feature (JE-initiated
-    // proposals), not part of the fair-assignment pool. Every other ticket,
-    // including a normal ticket raised by a JE, goes through the fair
-    // auto-assignment engine (which ranks the raiser last).
+    // If a JE is proposing NON-RECURRING work in their own department (and
+    // campus), they inspect it themselves -- a distinct, pre-existing feature
+    // (JE-initiated proposals), not part of the fair-assignment pool. Every
+    // other ticket, including a normal ticket raised by a JE, goes through the
+    // fair auto-assignment engine (which ranks the raiser last).
+    let jeCoversCampus = false;
     if (req.user.role === 'JE' && type === 'non-recurring' && req.user.department === department) {
+      const [scope] = await connection.query(
+        "SELECT 1 FROM user_scopes WHERE user_id = ? AND campus IN (?, 'BOTH') LIMIT 1",
+        [req.user.id, campus]);
+      jeCoversCampus = scope.length > 0;
+    }
+    if (jeCoversCampus) {
       assignment = {
         status: 'ASSIGNED_TO_JE',
         assignedJeId: req.user.id,
@@ -148,9 +155,13 @@ export const createTicket = async (req, res) => {
 };
 
 
+const SCOPE_OR_DESK = `(t.current_desk_user_id = ? OR EXISTS (
+  SELECT 1 FROM user_scopes s
+   WHERE s.user_id = ? AND s.department = t.department AND (t.campus IS NULL OR s.campus IN (t.campus, 'BOTH'))))`;
+
 // PAGINATION & ROLE QUEUES: Get Authority Queue for AE, SE, DEAN, DIRECTOR, CLERICAL, ACCOUNTANT
 export const getQueue = async (req, res) => {
-  const { role, department } = req.user;
+  const { role } = req.user;
   const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 50;
   const offset = (page - 1) * limit;
@@ -194,11 +205,10 @@ export const getQueue = async (req, res) => {
   }
 
   if (role === 'AE') {
-    // Department match (legacy single-department scope) OR the ticket is on
-    // this AE's desk right now -- an AE whose extra coverage lives only in
-    // user_scopes (e.g. Horticulture) still sees tickets routed to them.
-    whereClauses.push('(t.department = ? OR t.current_desk_user_id = ?)');
-    queryParams.push(department, req.user.id);
+    // The ticket is on this AE's desk, or inside their (department, campus)
+    // scopes -- never the other campus's tickets (A5).
+    whereClauses.push(SCOPE_OR_DESK);
+    queryParams.push(req.user.id, req.user.id);
     if (tab === 'pending') {
       // UNASSIGNED tickets routed here by the fair-assignment engine
       // (plan.md Q8) surface in the AE's pending tab alongside their normal
@@ -208,8 +218,8 @@ export const getQueue = async (req, res) => {
       whereClauses.push("t.status = 'RETURNED_TO_JE'");
     }
   } else if (role === 'SE') {
-    whereClauses.push('t.department = ?');
-    queryParams.push(department);
+    whereClauses.push(SCOPE_OR_DESK);
+    queryParams.push(req.user.id, req.user.id);
     if (tab === 'pending') {
       whereClauses.push("t.status = 'PENDING_SE_APPROVAL'");
     } else if (tab === 'returned') {

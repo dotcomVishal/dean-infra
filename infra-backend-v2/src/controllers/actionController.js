@@ -76,7 +76,7 @@ export const performTicketAction = async (req, res) => {
       ? await messageModel.getMessage(connection, row.open_change_request_id)
       : null;
     const specs = planMessages({
-      action, fromDesk: t.fromDesk, toDesk: t.toDesk,
+      action: t.action, fromDesk: t.fromDesk, toDesk: t.toDesk,
       payload: { message, internal_remark, public_note }, openRequest,
     });
 
@@ -84,10 +84,10 @@ export const performTicketAction = async (req, res) => {
     let nextDeskUser = null;
     let assignedJeId;
     if (action === ACTION.ASSIGN_JE) {
-      nextDeskUser = await deskModel.getEligibleJe(connection, assignee_id, row.department);
+      nextDeskUser = await deskModel.getEligibleJe(connection, assignee_id, row.department, row.campus);
       if (!nextDeskUser) {
         throw new WorkflowError(
-          `User ${assignee_id} is not an active JE covering ${row.department}.`,
+          `User ${assignee_id} is not an active JE covering ${row.department}${row.campus ? ` (${row.campus})` : ''}.`,
           { code: 'INVALID_ASSIGNEE', status: 400 });
       }
       assignedJeId = nextDeskUser.id;
@@ -101,7 +101,7 @@ export const performTicketAction = async (req, res) => {
         { code: 'NO_DESK_OWNER', status: 409 });
     }
 
-    const opensNewRequest = action === ACTION.REQUEST_CHANGES;
+    const opensNewRequest = t.action === ACTION.REQUEST_CHANGES;
     const carriedOpen = opensNewRequest
       ? row.open_change_request_id
       : nextOpenRequestId({
@@ -152,7 +152,7 @@ export const performTicketAction = async (req, res) => {
     // Outbox rows (desk mail, reminders, sanitized applicant stage mail) commit
     // with the move itself.
     await notifyTransition(connection, {
-      ticketId, fromStatus: t.fromStatus, toStatus: t.toStatus, action, toDesk: t.toDesk,
+      ticketId, fromStatus: t.fromStatus, toStatus: t.toStatus, action: t.action, toDesk: t.toDesk,
       nextDeskUser, actor: { name: req.user.name, desk: t.fromDesk },
       message: opensNewRequest ? message : null,
     });

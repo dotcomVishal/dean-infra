@@ -40,7 +40,7 @@ async function connectWithRetry(tries = 30) {
 
 const conn = await connectWithRetry();
 try {
-  // schema.sql also INSERTs seed users, so it is not re-runnable: load it once only.
+  // Load schema.sql once only (skip if the users table already exists).
   const [[{ n }]] = await conn.query(
     `SELECT COUNT(*) AS n FROM information_schema.TABLES
       WHERE TABLE_SCHEMA = 'deanery_infra' AND TABLE_NAME = 'users'`);

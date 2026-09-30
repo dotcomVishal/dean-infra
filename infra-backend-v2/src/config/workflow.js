@@ -89,7 +89,8 @@ const NEXT_DESK = Object.freeze({ [DESK.AE]: DESK.SE, [DESK.SE]: DESK.DEAN, [DES
 // approval power (Q1); the Director has no limit.
 const APPROVAL_LIMIT_KEY = Object.freeze({ [DESK.SE]: 'SE_APPROVE', [DESK.DEAN]: 'DEAN_APPROVE' });
 const CAN_APPROVE = Object.freeze([DESK.SE, DESK.DEAN, DESK.DIRECTOR]);
-const CAN_REJECT  = Object.freeze([DESK.SE, DESK.DEAN, DESK.DIRECTOR]);
+const CAN_REJECT  = Object.freeze([DESK.DIRECTOR]);
+const PREV_DESK = Object.freeze({ [DESK.AE]: DESK.JE, [DESK.SE]: DESK.AE, [DESK.DEAN]: DESK.SE, [DESK.DIRECTOR]: DESK.DEAN });
 
 /** Approval-limit summary for a desk, so the UI never hardcodes ceilings (F3).
  *  { can_approve:false } for AE/JE; { unlimited:true } for the Director;
@@ -155,8 +156,7 @@ export function availableActions(user, ticket, limits = {}) {
         d = { action: ACTION.APPROVE, enabled: false, code: 'LIMIT_NOT_CONFIGURED',
               reason: `No financial limit configured for ${key}.` };
       } else if (Number(estimate) > Number(limit)) {
-        d = { action: ACTION.APPROVE, enabled: false, code: 'ABOVE_LIMIT',
-              reason: `Estimate ${inr(estimate)} is above your approval limit of ${inr(limit)}. Forward it instead.` };
+        d = { action: ACTION.APPROVE, enabled: true, escalates_to: NEXT_DESK[desk] };
       }
     }
     actions.push(d);
@@ -164,7 +164,7 @@ export function availableActions(user, ticket, limits = {}) {
 
   const owners = ticket.desk_owners;
   const targets = DESKS_BY_RANK.filter(
-    (d) => DESK_RANK[d] < DESK_RANK[desk] && (owners === undefined || owners[d] != null)
+    (d) => d === PREV_DESK[desk] && (owners === undefined || owners[d] != null)
   );
   actions.push(targets.length > 0
     ? { action: ACTION.REQUEST_CHANGES, enabled: true, targets }
@@ -237,6 +237,10 @@ export function resolveAction({ user, ticket, limits = {}, action, to_desk, esti
       return done(desk, to, STATUS_FOR_DESK[to], LOG_ACTION.FORWARDED);
     }
     case ACTION.APPROVE:
+      if (descriptor.escalates_to) {
+        const to = descriptor.escalates_to;
+        return { ...done(desk, to, STATUS_FOR_DESK[to], LOG_ACTION.FORWARDED), action: ACTION.FORWARD, escalated: true };
+      }
       return done(desk, null, STATUS.APPROVED_FOR_TENDERING, LOG_ACTION.APPROVED);
     case ACTION.REJECT:
       return done(desk, null, STATUS.DENIED, LOG_ACTION.REJECTED);

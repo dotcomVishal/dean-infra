@@ -4,7 +4,7 @@
 import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'crypto';
-import { findDeskOwner, loadAssignees, resolveAeForScope } from '../../src/models/deskModel.js';
+import { findDeskOwner, loadAssignees, resolveAeForScope, effectiveOwnerId, reconcileDeskOwners } from '../../src/models/deskModel.js';
 import { pickAvailableJe } from '../../src/services/assignment.js';
 import { performTicketAction, pinsFor, isSelfAction } from '../../src/controllers/actionController.js';
 import { overrideTicketStatus, getStaff, getAdminMetrics, getMasterAuditLogs } from '../../src/controllers/adminController.js';
@@ -421,4 +421,34 @@ test('a JE proposal (non-recurring, own department) is self-assigned and flagged
   } finally {
     await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
   }
+});
+
+// ---- reconciliation must not undo a Sysadmin reassignment -------------------------------------------------------------
+test('a pinned AE outside the ticket scope stays the holder: effectiveOwnerId and boot reconciliation keep it', async () => {
+  const admin = await makeUser({ role: 'SYSADMIN' });
+  const applicant = await makeUser({ role: 'APPLICANT' });
+  const scopeAe = await makeUser({ role: 'AE' }); await civilScope(scopeAe);
+  const outsideAe = await makeUser({ role: 'AE' }); // no Civil scope
+  const id = await ticketAtAe({ applicant, ae: scopeAe });
+
+  const res = await override(admin, id, { remarks: 'cover', reassign: { desk: 'AE', user_id: outsideAe } });
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.equal((await ticketRow(id)).current_desk_user_id, outsideAe);
+  assert.equal(await effectiveOwnerId(pool, await ticketRow(id), 'AE'), outsideAe);
+
+  await reconcileDeskOwners(pool);
+  assert.equal((await ticketRow(id)).current_desk_user_id, outsideAe);
+
+  // Without the pin the same holder is stale and gets healed.
+  await patch(id, { assigned_ae_id: null });
+  await reconcileDeskOwners(pool);
+  assert.notEqual((await ticketRow(id)).current_desk_user_id, outsideAe);
+});
+
+test('reconciliation leaves a mock ticket held by the Sysadmin', async () => {
+  const admin = await makeUser({ role: 'SYSADMIN' });
+  const id = await makeOpenTicket(admin, admin, 'PENDING_SE_APPROVAL');
+  await patch(id, { is_mock: 1, current_desk_user_id: admin });
+  await reconcileDeskOwners(pool);
+  assert.equal((await ticketRow(id)).current_desk_user_id, admin);
 });
