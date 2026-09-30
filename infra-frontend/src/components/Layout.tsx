@@ -64,7 +64,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       );
     }
     // Every role can raise a ticket (W15/F9). A JE also keeps the proposal form.
-    base.push({ name: 'New Ticket', path: '/raise', icon: PlusCircle });
+    base.push({ name: 'Raise a Ticket', path: '/raise', icon: PlusCircle });
     if (role === 'JE') base.push({ name: 'New Proposal', path: '/je/raise', icon: FilePlus2 });
     return base;
   };

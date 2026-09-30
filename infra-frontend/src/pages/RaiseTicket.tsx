@@ -133,7 +133,7 @@ export default function RaiseTicket() {
   return (
     <div className="max-w-5xl mx-auto w-full">
       <div className="md:hidden flex items-center justify-center mb-6">
-        <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">New Ticket</h2>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Raise a Ticket</h2>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6 bg-white dark:bg-slate-800 md:p-10 md:rounded-3xl md:shadow-sm md:border border-gray-200/60 dark:border-slate-700">
@@ -144,36 +144,17 @@ export default function RaiseTicket() {
           </div>
         )}
 
-        {/* 1. Photos */}
+        {/* 1. Title */}
         <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Photos</label>
-          {previewUrls.length === 0 ? (
-            <label className="border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer group">
-              <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-105 transition-transform border dark:border-slate-700">
-                <ImagePlus size={28} className="text-slate-400 dark:text-slate-300 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors" />
-              </div>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Add Photos</span>
-              <span className="text-xs text-slate-400 dark:text-slate-500 mt-1">Up to 5 images</span>
-              <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic" className="hidden" onChange={handleFileChange} />
-            </label>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {previewUrls.map((url, index) => (
-                <div key={index} className="relative aspect-square rounded-xl overflow-hidden shadow-sm group border border-slate-200 dark:border-slate-700">
-                  <img src={url} alt="Preview" className="w-full h-full object-cover" />
-                  <button type="button" onClick={() => removeFile(index)} className="absolute top-2 right-2 bg-slate-900/70 text-white p-1.5 rounded-full hover:bg-red-600 transition backdrop-blur-sm">
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-              {previewUrls.length < 5 && (
-                <label className="aspect-square rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition">
-                  <ImagePlus size={24} className="text-slate-400 dark:text-slate-500" />
-                  <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic" className="hidden" onChange={handleFileChange} />
-                </label>
-              )}
-            </div>
-          )}
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Title</label>
+          <input 
+            type="text" 
+            required
+            placeholder="Short summary, e.g. Water leak in Lab B2-104"
+            className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
         </div>
 
         {/* 2. Department */}
@@ -191,7 +172,7 @@ export default function RaiseTicket() {
           </div>
         </div>
 
-        {/* 2b. Campus */}
+        {/* 3. Campus */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Campus</label>
           <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
@@ -206,7 +187,7 @@ export default function RaiseTicket() {
           </div>
         </div>
 
-        {/* 2c. Category & Priority */}
+        {/* 4. Category & Priority */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Category</label>
@@ -234,20 +215,7 @@ export default function RaiseTicket() {
           </div>
         </div>
 
-        {/* 2.5 Title */}
-        <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Title</label>
-          <input 
-            type="text" 
-            required
-            placeholder="Short summary, e.g. Water leak in Lab B2-104"
-            className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-
-        {/* 3. Description */}
+        {/* 5. Description */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Description</label>
           <textarea 
@@ -256,7 +224,7 @@ export default function RaiseTicket() {
           />
         </div>
 
-        {/* 4. Location */}
+        {/* 6. Location */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-3 tracking-wider uppercase">Location</label>
           <div className="space-y-3">
@@ -309,7 +277,39 @@ export default function RaiseTicket() {
           </div>
         </div>
 
-        {/* 5. Sticky Submit */}
+        {/* 7. Photos */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">Photos</label>
+          {previewUrls.length === 0 ? (
+            <label className="border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer group">
+              <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-105 transition-transform border dark:border-slate-700">
+                <ImagePlus size={28} className="text-slate-400 dark:text-slate-300 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors" />
+              </div>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Add Photos</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500 mt-1">Up to 5 images</span>
+              <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic" className="hidden" onChange={handleFileChange} />
+            </label>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {previewUrls.map((url, index) => (
+                <div key={index} className="relative aspect-square rounded-xl overflow-hidden shadow-sm group border border-slate-200 dark:border-slate-700">
+                  <img src={url} alt="Preview" className="w-full h-full object-cover" />
+                  <button type="button" onClick={() => removeFile(index)} className="absolute top-2 right-2 bg-slate-900/70 text-white p-1.5 rounded-full hover:bg-red-600 transition backdrop-blur-sm">
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+              {previewUrls.length < 5 && (
+                <label className="aspect-square rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition">
+                  <ImagePlus size={24} className="text-slate-400 dark:text-slate-500" />
+                  <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic" className="hidden" onChange={handleFileChange} />
+                </label>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 8. Sticky Submit */}
         <div className="fixed bottom-[4.5rem] md:static left-0 right-0 p-4 md:p-0 bg-white/80 dark:bg-slate-900/80 md:bg-transparent backdrop-blur-md md:backdrop-blur-none border-t border-slate-200 dark:border-slate-700 md:border-none z-40 md:pt-4">
           <button type="submit" disabled={isSubmitting} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             {isSubmitting ? <><Loader2 size={20} className="animate-spin" /> Submitting…</> : <><Send size={20} /> Submit</>}

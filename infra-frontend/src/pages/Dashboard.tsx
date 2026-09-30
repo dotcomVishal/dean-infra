@@ -16,11 +16,11 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white md:text-3xl">
             {greeting}, {user?.name?.split(' ')[0]}
           </h1>
-          <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">Track the issues you have reported.</p>
+          <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">Track the tickets you have raised.</p>
         </div>
         <button onClick={() => navigate('/raise')}
           className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">
-          <PlusCircle size={18} /> Report an issue
+          <PlusCircle size={18} /> Raise a Ticket
         </button>
       </div>
       <DeskBoard />

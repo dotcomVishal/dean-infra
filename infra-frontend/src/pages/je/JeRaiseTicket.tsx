@@ -185,7 +185,22 @@ export default function JeRaiseTicket() {
           </div>
         )}
 
-        {/* 1. Department */}
+        {/* 1. Proposal Title */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
+            Proposal Title
+          </label>
+          <input
+            type="text"
+            required
+            placeholder="Short title"
+            className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
+
+        {/* 2. Department */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
             Department
@@ -208,7 +223,7 @@ export default function JeRaiseTicket() {
           </div>
         </div>
 
-        {/* 1b. Campus */}
+        {/* 3. Campus */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
             Campus
@@ -231,7 +246,7 @@ export default function JeRaiseTicket() {
           </div>
         </div>
 
-        {/* 1c. Category & Priority */}
+        {/* 4. Category & Priority */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
@@ -269,22 +284,7 @@ export default function JeRaiseTicket() {
           </div>
         </div>
 
-        {/* 2. Proposal Title */}
-        <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
-            Proposal Title
-          </label>
-          <input
-            type="text"
-            required
-            placeholder="Short title"
-            className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-
-        {/* 3. Scope of Work */}
+        {/* 5. Scope of Work */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
             Scope of Work
@@ -299,52 +299,7 @@ export default function JeRaiseTicket() {
           />
         </div>
 
-        {/* 4. Evidence Photos / Sketches */}
-        <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
-            Preliminary Sketches / Existing Site Photos (Optional)
-          </label>
-          {previewUrls.length === 0 ? (
-            <label className="border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer group">
-              <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-105 transition-transform border dark:border-slate-700">
-                <ImagePlus size={22} className="text-slate-400 dark:text-slate-300 group-hover:text-blue-500 transition-colors" />
-              </div>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Select Photos or Documents
-              </span>
-              <span className="text-xs text-slate-400 mt-1">
-                Up to 5 files (images, PDF)
-              </span>
-              <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,application/pdf" className="hidden" onChange={handleFileChange} />
-            </label>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {previewUrls.map((url, index) => (
-                <div
-                  key={index}
-                  className="relative aspect-square rounded-xl overflow-hidden shadow-sm group border border-slate-200 dark:border-slate-700"
-                >
-                  <img src={url} alt="Preview" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeFile(index)}
-                    className="absolute top-1.5 right-1.5 bg-slate-900/70 text-white p-1 rounded-full hover:bg-red-600 transition"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-              {previewUrls.length < 5 && (
-                <label className="aspect-square rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition">
-                  <ImagePlus size={20} className="text-slate-400 dark:text-slate-500" />
-                  <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,application/pdf" className="hidden" onChange={handleFileChange} />
-                </label>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 5. Location */}
+        {/* 6. Location & Landmark */}
         <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-3 tracking-wider uppercase">
             Location & Landmark
@@ -405,7 +360,52 @@ export default function JeRaiseTicket() {
           </div>
         </div>
 
-        {/* Submit */}
+        {/* 7. Evidence Photos / Sketches */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
+            Preliminary Sketches / Existing Site Photos (Optional)
+          </label>
+          {previewUrls.length === 0 ? (
+            <label className="border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer group">
+              <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-105 transition-transform border dark:border-slate-700">
+                <ImagePlus size={22} className="text-slate-400 dark:text-slate-300 group-hover:text-blue-500 transition-colors" />
+              </div>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Select Photos or Documents
+              </span>
+              <span className="text-xs text-slate-400 mt-1">
+                Up to 5 files (images, PDF)
+              </span>
+              <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,application/pdf" className="hidden" onChange={handleFileChange} />
+            </label>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              {previewUrls.map((url, index) => (
+                <div
+                  key={index}
+                  className="relative aspect-square rounded-xl overflow-hidden shadow-sm group border border-slate-200 dark:border-slate-700"
+                >
+                  <img src={url} alt="Preview" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removeFile(index)}
+                    className="absolute top-1.5 right-1.5 bg-slate-900/70 text-white p-1 rounded-full hover:bg-red-600 transition"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+              {previewUrls.length < 5 && (
+                <label className="aspect-square rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition">
+                  <ImagePlus size={20} className="text-slate-400 dark:text-slate-500" />
+                  <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,application/pdf" className="hidden" onChange={handleFileChange} />
+                </label>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 8. Submit */}
         <div className="pt-2">
           <button
             type="submit"
