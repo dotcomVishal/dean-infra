@@ -57,7 +57,6 @@ TICKET INFORMATION
 • Title:          ${t.title}
 • Department:     ${t.department}
 • Category:       ${t.category}
-• Priority:       ${t.priority}
 • Work Type:      ${t.type === 'non-recurring' ? 'Proposal' : 'Recurring'}
 • Reported By:    ${t.reporterLine}
 • Contact Phone:  ${t.contactPhone}
@@ -94,7 +93,6 @@ TICKET INFORMATION
 • Title:          ${t.title}
 • Department:     ${t.department}
 • Category:       ${t.category}
-• Priority:       ${t.priority}
 • Reported By:    ${t.reporterLine}
 • Contact Phone:  ${t.contactPhone}
 • Location:       ${t.locationBlock}

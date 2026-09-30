@@ -29,7 +29,7 @@ export default function TicketHeader({ ticket, role }: { ticket: TicketDetail; r
             <span className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400">{ticketNo(ticket.id)}</span>
             {ticket.campus && <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">{ticket.campus}</span>}
             <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-700 dark:bg-slate-700 dark:text-slate-200">{ticket.department}</span>
-            {ticket.priority && <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${PRIORITY[ticket.priority] ?? PRIORITY.NORMAL}`}>{ticket.priority}</span>}
+            {ticket.priority && ticket.priority !== 'NORMAL' && <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${PRIORITY[ticket.priority] ?? PRIORITY.NORMAL}`}>{ticket.priority}</span>}
           </div>
           <h1 className="mt-1 break-words text-lg font-bold text-slate-900 dark:text-white md:text-2xl">{ticket.title || 'Untitled ticket'}</h1>
           <p className={`mt-1 text-sm font-semibold ${ticket.status === 'DENIED' ? 'text-rose-600' : 'text-slate-700 dark:text-slate-200'}`}>
