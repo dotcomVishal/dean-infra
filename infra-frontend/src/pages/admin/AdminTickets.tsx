@@ -1,31 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
   ClipboardList, Search, ChevronLeft, ChevronRight, 
-  RefreshCw, ShieldAlert, ArrowRight, X
+  RefreshCw, ShieldAlert, ArrowRight, X, Download
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
 import ReassignFields from '../../components/admin/ReassignFields';
 import { NO_REASSIGN, reassignBody, type ReassignValue } from '../../lib/reassign';
-import { staffStatusLabel } from '../../lib/ticketUi';
+import { ALL_STATUSES, errorMessage, isPostApproval, staffStatusLabel } from '../../lib/ticketUi';
 
-const ALL_STATUSES = [
-  'UNASSIGNED',
-  'ASSIGNED_TO_JE',
-  'PENDING_AE_APPROVAL',
-  'PENDING_SE_APPROVAL',
-  'PENDING_DEAN_APPROVAL',
-  'PENDING_DIRECTOR_APPROVAL',
-  'APPROVED_FOR_TENDERING',
-  'TENDER_PUBLISHED',
-  'WORK_IN_PROGRESS',
-  'WORK_COMPLETED',
-  'RETURNED_TO_JE',
-  'DENIED',
-  'CLOSED'
-];
 
 const TICKET_DEPARTMENTS = ['Civil', 'Electrical', 'Horticulture'];
 
@@ -36,7 +21,7 @@ interface TicketItem {
   campus?: string | null;
   type: string;
   description: string;
-  location: string | null;
+  landmark: string | null;
   status: string;
   created_at: string;
   applicant_name: string;
@@ -48,17 +33,38 @@ interface TicketItem {
   estimated_amount: number | null;
   nature_of_work: string | null;
   attachment_count: number;
+  priority?: string | null;
+  deleted_at?: string | null;
+  is_mock?: boolean | number;
 }
 
 export default function AdminTickets() {
   const [tickets, setTickets] = useState<TicketItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [deptFilter, setDeptFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [page, setPage] = useState(1);
+  // Filter state lives in the URL query string, so a filtered view can be bookmarked and shared.
+  const [params, setParams] = useSearchParams();
+  const q = params.get('q') ?? '';
+  const statuses = (params.get('status') ?? '').split(',').filter(Boolean);
+  const campus = params.get('campus') ?? '';
+  const dept = params.get('department') ?? '';
+  const priority = params.get('priority') ?? '';
+  const typeF = params.get('type') ?? '';
+  const from = params.get('from') ?? '';
+  const to = params.get('to') ?? '';
+  const mock = params.get('mock') === '1';
+  const deleted = params.get('deleted') === '1';
+  const preset = params.get('preset') ?? '';
+  const page = parseInt(params.get('page') ?? '1', 10) || 1;
+  const [searchText, setSearchText] = useState(q);
+  const [exporting, setExporting] = useState(false);
+  const setFilter = (changes: Record<string, string | null>) => {
+    const next = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(changes)) { if (v) next.set(k, v); else next.delete(k); }
+    if (!('page' in changes)) next.delete('page'); // any filter change goes back to page 1
+    setParams(next, { replace: true });
+  };
+  const setPage = (n: number) => setFilter({ page: n > 1 ? String(n) : null });
   const limit = 20;
 
   // Override modal state
@@ -69,30 +75,68 @@ export default function AdminTickets() {
   const [overrideRemarks, setOverrideRemarks] = useState('');
   const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
 
+  // The same parameters feed the list and the CSV, so the file equals what is on screen.
+  const filterParams = () => {
+    const p: Record<string, string> = {};
+    if (q.trim()) p.search = q.trim();
+    if (statuses.length) p.status = statuses.join(',');
+    if (campus) p.campus = campus;
+    if (dept) p.department = dept;
+    if (priority) p.priority = priority;
+    if (typeF) p.type = typeF;
+    if (from) p.from = from;
+    if (to) p.to = to;
+    if (mock) p.include_mock = '1';
+    if (deleted) p.include_deleted = '1';
+    if (preset === 'confirm') p.awaiting_confirmation = '1';
+    if (preset === 'sent_back') p.sent_back = '1';
+    return p;
+  };
+
   const fetchTickets = async () => {
     setLoading(true);
     try {
-      const params: any = { page, limit };
-      if (search.trim()) params.search = search.trim();
-      if (statusFilter && statusFilter !== 'ALL') params.status = statusFilter;
-      if (deptFilter && deptFilter !== 'ALL') params.department = deptFilter;
-      if (typeFilter && typeFilter !== 'ALL') params.type = typeFilter;
-
-      const res = await api.get('/admin/tickets', { params });
+      const res = await api.get('/admin/tickets', { params: { ...filterParams(), page, limit } });
       if (res.data.success) {
         setTickets(res.data.tickets || []);
         setTotal(res.data.total || 0);
       }
     } catch (err) {
-      console.error('Failed to load tickets:', err);
+      toast.error(errorMessage(err, 'Could not load the tickets.'));
     } finally {
       setLoading(false);
     }
   };
 
+  // The endpoint needs the bearer token, so the file is fetched through axios and saved from a blob.
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get('/admin/tickets/export.csv', { params: filterParams(), responseType: 'blob' });
+      const href = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `tickets-${format(new Date(), 'yyyyMMdd')}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    } catch (err) {
+      // An error body arrives as a blob: read the server's message out of it.
+      const blob = (err as { response?: { data?: Blob } })?.response?.data;
+      let message = errorMessage(err, 'Could not export the tickets.');
+      if (blob instanceof Blob) {
+        try { message = JSON.parse(await blob.text()).message ?? message; } catch { /* keep the generic message */ }
+      }
+      toast.error(message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   useEffect(() => {
     fetchTickets();
-  }, [page, statusFilter, deptFilter, typeFilter]);
+  }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenOverride = (t: TicketItem) => {
     setSelectedTicket(t);
@@ -134,7 +178,7 @@ export default function AdminTickets() {
     if (s === 'CLOSED') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
     if (s === 'DENIED') return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20';
     if (s.startsWith('PENDING_')) return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
-    if (s === 'APPROVED_FOR_TENDERING' || s === 'TENDER_PUBLISHED' || s === 'WORK_IN_PROGRESS' || s === 'WORK_COMPLETED') {
+    if (isPostApproval(s)) {
       return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
     }
     return 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20';
@@ -165,7 +209,7 @@ export default function AdminTickets() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => { setPage(1); fetchTickets(); }}
+            onClick={() => fetchTickets()}
             disabled={loading}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700/60 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition"
           >
@@ -176,58 +220,84 @@ export default function AdminTickets() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm flex flex-col lg:flex-row gap-3 items-center justify-between">
-        <div className="flex-1 w-full flex flex-col sm:flex-row gap-2">
+      <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-700/80 dark:bg-slate-800">
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => { e.preventDefault(); setFilter({ q: searchText.trim() || null }); }}
+        >
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input
               type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && { setPage: 1, fetchTickets }}
-              placeholder="Search by ID, title, applicant or location"
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs md:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Search by ID, title, applicant or landmark"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white md:text-sm"
             />
           </div>
+          <button type="submit" className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700">Search</button>
+        </form>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 focus:outline-none"
-          >
-            <option value="">All Statuses</option>
-            {ALL_STATUSES.map((s) => (
-              <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
-            ))}
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
+          <details className="relative col-span-2 md:col-span-1">
+            <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+              {statuses.length ? `${statuses.length} status${statuses.length > 1 ? 'es' : ''}` : 'All statuses'}
+            </summary>
+            <div className="absolute z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+              {ALL_STATUSES.map((st) => (
+                <label key={st} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-700/60">
+                  <input type="checkbox" checked={statuses.includes(st)}
+                    onChange={() => setFilter({ status: (statuses.includes(st) ? statuses.filter((x) => x !== st) : [...statuses, st]).join(',') || null })} />
+                  {staffStatusLabel(st)}
+                </label>
+              ))}
+            </div>
+          </details>
+          <select aria-label="Campus" value={campus} onChange={(e) => setFilter({ campus: e.target.value || null })}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+            <option value="">All campuses</option><option value="NORTH">North</option><option value="SOUTH">South</option>
           </select>
-
-          <select
-            value={deptFilter}
-            onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }}
-            className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 focus:outline-none"
-          >
-            <option value="">All Departments</option>
-            {TICKET_DEPARTMENTS.map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
+          <select aria-label="Department" value={dept} onChange={(e) => setFilter({ department: e.target.value || null })}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+            <option value="">All departments</option>
+            {TICKET_DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
-
-          <select
-            value={typeFilter}
-            onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
-            className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 focus:outline-none"
-          >
-            <option value="">All Types</option>
-            <option value="recurring">Recurring</option>
-            <option value="non-recurring">Proposals</option>
+          <select aria-label="Priority" value={priority} onChange={(e) => setFilter({ priority: e.target.value || null })}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+            <option value="">All priorities</option><option value="URGENT">Urgent</option><option value="NORMAL">Normal</option><option value="LOW">Low</option>
           </select>
+          <select aria-label="Type" value={typeF} onChange={(e) => setFilter({ type: e.target.value || null })}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+            <option value="">All types</option><option value="recurring">Recurring</option><option value="non-recurring">Proposals</option>
+          </select>
+          <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">From
+            <input type="date" value={from} max={to || undefined} onChange={(e) => setFilter({ from: e.target.value || null })}
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white" /></label>
+          <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">To
+            <input type="date" value={to} min={from || undefined} onChange={(e) => setFilter({ to: e.target.value || null })}
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white" /></label>
+        </div>
 
-          <button
-            onClick={() => { setPage(1); fetchTickets(); }}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition shadow-sm"
-          >
-            Filter
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600 dark:text-slate-300">
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={mock} onChange={(e) => setFilter({ mock: e.target.checked ? '1' : null })} /> Test tickets</label>
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={deleted} onChange={(e) => setFilter({ deleted: e.target.checked ? '1' : null })} /> Show deleted</label>
+            <select aria-label="Section" value={preset} onChange={(e) => setFilter({ preset: e.target.value || null })}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
+              <option value="">Any stage</option><option value="confirm">Resolved, awaiting confirmation</option><option value="sent_back">Sent back</option>
+            </select>
+            {params.toString() !== '' && (
+              <button type="button" onClick={() => { setSearchText(''); setParams(new URLSearchParams(), { replace: true }); }}
+                className="inline-flex items-center gap-1 font-semibold text-blue-600 hover:underline dark:text-blue-400"><X size={12} /> Clear filters</button>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{total} matching</span>
+            <button type="button" onClick={exportCsv} disabled={exporting || total === 0}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50">
+              <Download size={14} className={exporting ? 'animate-pulse' : ''} /> Export CSV
+            </button>
+          </div>
         </div>
       </div>
 
@@ -266,9 +336,10 @@ export default function AdminTickets() {
                     <td className="py-3 px-4 max-w-xs">
                       <p className="font-bold text-slate-900 dark:text-white truncate">
                         {t.title || t.description.substring(0, 50)}
+                        {t.deleted_at && <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">Deleted</span>}
                       </p>
                       <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                        {t.location || 'Campus'} · <span className="font-semibold text-slate-700 dark:text-slate-300">{t.department}</span> ({t.type})
+                        {t.landmark || 'Campus'} · <span className="font-semibold text-slate-700 dark:text-slate-300">{t.department}</span> ({t.type})
                       </p>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
@@ -322,14 +393,14 @@ export default function AdminTickets() {
           <span>Page {page} of {totalPages} · {total} tickets</span>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setPage(Math.max(1, page - 1))}
               disabled={page <= 1}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40"
             >
               <ChevronLeft size={16} />
             </button>
             <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
               disabled={page >= totalPages}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40"
             >

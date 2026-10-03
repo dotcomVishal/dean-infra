@@ -14,7 +14,7 @@ const ticket = {
   title: 'Leak', description: 'd', type: 'recurring', priority: 'NORMAL',
   applicant_name: 'Asha', applicant_email: 'a@x.in', assignees: { AE: { id: 3, name: 'Ae Person' } },
 };
-const emptyData = { attachments: [], reports: [], tenders: [], bills: [], auditLogs: [], messages: [] };
+const emptyData = { attachments: [], reports: [], tenders: [], auditLogs: [], messages: [] };
 
 test('applicantTicket never carries pinned holders, desk holder, mock flag or assignees', () => {
   const out = applicantTicket(ticket);

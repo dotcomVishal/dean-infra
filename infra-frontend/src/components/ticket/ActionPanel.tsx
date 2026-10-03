@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, CornerUpLeft, Eye, Loader2, Send, UserCheck, XCircle, ClipboardCheck, Gavel } from 'lucide-react';
+import { ArrowRight, CheckCircle2, CornerUpLeft, Eye, Loader2, Paperclip, Send, UserCheck, X, XCircle, ClipboardCheck, Gavel } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
 import { DESK_RANK, deskLabel, errorMessage, inr, visibleDesks } from '../../lib/ticketUi';
@@ -69,12 +69,14 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
   const [assignee, setAssignee] = useState('');
   const [jes, setJes] = useState<JeChoice[]>([]);
   const [busy, setBusy] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [pickKey, setPickKey] = useState(0); // new key = empty input, so the same file can be picked again
 
   // One choice = no extra tap. Reset the form whenever the ticket moves.
   const enabledCount = actions.filter((a) => a.enabled).length;
   useEffect(() => {
     setSelected(enabledCount === 1 ? actions.find((a) => a.enabled)!.action : null);
-    setToDesk(''); setMessage(''); setInternal(''); setPublicNote(''); setAssignee('');
+    setToDesk(''); setMessage(''); setInternal(''); setPublicNote(''); setAssignee(''); setFiles([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket.id, ticket.status, enabledCount]);
 
@@ -119,7 +121,15 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
 
     setBusy(true);
     try {
-      const res = await api.post(`/tickets/${ticket.id}/actions`, payload);
+      let body: Record<string, unknown> | FormData = payload;
+      if (files.length > 0 && current.action !== 'ASSIGN_JE') {
+        // Files travel with the move: one multipart request, same transaction on the server.
+        const fd = new FormData();
+        Object.entries(payload).forEach(([k, v]) => fd.append(k, String(v)));
+        files.forEach((f) => fd.append('files', f));
+        body = fd;
+      }
+      const res = await api.post(`/tickets/${ticket.id}/actions`, body);
       toast.success(res.data?.message || 'Ticket updated.');
       onDone();
     } catch (err) {
@@ -265,6 +275,29 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
               <textarea id="internal" rows={2} value={internal} onChange={(e) => setInternal(e.target.value)} className={`${fieldCls} resize-none`}
                 placeholder="Read by your desk and above." />
               <VisibleTo desks={visibleDesks(myRank)} />
+            </div>
+          )}
+
+          {current.action !== 'ASSIGN_JE' && (
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Attach documents (optional)</span>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200">
+                  <Paperclip size={12} /> Add files
+                  <input key={pickKey} type="file" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.xlsx,.docx" className="hidden"
+                    onChange={(e) => { const picked = Array.from(e.target.files ?? []); setFiles((p) => [...p, ...picked].slice(0, 5)); setPickKey((k) => k + 1); }} />
+                </label>
+              </div>
+              {files.map((f, i) => (
+                <div key={`${f.name}-${i}`} className="mt-1.5 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-800">
+                  <span className="min-w-0 truncate text-slate-700 dark:text-slate-300">{f.name}</span>
+                  <button type="button" aria-label="Remove file" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="ml-2 text-slate-400 hover:text-rose-600"><X size={13} /></button>
+                </div>
+              ))}
+              <p className="mt-1 flex items-start gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                <Eye size={12} className="mt-px shrink-0" />
+                <span>Visible to the officers on this ticket, the JE included. Never to the applicant.</span>
+              </p>
             </div>
           )}
 

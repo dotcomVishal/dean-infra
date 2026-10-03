@@ -25,14 +25,21 @@ interface Row {
   applicant_name?: string;
   current_holder_name?: string | null;
   current_desk?: string | null;
+  resolved_at?: string | null;
+  resolution_kind?: string | null;
+  reopen_count?: number;
+  sent_back_comment?: string | null;
+  needs_confirmation?: boolean;
 }
 interface Board {
   my_desk: Row[];
   watching: Row[];
   my_tickets: Row[];
+  awaiting_confirmation: Row[];
+  sent_back: Row[];
   approval_limit: { can_approve: boolean; unlimited: boolean; amount: number | null } | null;
 }
-type TabKey = 'desk' | 'watching' | 'mine' | 'all';
+type TabKey = 'desk' | 'watching' | 'confirm' | 'sent_back' | 'mine' | 'all';
 
 function TicketRow({ t, mode, now }: { t: Row; mode: TabKey; now: number }) {
   const navigate = useNavigate();
@@ -65,6 +72,9 @@ function TicketRow({ t, mode, now }: { t: Row; mode: TabKey; now: number }) {
           <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{t.title || t.description || 'Untitled ticket'}</p>
           <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
             {mode === 'mine' ? applicantStage(t.status, t.stage_label) : staffStatusLabel(t.status)}
+            {t.needs_confirmation && <> · <span className="font-bold text-amber-600 dark:text-amber-400">Waiting for your answer</span></>}
+            {mode === 'sent_back' && <> · sent back{t.reopen_count && t.reopen_count > 1 ? ` ${t.reopen_count} times` : ''}</>}
+            {mode === 'confirm' && t.resolution_kind === 'TENDER_CANCELLED' && ' · tender cancelled'}
             {mode !== 'mine' && t.estimated_amount != null && <> · <span className="font-mono">{inr(t.estimated_amount)}</span></>}
             {mode !== 'mine' && t.current_holder_name && <> · With {t.current_holder_name}{t.current_desk ? ` (${deskLabel(t.current_desk)})` : ''}</>}
             {t.applicant_name && mode === 'all' && <> · {t.applicant_name}</>}
@@ -82,6 +92,9 @@ function TicketRow({ t, mode, now }: { t: Row; mode: TabKey; now: number }) {
           <Eye size={14} className="text-slate-300" />
         </div>
       </button>
+      {mode === 'sent_back' && t.sent_back_comment && (
+        <p className="mx-1 mt-1 rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-800 dark:bg-red-950/30 dark:text-red-300">{t.sent_back_comment}</p>
+      )}
     </li>
   );
 }
@@ -122,7 +135,8 @@ export default function DeskBoard({ allWorks }: { allWorks?: string }) {
   }, [tab, all]);
 
   const rows: Row[] = tab === 'desk' ? board?.my_desk ?? [] : tab === 'watching' ? board?.watching ?? []
-    : tab === 'mine' ? board?.my_tickets ?? [] : all ?? [];
+    : tab === 'confirm' ? board?.awaiting_confirmation ?? [] : tab === 'sent_back' ? board?.sent_back ?? []
+      : tab === 'mine' ? board?.my_tickets ?? [] : all ?? [];
 
   const counts = useMemo(() => {
     const c = { ok: 0, warn: 0, late: 0 };
@@ -134,6 +148,8 @@ export default function DeskBoard({ allWorks }: { allWorks?: string }) {
     ...(isStaff ? [
       { key: 'desk' as const, label: 'My desk', n: board?.my_desk.length },
       { key: 'watching' as const, label: 'Watching', n: board?.watching.length },
+      { key: 'sent_back' as const, label: 'Sent back', n: board?.sent_back?.length },
+      { key: 'confirm' as const, label: 'Resolved, awaiting confirmation', n: board?.awaiting_confirmation?.length },
     ] : []),
     { key: 'mine', label: 'My tickets', n: board?.my_tickets.length },
     ...(allWorks ? [{ key: 'all' as const, label: allWorks }] : []),
@@ -143,6 +159,8 @@ export default function DeskBoard({ allWorks }: { allWorks?: string }) {
   const empty: Record<TabKey, string> = {
     desk: 'Nothing is waiting for you.',
     watching: 'Tickets you handled will appear here while they are still open.',
+    confirm: 'No resolved ticket is waiting for confirmation.',
+    sent_back: 'Nothing has been sent back.',
     mine: 'You have not raised any tickets.',
     all: 'No tickets found.',
   };

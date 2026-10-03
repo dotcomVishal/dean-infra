@@ -1,15 +1,20 @@
 import mysql from 'mysql2/promise';
 import logger, { errorFields } from '../utils/logger.js';
+import { dbConfig, SESSION_INIT_SQL } from './dbConfig.js';
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT) || 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || 'deanery_infra',
+  ...dbConfig(),
   waitForConnections: true,
   connectionLimit: 15,
-  queueLimit: 0
+  queueLimit: 0,
+  // The database may be on another machine; campus firewalls drop idle connections.
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+});
+
+// Queued before the connection is handed to any caller, so it always runs first.
+pool.on('connection', (connection) => {
+  connection.query(SESSION_INIT_SQL);
 });
 
 // Test connection on startup

@@ -16,7 +16,7 @@ import pool from '../config/db.js';
 
 export const TEST_ROLE_HEADER = 'x-test-role';
 export const TEST_ROLES = Object.freeze([
-  'APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'CLERICAL', 'ACCOUNTANT',
+  'APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR',
 ]);
 
 /** Kill switch. Default ON; only the literal string 'false' turns it off. */
@@ -54,12 +54,12 @@ async function apply(req, res, next, mockLookupSql, id) {
 
 /** router.param('ticket_id', ...) handler. */
 export const testRoleForTicketParam = (req, res, next, ticketId) =>
-  apply(req, res, next, 'SELECT is_mock FROM tickets WHERE id = ?', ticketId);
+  apply(req, res, next, 'SELECT is_mock FROM infra_tickets WHERE id = ?', ticketId);
 
 /** router.param('id', ...) handler for /api/attachments/:id (the ticket comes from the attachment). */
 export const testRoleForAttachmentParam = (req, res, next, attachmentId) =>
   apply(req, res, next,
-    'SELECT t.is_mock FROM attachments a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
+    'SELECT t.is_mock FROM infra_attachments a JOIN infra_tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
 
 /** Router-level guard: the header is only meaningful under /:ticket_id/... */
 export const rejectStrayTestRole = (req, res, next) => {

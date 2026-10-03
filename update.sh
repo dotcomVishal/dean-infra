@@ -44,9 +44,14 @@ command -v curl >/dev/null || fail "curl is not installed"
 [ -f .env ] || fail ".env is missing. Create it from .env.example (secrets are never in git)."
 [ -f infra-backend-v2/serviceAccountKey.json ] \
   || fail "infra-backend-v2/serviceAccountKey.json is missing (Firebase Admin key, see README)."
-for var in DB_ROOT_PASSWORD DB_PASSWORD; do
-  grep -Eq "^${var}=.+" .env || fail "${var} is empty in .env (docker-compose.yml refuses to start without it)."
-done
+grep -Eq "^DB_PASSWORD=.+" .env || fail "DB_PASSWORD is empty in .env (docker-compose.yml refuses to start without it)."
+
+# Stage A (Azure) runs MySQL in a container (COMPOSE_PROFILES=localdb). Stage B uses the
+# institute database over the network: no mysql container, no local dump.
+LOCALDB=0
+if [ -n "$(docker compose ps -q mysql 2>/dev/null)" ] || grep -Eq '^COMPOSE_PROFILES=.*localdb' .env; then
+  LOCALDB=1
+fi
 mkdir -p infra-backend-v2/uploads backups
 
 # 3. Sync code. The server checkout is deploy-only, so it is made to match origin exactly.
@@ -64,19 +69,21 @@ echo "Deploying $(git rev-parse --short HEAD) (was ${PREVIOUS})"
 
 docker compose config -q || fail "docker-compose.yml / .env does not validate"
 
+# NEVER run `docker volume prune`, `docker compose down -v` or `docker system prune --volumes`
+# here: mysql_data holds the database (Stage A) and uploads/ is a bind mount.
+
 # 4. Back up the database before new code (and its migrations) touch it.
-if [ "${SKIP_BACKUP:-0}" != "1" ] && [ -n "$(docker compose ps -q --status running mysql 2>/dev/null)" ]; then
+if [ "$LOCALDB" = "0" ]; then
+  log "Backup skipped"
+  echo "WARNING: no backup is taken for the external database. Backups are a go-live gate (Master plan 2.5)."
+elif [ "${SKIP_BACKUP:-0}" != "1" ] && [ -n "$(docker compose ps -q --status running mysql 2>/dev/null)" ]; then
   log "Backup database"
-  DUMP="backups/deanery_infra_$(date +%Y%m%d_%H%M%S).sql.gz"
+  DUMP="backups/infraseva_$(date +%Y%m%d_%H%M%S).sql.gz"
   TMP_DUMP="${DUMP}.tmp"
   if docker compose exec -T mysql sh -c \
-    'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --no-tablespaces "$MYSQL_DATABASE"' \
-    | gzip > "$TMP_DUMP"; then
-    :
-  elif docker compose exec -T mysql sh -c \
     'mysqldump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines --no-tablespaces "$MYSQL_DATABASE"' \
     | gzip > "$TMP_DUMP"; then
-    echo "WARNING: root dump authentication failed; backup used MYSQL_USER instead"
+    :
   else
     rm -f "$TMP_DUMP" "$DUMP"
     fail "database backup failed; deploy aborted, nothing was changed"
@@ -84,7 +91,7 @@ if [ "${SKIP_BACKUP:-0}" != "1" ] && [ -n "$(docker compose ps -q --status runni
   mv "$TMP_DUMP" "$DUMP"
   echo "Saved ${DUMP}"
   # shellcheck disable=SC2012
-  ls -1t backups/deanery_infra_*.sql.gz 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | xargs -r rm -f --
+  ls -1t backups/infraseva_*.sql.gz 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | xargs -r rm -f --
 else
   log "Backup skipped (first deploy, database not running, or SKIP_BACKUP=1)"
 fi
@@ -98,7 +105,9 @@ log "Wait for healthy (max ${HEALTH_TIMEOUT}s)"
 deadline=$((SECONDS + HEALTH_TIMEOUT))
 while :; do
   unhealthy=""
-  for svc in mysql backend frontend proxy; do
+  svcs="backend frontend proxy"
+  [ "$LOCALDB" = "1" ] && svcs="mysql ${svcs}"
+  for svc in $svcs; do
     cid="$(docker compose ps -q "$svc")"
     state="$([ -n "$cid" ] && docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" || echo missing)"
     [ "$state" = "healthy" ] || [ "$state" = "running" ] || unhealthy="${unhealthy} ${svc}=${state}"

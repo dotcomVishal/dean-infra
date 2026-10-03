@@ -54,7 +54,7 @@ export default function TicketHeader({ ticket, role }: { ticket: TicketDetail; r
       {role === 'JE' && isPostApproval(ticket.status) && (
         <button onClick={() => navigate(`/je/tender/${ticket.id}`)}
           className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 sm:w-auto sm:px-5">
-          <FileSpreadsheet size={16} /> Tender milestones
+          <FileSpreadsheet size={16} /> Tenders and resolution
         </button>
       )}
     </div>

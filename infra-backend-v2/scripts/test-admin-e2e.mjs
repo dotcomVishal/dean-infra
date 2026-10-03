@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import '../src/config/requireTestDb.js';
 import pool from '../src/config/db.js';
 import { 
   getAllUsers, 
@@ -43,11 +44,11 @@ async function runAdminTests() {
   console.log('======================================================\n');
 
   // 1. Get or create a Sysadmin user for auth context
-  let [adminRows] = await pool.query("SELECT id, name, email, role, department FROM users WHERE role = 'SYSADMIN' LIMIT 1");
+  let [adminRows] = await pool.query("SELECT id, name, email, role, department FROM infra_users WHERE role = 'SYSADMIN' LIMIT 1");
   let sysadmin;
   if (adminRows.length === 0) {
     const [res] = await pool.query(
-      `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+      `INSERT INTO infra_users (firebase_uid, name, email, role, department, is_active)
        VALUES ('mock_sysadmin_uid', 'System Administrator', 'admin.test@iitmandi.ac.in', 'SYSADMIN', 'IT', TRUE)`
     );
     sysadmin = { id: res.insertId, name: 'System Administrator', email: 'admin.test@iitmandi.ac.in', role: 'SYSADMIN', department: 'IT' };

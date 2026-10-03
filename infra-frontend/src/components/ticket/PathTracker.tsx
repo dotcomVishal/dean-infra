@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 import { Check, X, CornerUpLeft, Circle } from 'lucide-react';
 import type { AuditEntry, TicketDetail } from './types';
-import { deskLabel, formatAge, hoursSince, STATUS_DESK } from '../../lib/ticketUi';
+import { deskLabel, formatAge, hoursSince, staffStatusLabel, STATUS_DESK } from '../../lib/ticketUi';
 import { Card } from './Card';
 
 type StepState = 'done' | 'current' | 'future' | 'returned' | 'rejected';
@@ -15,7 +15,7 @@ interface Step {
   spent?: string;
 }
 
-// Movements that become a node on the path. Reminders, bills and admin noise do not.
+// Movements that become a node on the path. Reminders and admin noise do not.
 const NODE_LABEL: Record<string, (a: AuditEntry) => string> = {
   CREATED: () => 'Raised',
   ASSIGNED: () => 'Assigned to JE',
@@ -31,8 +31,14 @@ const NODE_LABEL: Record<string, (a: AuditEntry) => string> = {
   TENDER_PUBLISHED: () => 'Tender published',
   WORK_AWARDED: () => 'Work awarded',
   WORK_COMPLETED: () => 'Work marked complete',
-  WORK_REOPENED: () => 'Applicant: work not done',
-  CLOSED: () => 'Closed — applicant confirmed',
+  WORK_REOPENED: () => 'Sent back by the confirmer',
+  TECH_EVAL_STARTED: () => 'Technical evaluation started',
+  FIN_EVAL_STARTED: () => 'Financial evaluation started',
+  TENDER_CANCELLED: () => 'Tender cancelled',
+  RESOLVED: () => 'Resolved',
+  AUTO_CLOSED: () => 'Closed automatically',
+  FILES_ADDED: () => 'Files added',
+  CLOSED: () => 'Closed — confirmed',
 };
 const STATE_OF: Record<string, StepState> = {
   CHANGES_REQUESTED: 'returned', RETURNED: 'returned', REJECTED: 'rejected', DENIED: 'rejected',
@@ -41,8 +47,10 @@ const STATE_OF: Record<string, StepState> = {
 const CHAIN = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'];
 const POST = [
   { key: 'tender', label: 'Tendering' },
+  { key: 'tech', label: 'Technical evaluation' },
+  { key: 'fin', label: 'Financial evaluation' },
   { key: 'work', label: 'Work in progress' },
-  { key: 'verify', label: 'Applicant verifies' },
+  { key: 'verify', label: 'Confirmation' },
   { key: 'closed', label: 'Closed' },
 ];
 
@@ -52,7 +60,9 @@ function futureSteps(status: string, assignees?: TicketDetail['assignees']): Ste
   const push = (key: string, label: string, sub?: string) => out.push({ key: `f-${key}`, label, sub, state: 'future' });
   if (status === 'CLOSED' || status === 'DENIED') return out;
 
-  const postIdx: Record<string, number> = { APPROVED_FOR_TENDERING: 0, TENDER_PUBLISHED: 1, WORK_IN_PROGRESS: 2, WORK_COMPLETED: 3 };
+  const postIdx: Record<string, number> = {
+    APPROVED_FOR_TENDERING: 0, TENDER_PUBLISHED: 0, TECHNICAL_EVALUATION: 1, FINANCIAL_EVALUATION: 2, WORK_IN_PROGRESS: 3, WORK_COMPLETED: 4,
+  };
   if (status in postIdx) {
     POST.slice(postIdx[status] + 1).forEach((p) => push(p.key, p.label));
     return out;
@@ -99,8 +109,7 @@ function buildSteps(ticket: TicketDetail, now = Date.now()): Step[] {
     const desk = STATUS_DESK[ticket.status];
     steps.push({
       key: 'now',
-      label: desk ? `${deskLabel(desk)} desk` : ticket.status === 'APPROVED_FOR_TENDERING' ? 'Tendering'
-        : ticket.status === 'TENDER_PUBLISHED' ? 'Tender open' : 'Work in progress',
+      label: desk ? `${deskLabel(desk)} desk` : staffStatusLabel(ticket.status),
       sub: [ticket.assignees?.current?.name, `Here ${formatAge(hoursSince(since, now))}`].filter(Boolean).join(' · '),
       state: 'current',
     });

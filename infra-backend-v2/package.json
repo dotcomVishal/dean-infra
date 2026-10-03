@@ -11,7 +11,7 @@
     "test": "NODE_ENV=test node --test 'test/unit/*.test.mjs' scripts/test-workflow.mjs scripts/test-visibility.mjs",
     "test:unit": "NODE_ENV=test node --test 'test/unit/*.test.mjs' scripts/test-workflow.mjs scripts/test-visibility.mjs",
     "test:integration": "NODE_ENV=test node scripts/prepare-test-db.mjs && NODE_ENV=test node --test --test-concurrency=1 'test/integration/*.test.mjs'",
-    "test:integration:local": "env DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER=root DB_PASSWORD=ci-throwaway DB_NAME=deanery_infra npm run test:integration",
+    "test:integration:local": "env DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER=root DB_PASSWORD=ci-throwaway DB_NAME=infraseva_test npm run test:integration",
     "test:e2e": "node scripts/test-endpoints-e2e.mjs",
     "test:workflow": "node --test scripts/test-workflow.mjs",
     "test:actions": "node scripts/test-actions.mjs",

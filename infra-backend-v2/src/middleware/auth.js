@@ -33,29 +33,29 @@ export const requireAuth = async (req, res, next) => {
 
     // 2. Look up the user in our MySQL database using their unique Firebase UID
     let [users] = await pool.query(
-      'SELECT id, name, email, role, department, is_active FROM users WHERE firebase_uid = ?',
+      'SELECT id, name, email, role, department, is_active FROM infra_users WHERE firebase_uid = ?',
       [firebase_uid]
     );
 
     if (users.length === 0 && decodedToken.email) {
       // Check if user exists by email (pre-seeded account)
       const [byEmail] = await pool.query(
-        'SELECT id, name, email, role, department, is_active FROM users WHERE email = ?',
+        'SELECT id, name, email, role, department, is_active FROM infra_users WHERE email = ?',
         [decodedToken.email]
       );
 
       if (byEmail.length > 0) {
-        await pool.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [firebase_uid, byEmail[0].id]);
+        await pool.query('UPDATE infra_users SET firebase_uid = ? WHERE id = ?', [firebase_uid, byEmail[0].id]);
         users = byEmail;
       } else {
         // Any google account: auto-provision as APPLICANT
         const displayName = decodedToken.name || decodedToken.email.split('@')[0];
         const [result] = await pool.query(
-          `INSERT INTO users (firebase_uid, name, email, role, department, is_active) 
+          `INSERT INTO infra_users (firebase_uid, name, email, role, department, is_active) 
            VALUES (?, ?, ?, 'APPLICANT', 'General', TRUE)`,
           [firebase_uid, displayName, decodedToken.email]
         );
-        const [created] = await pool.query('SELECT id, name, email, role, department, is_active FROM users WHERE id = ?', [result.insertId]);
+        const [created] = await pool.query('SELECT id, name, email, role, department, is_active FROM infra_users WHERE id = ?', [result.insertId]);
         users = created;
       }
     }

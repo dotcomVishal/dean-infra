@@ -5,9 +5,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildViewer, canViewTicket, capabilities, canViewAttachment, filterMessages, filterAudit,
-  buildTicketDetails, redactQueueRow, stageLabel, uploadCategory,
+  buildTicketDetails, stageLabel, uploadCategory,
 } from '../src/services/visibility.js';
-import { reminderDueAt, copiesAe } from '../src/services/notifier.js';
+import { reminderDueAt } from '../src/services/notifier.js';
 import { applicantStageEmail } from '../src/services/emailTemplates.js';
 import { fileFilter } from '../src/middleware/upload.js';
 
@@ -21,12 +21,11 @@ const je = { id: 10, role: 'JE' };
 const otherJe = { id: 11, role: 'JE' };
 const ae = { id: 20, role: 'AE', department: 'Civil' };
 const se = { id: 30, role: 'SE' }, dean = { id: 40, role: 'DEAN' }, dir = { id: 50, role: 'DIRECTOR' };
-const clerk = { id: 60, role: 'CLERICAL' }, acct = { id: 70, role: 'ACCOUNTANT' }, admin = { id: 80, role: 'SYSADMIN' };
+const admin = { id: 80, role: 'SYSADMIN' };
 const scopesNorthCivil = [{ department: 'Civil', campus: 'NORTH' }];
 
 test('canViewTicket: who may open which ticket', () => {
   const t = ticket();
-  const approved = ticket({ status: 'APPROVED_FOR_TENDERING' });
   const rows = [
     [applicant, t, {}, true], [{ id: 999, role: 'APPLICANT' }, t, {}, false],
     [je, t, {}, true], [otherJe, t, {}, false],
@@ -36,8 +35,6 @@ test('canViewTicket: who may open which ticket', () => {
     [ae, ticket({ department: 'Electrical' }), { scopes: scopesNorthCivil }, false],
     [ae, ticket({ campus: 'SOUTH', current_desk_user_id: 20 }), { scopes: scopesNorthCivil }, true],
     [se, t, {}, true], [dean, t, {}, true], [dir, t, {}, true], [admin, t, {}, true],
-    [clerk, t, {}, false], [clerk, approved, {}, true],
-    [acct, t, {}, false], [acct, approved, {}, true],
   ];
   for (const [u, tk, facts, want] of rows) {
     assert.equal(canViewTicket(V(u, tk, facts), tk), want, `${u.role}#${u.id} on ${tk.status}/${tk.campus}`);
@@ -58,19 +55,17 @@ test('staff who raised the ticket get the union of applicant and staff views', (
 const att = (document_category, extra = {}) => ({ document_category, uploaded_by: 10, uploader_role: 'JE', ...extra });
 test('canViewAttachment: category x viewer matrix', () => {
   const t = ticket({ status: 'WORK_IN_PROGRESS' });
-  const cats = ['APPLICANT_EVIDENCE', 'JE_SITE_PHOTO', 'JE_ESTIMATE_DOC', 'CLERK_TENDER_DOC', 'FINANCE_SANCTION', 'AUTHORITY_REMARKS', 'DESK_DOC', 'WORK_DOC'];
-  //                          applicant je     ae    se    dean  dir   clerk  acct   admin
+  const cats = ['APPLICANT_EVIDENCE', 'JE_SITE_PHOTO', 'JE_ESTIMATE_DOC', 'AUTHORITY_REMARKS', 'DESK_DOC', 'WORK_DOC'];
+  //                          applicant je     ae    se    dean  dir   admin
   const want = {
-    APPLICANT_EVIDENCE: [true,  true, true, true, true, true, true, true, true],
-    JE_SITE_PHOTO:      [false, true, true, true, true, true, true, true, true],
-    JE_ESTIMATE_DOC:    [false, true, true, true, true, true, true, true, true],
-    CLERK_TENDER_DOC:   [false, true, true, true, true, true, true, true, true],
-    FINANCE_SANCTION:   [false, false, true, true, true, true, true, true, true],
-    AUTHORITY_REMARKS:  [false, false, false, false, true, true, false, false, true], // uploaded by DEAN below
-    DESK_DOC:           [false, true, true, true, true, true, true, true, true],   // flows back to the JE
-    WORK_DOC:           [true,  true, true, true, true, true, true, true, true],   // applicant verifies against it
+    APPLICANT_EVIDENCE: [true, true, true, true, true, true, true],
+    JE_SITE_PHOTO:      [false, true, true, true, true, true, true],
+    JE_ESTIMATE_DOC:    [false, true, true, true, true, true, true],
+    AUTHORITY_REMARKS:  [false, false, false, false, true, true, true], // uploaded by DEAN below
+    DESK_DOC:           [false, true, true, true, true, true, true],   // flows back to the JE
+    WORK_DOC:           [true, true, true, true, true, true, true],   // applicant verifies against it
   };
-  const viewers = [applicant, je, ae, se, dean, dir, clerk, acct, admin];
+  const viewers = [applicant, je, ae, se, dean, dir, admin];
   for (const cat of cats) {
     viewers.forEach((u, i) => {
       const a = att(cat, cat === 'AUTHORITY_REMARKS' ? { uploaded_by: 40, uploader_role: 'DEAN' } : { uploaded_by: 999 });
@@ -96,9 +91,6 @@ test('uploadCategory: decided by who uploads, refused on closed tickets and to o
   assert.equal(cat(je, wip), 'WORK_DOC');
   assert.equal(cat(ae, wip, { scopes: scopesNorthCivil }), 'DESK_DOC');
   for (const u of [se, dean, dir, admin]) assert.equal(cat(u, wip), 'DESK_DOC');
-  assert.equal(cat(clerk, wip), 'CLERK_TENDER_DOC');
-  assert.equal(cat(acct, wip), 'FINANCE_SANCTION');
-  assert.equal(cat(clerk, pre), null);                    // Clerical cannot see a pre-approval ticket
   assert.equal(cat(otherJe, wip), null);
   assert.equal(cat(applicant, ticket({ status: 'CLOSED' })), null);
   assert.equal(cat(dir, ticket({ status: 'DENIED' })), null);
@@ -118,7 +110,6 @@ test('messages: rank filter + applicant sees only PUBLIC_NOTE without names', ()
   assert.equal(kinds(dean).length, 5);                 // everything but the Director's remark
   assert.equal(kinds(dir).length, 6);
   assert.equal(kinds(admin).length, 6);
-  assert.deepEqual(kinds(clerk, {}), []);                  // not viewable at ASSIGNED_TO_JE
   const pub = filterMessages(V(applicant, t), t, thread);
   assert.deepEqual(pub.map((m) => m.kind), ['PUBLIC_NOTE']);
   assert.equal(pub[0].author_name, null);
@@ -157,14 +148,6 @@ test('audit log: applicant none, JE neutral text, no executive detail', () => {
   assert.equal(filterAudit(V(admin, t), t, rows).length, rows.length);
 });
 
-test('audit log: Clerical/Accountant see only the post-approval trail', () => {
-  const t = ticket({ status: 'TENDER_PUBLISHED' });
-  const rows = [A('FORWARDED'), A('APPROVED'), A('TENDER_PUBLISHED'), A('REMINDER_SENT'), A('BILL_RECORDED')];
-  for (const u of [clerk, acct]) {
-    assert.deepEqual(filterAudit(V(u, t), t, rows).map((r) => r.action), ['APPROVED', 'TENDER_PUBLISHED', 'BILL_RECORDED']);
-  }
-});
-
 test('details payload: applicant view is an allow-list with no people, files or money', () => {
   const t = { ...ticket({ status: 'PENDING_SE_APPROVAL' }), title: 'Leak', description: 'd', contact_phone: '999',
     applicant_name: 'Ann', applicant_email: 'a@x', applicant_phone: '1', open_change_request_id: 5 };
@@ -173,7 +156,7 @@ test('details payload: applicant view is an allow-list with no people, files or 
       { id: 1, file_url: '/uploads/tickets/1/applicant_evidence/1-2-a.jpg', document_category: 'APPLICANT_EVIDENCE', uploaded_by: 100 },
       { id: 2, file_url: '/uploads/tickets/1/je_reports/site_photos/1-2-b.jpg', document_category: 'JE_SITE_PHOTO', uploaded_by: 10, uploader_role: 'JE' },
     ],
-    reports: [{ estimated_amount: 120000 }], tenders: [{ id: 1 }], bills: [{ id: 1 }],
+    reports: [{ estimated_amount: 120000 }], tenders: [{ id: 1 }],
     auditLogs: [A('FORWARDED')], messages: [msg('PUBLIC_NOTE', 0), msg('INTERNAL_REMARK', 4)],
   });
   assert.equal(out.stage_label, 'Under review');
@@ -181,35 +164,20 @@ test('details payload: applicant view is an allow-list with no people, files or 
   assert.equal(out.current_desk_user_id, undefined);
   assert.equal(out.applicant_email, undefined);
   assert.equal(out.report, null);
-  assert.deepEqual([out.tenders, out.bills, out.audit_logs], [[], [], []]);
+  assert.deepEqual([out.tenders, out.audit_logs], [[], []]);
   assert.deepEqual(out.attachments.map((a) => a.id), [1]);
   assert.equal(out.attachments[0].download_url, '/api/attachments/1');
   assert.equal(out.attachments[0].file_url, undefined);
   assert.deepEqual(out.messages.map((m) => m.kind), ['PUBLIC_NOTE']);
   assert.equal(out.reminder_count, null);
-  assert.equal(buildTicketDetails(V(otherJe, t), t, { attachments: [], reports: [], tenders: [], bills: [], auditLogs: [], messages: [] }), null);
+  assert.equal(buildTicketDetails(V(otherJe, t), t, { attachments: [], reports: [], tenders: [], auditLogs: [], messages: [] }), null);
 });
 
-test('details payload: JE gets no bills; Clerical loses applicant contact', () => {
-  const t = { ...ticket({ status: 'WORK_IN_PROGRESS' }), applicant_phone: '1', applicant_email: 'a@x', contact_phone: '9' };
-  const data = { attachments: [], reports: [{ id: 1 }], tenders: [{ id: 1 }], bills: [{ id: 1 }], auditLogs: [], messages: [] };
-  const forJe = buildTicketDetails(V(je, t), t, data);
-  assert.deepEqual(forJe.bills, []);
-  assert.deepEqual(forJe.tenders, [{ id: 1 }]);
-  assert.equal(forJe.applicant_phone, '1');
-  const forClerk = buildTicketDetails(V(clerk, t), t, data);
-  assert.equal(forClerk.applicant_phone, undefined);
-  assert.equal(forClerk.contact_phone, undefined);
-  assert.deepEqual(forClerk.bills, [{ id: 1 }]);
-  assert.equal(redactQueueRow({ role: 'CLERICAL' }, { id: 1, applicant_phone: '1', applicant_email: 'e' }).applicant_phone, undefined);
-  assert.equal(redactQueueRow({ role: 'DEAN' }, { id: 1, applicant_phone: '1' }).applicant_phone, '1');
-});
-
-test('reminder schedule: instant, +12h, +24h, +72h, then every 24h; AE copied from #4', () => {
+test('reminder schedule: JE instant, +12h, +24h, +72h, then every 24h; the confirmer instant then every 24h', () => {
   const t0 = new Date('2026-01-01T00:00:00Z');
   const h = (n) => (reminderDueAt(t0, n) - t0) / 3600e3;
   assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map(h), [0, 12, 24, 72, 96, 120, 144]);
-  assert.deepEqual([1, 2, 3, 4, 5, 10].map(copiesAe), [false, false, false, true, true, true]);
+  assert.deepEqual([1, 2, 3, 4].map((n) => (reminderDueAt(t0, n, 'APPLICANT') - t0) / 3600e3), [0, 24, 48, 72]);
 });
 
 test('applicant email: stage + portal link only, whatever the ticket holds', () => {

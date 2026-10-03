@@ -1,7 +1,6 @@
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -12,6 +11,7 @@ import adminRoutes from './routes/adminRoutes.js';
 import availabilityRoutes from './routes/availabilityRoutes.js';
 import attachmentRoutes from './routes/attachmentRoutes.js';
 import { requestId } from './middleware/requestId.js';
+import { authLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 // 1. Initialize __dirname for ES Modules
@@ -21,9 +21,11 @@ const __dirname = path.dirname(__filename);
 // 2. INITIALIZE APP (This must happen before any app.use calls)
 const app = express();
 
-// S8: behind nginx, every request otherwise arrives with the proxy's IP, so
-// the rate limiter's 100 requests / 15 min is shared by the whole institute.
-app.set('trust proxy', 1);
+// S8: behind reverse proxies every request arrives with the proxy's IP. TRUST_PROXY_HOPS is
+// the number of proxies in front of this process (2 in production, 0 locally and in tests).
+// Per-user limits (middleware/rateLimit.js) do not depend on it; the sign-in limiter does.
+const proxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? '0', 10);
+app.set('trust proxy', Number.isInteger(proxyHops) && proxyHops >= 0 ? proxyHops : 0);
 
 // S12: request id + structured access log. First, so every later response
 // (rate limit, 404, error) carries X-Request-Id.
@@ -50,18 +52,9 @@ app.use(express.urlencoded({ extended: true }));
 // through the authenticated GET /api/attachments/:id (visibility-checked).
 app.use(express.static(path.join(__dirname, '../public')));
 
-// 6. Prevent Brute Force
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  handler: (req, res) => res.status(429).json({
-    success: false, message: 'Too many requests, please try again later.', requestId: req.id,
-  }),
-});
-app.use('/api/', apiLimiter);
-
 // 7. API Routes
-app.use('/api/auth', authRoutes);
+// Rate limits: strict per-IP on sign-in here; per-person limits sit behind requireAuth in each router.
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/availability', availabilityRoutes);

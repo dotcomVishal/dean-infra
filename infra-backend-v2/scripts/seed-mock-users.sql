@@ -1,7 +1,5 @@
 -- Dev/test fixtures only. Never load in production. Run: npm run seed:mock-users
-USE deanery_infra;
-
-INSERT INTO users (firebase_uid, name, email, role, department, phone) VALUES
+INSERT INTO infra_users (firebase_uid, name, email, role, department, phone) VALUES
 -- The Top Brass & Admins
 ('mock_uid_01', 'Dr. S. K. Mehta', 'director@campus.edu', 'DIRECTOR', 'Administration', '9876543001'),
 ('mock_uid_02', 'Prof. K. N. Rao', 'dean.infra@campus.edu', 'DEAN', 'Administration', '9876543002'),
@@ -23,12 +21,6 @@ INSERT INTO users (firebase_uid, name, email, role, department, phone) VALUES
 ('mock_uid_12', 'Kavita Reddy', 'je.electrical2@campus.edu', 'JE', 'Electrical', '9876543012'),
 ('mock_uid_13', 'Sneha Patel', 'je.horticulture1@campus.edu', 'JE', 'Horticulture', '9876543013'),
 ('mock_uid_14', 'Arjun Das', 'je.horticulture2@campus.edu', 'JE', 'Horticulture', '9876543014'),
-
--- Clerical & Account Staff
-('mock_uid_15', 'Jyoti Singh', 'accountant1@campus.edu', 'ACCOUNTANT', 'Administration', '9876543015'),
-('mock_uid_16', 'Ramesh Kumar', 'accountant2@campus.edu', 'ACCOUNTANT', 'Administration', '9876543016'),
-('mock_uid_17', 'Pooja Sharma', 'clerical1@campus.edu', 'CLERICAL', 'Administration', '9876543017'),
-('mock_uid_18', 'Anil Kapoor', 'clerical2@campus.edu', 'CLERICAL', 'Administration', '9876543018'),
 
 -- General Applicants
 ('mock_uid_19', 'Rohan Verma', 'applicant1@campus.edu', 'APPLICANT', 'General', '9876543019'),

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import '../src/config/requireTestDb.js';
 import fs from 'fs';
 import path from 'path';
 import pool from '../src/config/db.js';
@@ -40,10 +41,10 @@ async function runControllerTests() {
   console.log('======================================================\n');
 
   // 1. Get or create test users
-  const [applicantRows] = await pool.query("SELECT id, name, email, role, department FROM users WHERE role = 'APPLICANT' LIMIT 1");
+  const [applicantRows] = await pool.query("SELECT id, name, email, role, department FROM infra_users WHERE role = 'APPLICANT' LIMIT 1");
   const applicant = applicantRows[0] || { id: 1, name: 'Student Applicant', email: 'student@example.com', role: 'APPLICANT' };
 
-  const [jeRows] = await pool.query("SELECT id, name, email, role, department FROM users WHERE role = 'JE' AND department = 'Civil' LIMIT 1");
+  const [jeRows] = await pool.query("SELECT id, name, email, role, department FROM infra_users WHERE role = 'JE' AND department = 'Civil' LIMIT 1");
   const je = jeRows[0];
 
   assert(applicant.id > 0, `Applicant user ID #${applicant.id}`);
@@ -63,7 +64,9 @@ async function runControllerTests() {
       description: 'Heavy seepage from overhead pipe during lunch hours.',
       department: 'Civil',
       type: 'recurring',
-      location: 'Dining Hall 2'
+      campus: 'NORTH',
+      landmark: 'Dining Hall 2',
+      contact_phone: '9999999999',
     },
     files: [
       {
@@ -84,18 +87,18 @@ async function runControllerTests() {
   assert(ticketId > 0, `Ticket created with ID #${ticketId}`);
 
   // 3. Verify attachment in database with document_category
-  const [attRows] = await pool.query("SELECT * FROM attachments WHERE ticket_id = ?", [ticketId]);
+  const [attRows] = await pool.query("SELECT * FROM infra_attachments WHERE ticket_id = ?", [ticketId]);
   assert(attRows.length === 1, `Attachment saved in DB: count = ${attRows.length}`);
   assert(attRows[0].document_category === 'APPLICANT_EVIDENCE', `document_category is APPLICANT_EVIDENCE: actual = ${attRows[0].document_category}`);
 
   // 4. Verify ticket details
-  const [ticketRows] = await pool.query("SELECT * FROM tickets WHERE id = ?", [ticketId]);
+  const [ticketRows] = await pool.query("SELECT * FROM infra_tickets WHERE id = ?", [ticketId]);
   assert(ticketRows.length === 1, `Ticket found in DB`);
   assert(ticketRows[0].title === 'Water Seepage in North Campus Cafeteria', 'DB contains correct ticket title');
 
   // 5. Test JE filing inspection report with site_photos and estimate_docs
   const assignedJeId = resCreate.body.assigned_je_id || je.id;
-  const [assignedJeRows] = await pool.query("SELECT id, name, email, role, department FROM users WHERE id = ?", [assignedJeId]);
+  const [assignedJeRows] = await pool.query("SELECT id, name, email, role, department FROM infra_users WHERE id = ?", [assignedJeId]);
   const assignedJe = assignedJeRows[0];
 
   const mockSitePhoto = path.join(tempDir, `site-photo-${Date.now()}.png`);
@@ -138,7 +141,7 @@ async function runControllerTests() {
   assert(resInspection.body.success === true, `submitReport success is true: ${JSON.stringify(resInspection.body)}`);
 
   // 6. Verify inspection attachments in database
-  const [allAttRows] = await pool.query("SELECT * FROM attachments WHERE ticket_id = ? ORDER BY id ASC", [ticketId]);
+  const [allAttRows] = await pool.query("SELECT * FROM infra_attachments WHERE ticket_id = ? ORDER BY id ASC", [ticketId]);
   assert(allAttRows.length === 3, `Total attachments after inspection is 3, got ${allAttRows.length}`);
   const categories = allAttRows.map(a => a.document_category);
   assert(categories.includes('APPLICANT_EVIDENCE'), 'Contains APPLICANT_EVIDENCE');
@@ -146,7 +149,7 @@ async function runControllerTests() {
   assert(categories.includes('JE_ESTIMATE_DOC'), 'Contains JE_ESTIMATE_DOC');
 
   // 7. Verify ticket status moved to PENDING_AE_APPROVAL
-  const [ticketAfter] = await pool.query("SELECT status FROM tickets WHERE id = ?", [ticketId]);
+  const [ticketAfter] = await pool.query("SELECT status FROM infra_tickets WHERE id = ?", [ticketId]);
   assert(ticketAfter[0].status === 'PENDING_AE_APPROVAL', `Ticket moved to PENDING_AE_APPROVAL, actual = ${ticketAfter[0].status}`);
 
   console.log('\n======================================================');

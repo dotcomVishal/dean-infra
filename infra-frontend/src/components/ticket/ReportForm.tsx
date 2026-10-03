@@ -25,6 +25,8 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
   const [docs, setDocs] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  // Bumped after every pick so the input is empty again: re-picking a file that was just removed still fires onChange.
+  const [pickKey, setPickKey] = useState(0);
 
   useEffect(() => {
     const urls = photos.map((f) => URL.createObjectURL(f));
@@ -48,7 +50,7 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
 
     setBusy(true);
     try {
-      const res = await api.post(`/tickets/${ticketId}/report`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.post(`/tickets/${ticketId}/report`, fd);
       toast.success(res.data?.message || 'Report submitted.');
       onDone();
     } catch (err) {
@@ -93,8 +95,8 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
             <span className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300"><ImageIcon size={14} /> Site photos ({photos.length})</span>
             <label className="cursor-pointer rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700">
               Add
-              <input type="file" multiple accept={PHOTO_ACCEPT} className="hidden"
-                onChange={(e) => setPhotos((p) => [...p, ...Array.from(e.target.files ?? [])].slice(0, 10))} />
+              <input key={`photo-${pickKey}`} type="file" multiple accept={PHOTO_ACCEPT} className="hidden"
+                onChange={(e) => { const picked = Array.from(e.target.files ?? []); setPhotos((p) => [...p, ...picked].slice(0, 10)); setPickKey((k) => k + 1); }} />
             </label>
           </div>
           {previews.length > 0 && (
@@ -115,8 +117,8 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
             <span className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300"><UploadCloud size={14} /> Documents ({docs.length})</span>
             <label className="cursor-pointer rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-slate-900 dark:bg-slate-600">
               Add
-              <input type="file" multiple accept={DOC_ACCEPT} className="hidden"
-                onChange={(e) => setDocs((p) => [...p, ...Array.from(e.target.files ?? [])].slice(0, 10))} />
+              <input key={`doc-${pickKey}`} type="file" multiple accept={DOC_ACCEPT} className="hidden"
+                onChange={(e) => { const picked = Array.from(e.target.files ?? []); setDocs((p) => [...p, ...picked].slice(0, 10)); setPickKey((k) => k + 1); }} />
             </label>
           </div>
           {docs.map((f, i) => (

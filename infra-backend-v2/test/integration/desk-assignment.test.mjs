@@ -12,7 +12,7 @@ import { getQueue, createTicket } from '../../src/controllers/ticketController.j
 import { notifyTicketCreated } from '../../src/services/notifier.js';
 import { checkSingleHolders } from '../../src/services/deskHealth.js';
 import { processDueNotifications } from '../../src/cron/emailReminders.js';
-import { DEPT, makeUser, makeOpenTicket, inRolledBackTx, cleanup, pool } from './helpers.mjs';
+import { DEPT, makeUser, makeOpenTicket, putOnLeave, inRolledBackTx, cleanup, pool } from './helpers.mjs';
 
 beforeEach(cleanup);
 after(async () => { await cleanup(); await pool.end(); });
@@ -24,11 +24,11 @@ const fakeRes = () => {
   return res;
 };
 const civilScope = (userId, campus = 'NORTH') =>
-  pool.query("INSERT INTO user_scopes (user_id, department, campus) VALUES (?, 'Civil', ?)", [userId, campus]);
-const userRow = async (id) => (await pool.query('SELECT id, name, email, role FROM users WHERE id = ?', [id]))[0][0];
-const ticketRow = async (id) => (await pool.query('SELECT * FROM tickets WHERE id = ?', [id]))[0][0];
-const patch = (id, fields) => pool.query('UPDATE tickets SET ? WHERE id = ?', [fields, id]);
-const auditFor = async (id) => (await pool.query('SELECT * FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0];
+  pool.query("INSERT INTO infra_user_scopes (user_id, department, campus) VALUES (?, 'Civil', ?)", [userId, campus]);
+const userRow = async (id) => (await pool.query('SELECT id, name, email, role FROM infra_users WHERE id = ?', [id]))[0][0];
+const ticketRow = async (id) => (await pool.query('SELECT * FROM infra_tickets WHERE id = ?', [id]))[0][0];
+const patch = (id, fields) => pool.query('UPDATE infra_tickets SET ? WHERE id = ?', [fields, id]);
+const auditFor = async (id) => (await pool.query('SELECT * FROM infra_audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0];
 const act = async (user, ticketId, body) => {
   const res = fakeRes();
   await performTicketAction({ user: { ...user }, params: { ticket_id: String(ticketId) }, body }, res);
@@ -62,7 +62,7 @@ test('inactive or wrong-role pin falls back to scope resolution', async () => {
   const scopeAe = await makeUser({ role: 'AE' }); await civilScope(scopeAe);
   const pinnedAe = await makeUser({ role: 'AE' });
   const id = await ticketAtAe({ applicant, ae: pinnedAe });
-  await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [pinnedAe]);
+  await pool.query('UPDATE infra_users SET is_active = FALSE WHERE id = ?', [pinnedAe]);
   // Seeded staff in a dev DB may also cover Civil/NORTH: compare with the scope rule itself.
   const byScope = (await resolveAeForScope(pool, { department: 'Civil', campus: 'NORTH' })).id;
   assert.equal((await findDeskOwner(pool, await ticketRow(id), 'AE')).id, byScope);
@@ -220,7 +220,7 @@ test('override rejects bad input with 400 and changes nothing', async () => {
   const ae = await makeUser({ role: 'AE' });
   const se = await makeUser({ role: 'SE' });
   const inactive = await makeUser({ role: 'AE' });
-  await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [inactive]);
+  await pool.query('UPDATE infra_users SET is_active = FALSE WHERE id = ?', [inactive]);
   const id = await ticketAtAe({ applicant, ae });
   const before = await ticketRow(id);
 
@@ -230,7 +230,7 @@ test('override rejects bad input with 400 and changes nothing', async () => {
     { remarks: 'x', reassign: { desk: 'AE', user_id: se } },        // wrong role
     { remarks: 'x', reassign: { desk: 'AE', user_id: inactive } },  // inactive
     { remarks: 'x', reassign: { desk: 'AE', user_id: 999999999 } }, // unknown
-    { remarks: 'x', reassign: { desk: 'CLERICAL', user_id: ae } },  // not a chain desk
+    { remarks: 'x', reassign: { desk: 'SYSADMIN', user_id: ae } },  // not a chain desk
   ];
   for (const body of bad) {
     const res = await override(admin, id, body);
@@ -245,7 +245,7 @@ test('getStaff lists active users of one desk, scope match first', async () => {
   const other = await makeUser({ role: 'AE', name: 'CI other' });
   const match = await makeUser({ role: 'AE', name: 'CI match' }); await civilScope(match);
   const off = await makeUser({ role: 'AE' });
-  await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [off]);
+  await pool.query('UPDATE infra_users SET is_active = FALSE WHERE id = ?', [off]);
   const res = fakeRes();
   await getStaff({ query: { role: 'AE', department: 'Civil', campus: 'NORTH' } }, res);
   const ids = res.body.staff.map((s) => s.id);
@@ -254,7 +254,7 @@ test('getStaff lists active users of one desk, scope match first', async () => {
   assert.equal(res.body.staff.find((s) => s.id === match).scope_match, true);
 
   const bad = fakeRes();
-  await getStaff({ query: { role: 'CLERICAL' } }, bad);
+  await getStaff({ query: { role: 'SYSADMIN' } }, bad);
   assert.equal(bad.statusCode, 400);
 });
 
@@ -290,13 +290,13 @@ test('assignees: full for staff, only the JE desk and the current desk for a JE'
 // ---- single-holder health --------------------------------------------------------------------------------------------
 test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', async () => {
   await inRolledBackTx(async (c) => {
-    await c.query("UPDATE users SET is_active = FALSE WHERE role = 'DEAN'");
+    await c.query("UPDATE infra_users SET is_active = FALSE WHERE role = 'DEAN'");
     let h = await checkSingleHolders(c);
     assert.equal(h.DEAN.count, 0);
     assert.equal(h.DEAN.ok, false);
 
     const add = (email) => c.query(
-      `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+      `INSERT INTO infra_users (firebase_uid, name, email, role, department, is_active)
        VALUES (?, 'CI Dean', ?, 'DEAN', 'Administration', TRUE)`, [randomUUID(), email]);
     await add('ph-ci@placeholder.invalid');
     h = await checkSingleHolders(c);
@@ -308,7 +308,7 @@ test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', asy
     assert.equal(h.DEAN.placeholder, false);
     assert.match(h.DEAN.message, /Deactivate all but one/);
 
-    await c.query("UPDATE users SET is_active = FALSE WHERE email = 'ph-ci@placeholder.invalid'");
+    await c.query("UPDATE infra_users SET is_active = FALSE WHERE email = 'ph-ci@placeholder.invalid'");
     h = await checkSingleHolders(c);
     assert.deepEqual([h.DEAN.count, h.DEAN.ok, h.DEAN.message], [1, true, null]);
   });
@@ -318,21 +318,21 @@ test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', asy
 test('mail to a .invalid placeholder is cancelled, never sent or retried', async () => {
   const email = `ph-${randomUUID().slice(0, 6)}@placeholder.invalid`;
   const [u] = await pool.query(
-    `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+    `INSERT INTO infra_users (firebase_uid, name, email, role, department, is_active)
      VALUES (?, 'Placeholder', ?, 'DEAN', 'Administration', TRUE)`, [randomUUID(), email]);
   const [n] = await pool.query(
-    `INSERT INTO notifications (to_user_id, kind, subject, body, next_due_at) VALUES (?, 'EMAIL', 's', 'b', NOW() - INTERVAL 1 MINUTE)`,
+    `INSERT INTO infra_notifications (to_user_id, kind, subject, body, next_due_at) VALUES (?, 'EMAIL', 's', 'b', NOW() - INTERVAL 1 MINUTE)`,
     [u.insertId]);
   try {
     const sent = [];
     const tally = await processDueNotifications({ send: async (m) => { sent.push(m); } });
     assert.deepEqual(sent, []);
     assert.ok(tally.cancelled >= 1);
-    const [[row]] = await pool.query('SELECT status, last_error, attempts FROM notifications WHERE id = ?', [n.insertId]);
+    const [[row]] = await pool.query('SELECT status, last_error, attempts FROM infra_notifications WHERE id = ?', [n.insertId]);
     assert.deepEqual([row.status, row.last_error, row.attempts], ['CANCELLED', 'placeholder address', 0]);
   } finally {
-    await pool.query('DELETE FROM notifications WHERE to_user_id = ?', [u.insertId]);
-    await pool.query('DELETE FROM users WHERE id = ?', [u.insertId]);
+    await pool.query('DELETE FROM infra_notifications WHERE to_user_id = ?', [u.insertId]);
+    await pool.query('DELETE FROM infra_users WHERE id = ?', [u.insertId]);
   }
 });
 
@@ -342,14 +342,14 @@ test('a mock ticket sends no mail and is absent from queues, metrics and the aud
   const id = await makeOpenTicket(admin, admin, 'ASSIGNED_TO_JE');
   await patch(id, { is_mock: 1, current_desk_user_id: admin });
   await pool.query(
-    "INSERT INTO audit_logs (ticket_id, user_id, action, remarks, is_self_action) VALUES (?, ?, 'CREATED', 'mock', 1)", [id, admin]);
+    "INSERT INTO infra_audit_logs (ticket_id, user_id, action, remarks, is_self_action) VALUES (?, ?, 'CREATED', 'mock', 1)", [id, admin]);
 
   const deskUser = await userRow(admin);
   await inRolledBackTx((c) => notifyTicketCreated(c, {
     ticketId: id,
     assignment: { status: 'ASSIGNED_TO_JE', assignedJeId: admin, currentDeskUserId: admin, deskUser },
   }));
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM notifications WHERE ticket_id = ?', [id]);
+  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM infra_notifications WHERE ticket_id = ?', [id]);
   assert.equal(n, 0);
 
   const q = fakeRes();
@@ -358,7 +358,7 @@ test('a mock ticket sends no mail and is absent from queues, metrics and the aud
 
   const m = fakeRes();
   await getAdminMetrics({}, m);
-  const [[{ n_real }]] = await pool.query('SELECT COUNT(*) AS n_real FROM tickets WHERE is_mock = FALSE');
+  const [[{ n_real }]] = await pool.query('SELECT COUNT(*) AS n_real FROM infra_tickets WHERE is_mock = FALSE');
   assert.equal(m.body.metrics.totalTickets, n_real);
   assert.ok(m.body.desk_health.DEAN);
 
@@ -375,7 +375,7 @@ test('self_only returns only flagged audit rows', async () => {
   const applicant = await makeUser({ role: 'APPLICANT' });
   const ae = await makeUser({ role: 'AE' });
   const id = await ticketAtAe({ applicant, ae });
-  await pool.query("INSERT INTO audit_logs (ticket_id, user_id, action, is_self_action) VALUES (?, ?, 'FORWARDED', 1), (?, ?, 'APPROVED', 0)",
+  await pool.query("INSERT INTO infra_audit_logs (ticket_id, user_id, action, is_self_action) VALUES (?, ?, 'FORWARDED', 1), (?, ?, 'APPROVED', 0)",
     [id, ae, id, ae]);
   const res = fakeRes();
   await getMasterAuditLogs({ query: { ticket_id: String(id), self_only: '1' } }, res);
@@ -406,7 +406,7 @@ test('a JE raising a normal ticket goes through fair assignment: another JE gets
     const flagged = (await auditFor(out.ticket_id)).filter((a) => a.is_self_action);
     assert.equal(flagged.length, 0);
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM infra_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 
@@ -419,87 +419,89 @@ test('a JE proposal (non-recurring, own department) is self-assigned and flagged
     const assigned = (await auditFor(out.ticket_id)).find((a) => a.action === 'ASSIGNED');
     assert.equal(assigned.is_self_action, 1);
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM infra_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 
-// ---- category-aware routing ---------------------------------------------------------------------------------------------
-async function raiseAsApplicant(applicant, { category, department = 'Civil', campus = 'NORTH' }) {
+// ---- routing by department and campus only ------------------------------------------------------------------------------
+async function raiseAsApplicant(applicant, { department = 'Civil', campus = 'NORTH', ...extra } = {}) {
   const res = fakeRes();
   await createTicket({
     user: { id: applicant, role: 'APPLICANT', name: 'CI Applicant', email: 'applicant@test.local' },
-    body: { department, campus, description: 'ci ticket', landmark: 'gate', category, contact_phone: '9999999999' },
+    body: { department, campus, description: 'ci ticket', landmark: 'gate', contact_phone: '9999999999', ...extra },
   }, res);
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
   return res.body;
 }
 
-test('a category that forces the campus routes and stores that campus', async () => {
+test('a ticket is routed by department and campus and stores that campus', async () => {
   const applicant = await makeUser({ role: 'APPLICANT' });
   const je = await makeUser({ role: 'JE' }); await civilScope(je, 'SOUTH');
-  const out = await raiseAsApplicant(applicant, { category: 'Maintenance Civil - South Campus', campus: 'SOUTH' });
+  const out = await raiseAsApplicant(applicant, { campus: 'SOUTH' });
   try {
     const t = await ticketRow(out.ticket_id);
     assert.equal(t.campus, 'SOUTH');
-    assert.equal(t.category, 'Maintenance Civil - South Campus');
+    assert.equal(t.landmark, 'gate');
     assert.equal(out.status, 'ASSIGNED_TO_JE');
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM infra_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 
-test('a category that contradicts the campus is rejected with 400 and creates nothing', async () => {
+test('campus and department are required; landmark is required', async () => {
   const applicant = await makeUser({ role: 'APPLICANT' });
-  const res = fakeRes();
-  await createTicket({
-    user: { id: applicant, role: 'APPLICANT', name: 'CI Applicant', email: 'applicant@test.local' },
-    body: {
-      department: 'Civil', campus: 'SOUTH', description: 'ci ticket', landmark: 'gate',
-      category: 'Maintenance Civil - North Campus', contact_phone: '9999999999',
-    },
-  }, res);
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.code, 'VALIDATION_ERROR');
+  for (const body of [
+    { department: 'Civil', description: 'x', landmark: 'gate', contact_phone: '9999999999' },
+    { campus: 'NORTH', description: 'x', landmark: 'gate', contact_phone: '9999999999' },
+    { department: 'Civil', campus: 'NORTH', description: 'x', contact_phone: '9999999999' },
+  ]) {
+    const res = fakeRes();
+    await createTicket({ user: { id: applicant, role: 'APPLICANT', name: 'CI', email: 'a@test.local' }, body }, res);
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.code, 'VALIDATION_ERROR');
+  }
 });
 
-test('a manual-JE category skips the JE pick: UNASSIGNED at the AE, JE rotation untouched, then the AE assigns', async () => {
+test('a stale client still sending category and building is tolerated; neither is stored', async () => {
+  const applicant = await makeUser({ role: 'APPLICANT' });
+  const je = await makeUser({ role: 'JE' }); await civilScope(je);
+  const out = await raiseAsApplicant(applicant, { category: 'Beas Kund', building: 'Block A' });
+  try {
+    const t = await ticketRow(out.ticket_id);
+    assert.equal(out.status, 'ASSIGNED_TO_JE', 'no category forces the AE to pick a JE any more');
+    assert.ok(!('category' in t) && !('building' in t) && !('location' in t));
+  } finally {
+    await pool.query('DELETE FROM infra_tickets WHERE id = ?', [out.ticket_id]);
+  }
+});
+
+test('nobody free: UNASSIGNED at the AE, JE rotation untouched, the AE gets one needs-a-JE mail, then assigns', async () => {
   const applicant = await makeUser({ role: 'APPLICANT' });
   const je = await makeUser({ role: 'JE' }); await civilScope(je);
   const ae = await makeUser({ role: 'AE' }); await civilScope(ae);
-  const before = (await pool.query('SELECT last_assigned_at FROM users WHERE id = ?', [je]))[0][0].last_assigned_at;
-  const out = await raiseAsApplicant(applicant, { category: 'Beas Kund' });
+  const cleanupLeave = await putOnLeave(je, ae);
+  const out = await raiseAsApplicant(applicant);
   try {
     assert.equal(out.status, 'UNASSIGNED');
     assert.equal(out.assigned_je_id, null);
     const t = await ticketRow(out.ticket_id);
     const expectedAe = (await resolveAeForScope(pool, { department: 'Civil', campus: 'NORTH' })).id;
     assert.equal(t.current_desk_user_id, expectedAe);
-    const after = (await pool.query('SELECT last_assigned_at FROM users WHERE id = ?', [je]))[0][0].last_assigned_at;
-    assert.equal(String(after), String(before));
     const assigned = (await auditFor(out.ticket_id)).find((a) => a.action === 'ASSIGNED');
-    assert.match(assigned.remarks, /Beas Kund/);
-    assert.match(assigned.remarks, /manual JE selection/);
+    assert.match(assigned.remarks, /no available JE/);
+    const [rows] = await pool.query('SELECT subject, body, kind FROM infra_notifications WHERE ticket_id = ?', [out.ticket_id]);
+    const toAe = rows.find((r) => /needs a JE/.test(r.subject));
+    assert.ok(toAe, JSON.stringify(rows.map((r) => r.subject)));
+    assert.match(toAe.body, /No JE is free for Civil/);
+    assert.equal(toAe.kind, 'EMAIL', 'one mail for the AE, never a series');
 
+    await cleanupLeave();
     const aeUser = await userRow(expectedAe);
     const res = await act(aeUser, out.ticket_id, { action: 'ASSIGN_JE', assignee_id: je });
     assert.equal(res.statusCode, 200, JSON.stringify(res.body));
     assert.equal((await ticketRow(out.ticket_id)).status, 'ASSIGNED_TO_JE');
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
-  }
-});
-
-test('the UNASSIGNED mail for a manual-JE category says the AE assigns, not that no JE is available', async () => {
-  const applicant = await makeUser({ role: 'APPLICANT' });
-  const ae = await makeUser({ role: 'AE' });
-  await pool.query("INSERT INTO user_scopes (user_id, department, campus) VALUES (?, 'Electrical', 'BOTH')", [ae]);
-  const out = await raiseAsApplicant(applicant, { category: 'Maintenance Electrical - Garpha', department: 'Electrical' });
-  try {
-    const [rows] = await pool.query('SELECT subject, body FROM notifications WHERE ticket_id = ?', [out.ticket_id]);
-    assert.ok(rows.some((r) => /needs a JE/.test(r.subject)), JSON.stringify(rows.map((r) => r.subject)));
-    assert.ok(!rows.some((r) => /no JE available/.test(r.subject)));
-  } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM infra_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 

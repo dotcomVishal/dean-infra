@@ -18,8 +18,8 @@ import { makeUser, makeOpenTicket, cleanup, pool } from './helpers.mjs';
 // Their audit rows would block deleting the CI users, so remove them first.
 async function cleanAll() {
   await pool.query(
-    `DELETE FROM tickets WHERE is_mock = TRUE
-       AND applicant_id IN (SELECT id FROM users WHERE email LIKE 'ci-%@test.local')`);
+    `DELETE FROM infra_tickets WHERE is_mock = TRUE
+       AND applicant_id IN (SELECT id FROM infra_users WHERE email LIKE 'ci-%@test.local')`);
   await cleanup();
 }
 beforeEach(cleanAll);
@@ -31,8 +31,8 @@ const fakeRes = () => {
   res.json = (b) => { res.body = b; return res; };
   return res;
 };
-const userOf = async (id) => (await pool.query('SELECT id, name, email, role, department, is_active FROM users WHERE id = ?', [id]))[0][0];
-const ticketRow = async (id) => (await pool.query('SELECT * FROM tickets WHERE id = ?', [id]))[0][0];
+const userOf = async (id) => (await pool.query('SELECT id, name, email, role, department, is_active FROM infra_users WHERE id = ?', [id]))[0][0];
+const ticketRow = async (id) => (await pool.query('SELECT * FROM infra_tickets WHERE id = ?', [id]))[0][0];
 
 // Runs the ticket_id param middleware. Returns { next: bool, status, req }.
 async function throughParam(handler, user, id, headers, path) {
@@ -142,7 +142,7 @@ test('the header on a route without a ticket id is refused with 400', () => {
     return [ok, res.statusCode];
   };
   const h = { 'x-test-role': 'AE' };
-  for (const path of ['/queue', '/desk', '/applicant', '/', '/accountant/overview', '/bills/5', '/je/dashboard']) {
+  for (const path of ['/queue', '/desk', '/applicant', '/', '/je/dashboard']) {
     assert.deepEqual(run(path, h), [false, 400], path);
   }
   assert.deepEqual(run('/12/details', h), [true, 200]);
@@ -156,7 +156,7 @@ test('attachment route: header works on a mock ticket file only', async () => {
   const applicant = await makeUser({ role: 'APPLICANT' });
   const realTicket = await makeOpenTicket(applicant, null);
   const att = async (ticketId) => (await pool.query(
-    "INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, '/uploads/x.png', ?, 'JE_SITE_PHOTO')",
+    "INSERT INTO infra_attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, '/uploads/x.png', ?, 'JE_SITE_PHOTO')",
     [ticketId, admin.id]))[0].insertId;
   const onMock = await att(id);
   const onReal = await att(realTicket);
@@ -179,7 +179,7 @@ test('create: validates input, raises a mock ticket at the Sysadmin desk, option
   assert.equal(row.is_mock, 1);
   assert.equal(row.status, 'ASSIGNED_TO_JE');
   assert.deepEqual([row.applicant_id, row.assigned_je_id, row.current_desk_user_id], [admin.id, admin.id, admin.id]);
-  const [[rep]] = await pool.query('SELECT estimated_amount FROM reports WHERE ticket_id = ?', [id]);
+  const [[rep]] = await pool.query('SELECT estimated_amount FROM infra_reports WHERE ticket_id = ?', [id]);
   assert.equal(Number(rep.estimated_amount), 75000);
 
   const list = fakeRes();
@@ -248,7 +248,7 @@ test('walk: JE report -> AE -> SE -> Dean -> Director, each role switch shows th
   assert.equal(row.is_mock, 1);
 
   // Every audit row belongs to the real Sysadmin and says which role was played.
-  const [audit] = await pool.query('SELECT user_id, action, remarks, is_self_action FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]);
+  const [audit] = await pool.query('SELECT user_id, action, remarks, is_self_action FROM infra_audit_logs WHERE ticket_id = ? ORDER BY id', [id]);
   const played = audit.filter((a) => a.action !== 'CREATED');
   assert.ok(played.length >= 5);
   for (const a of played) {
@@ -257,7 +257,7 @@ test('walk: JE report -> AE -> SE -> Dean -> Director, each role switch shows th
     assert.equal(a.is_self_action, 0);
   }
   // No mail, no reminders.
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM notifications WHERE ticket_id = ?', [id]);
+  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM infra_notifications WHERE ticket_id = ?', [id]);
   assert.equal(n, 0);
 
   // Reset returns it to the JE stage and clears the walk.
@@ -267,8 +267,8 @@ test('walk: JE report -> AE -> SE -> Dean -> Director, each role switch shows th
   const after_ = await ticketRow(id);
   assert.deepEqual([after_.status, after_.current_desk_user_id, after_.assigned_ae_id, after_.assigned_se_id],
     ['ASSIGNED_TO_JE', admin.id, null, null]);
-  assert.equal((await pool.query('SELECT 1 FROM reports WHERE ticket_id = ?', [id]))[0].length, 0);
-  assert.equal((await pool.query('SELECT 1 FROM ticket_messages WHERE ticket_id = ?', [id]))[0].length, 0);
+  assert.equal((await pool.query('SELECT 1 FROM infra_reports WHERE ticket_id = ?', [id]))[0].length, 0);
+  assert.equal((await pool.query('SELECT 1 FROM infra_ticket_messages WHERE ticket_id = ?', [id]))[0].length, 0);
   assert.deepEqual(await actionsFor('JE'), ['SUBMIT_REPORT']);
 
   // Delete removes it.
@@ -297,7 +297,7 @@ test('as APPLICANT the Sysadmin sees the applicant projection: no staff identiti
   assert.equal(staffRole(viewer, row), null);
   const out = buildTicketDetails(viewer, row, {
     attachments: [{ id: 1, file_url: '/uploads/a.png', uploaded_by: admin.id, document_category: 'JE_SITE_PHOTO', uploader_role: 'JE' }],
-    reports: [{ estimated_amount: 5 }], tenders: [], bills: [],
+    reports: [{ estimated_amount: 5 }], tenders: [],
     auditLogs: [{ action: 'SUBMITTED', remarks: 'r', created_at: 1, user_id: admin.id, actor_name: admin.name, actor_role: 'JE' }],
     messages: [],
   });
@@ -323,7 +323,7 @@ test('test mode does not let "own upload" bypass the category rules', async () =
   const admin = await sysadmin();
   const id = await newMockTicket(admin);
   const row = await ticketRow(id);
-  const att = { document_category: 'FINANCE_SANCTION', uploaded_by: admin.id, uploader_role: 'ACCOUNTANT' };
+  const att = { document_category: 'DESK_DOC', uploaded_by: admin.id, uploader_role: 'AE' };
   const { req } = await asRole(admin, id, 'APPLICANT');
   const viewer = await loadViewer(pool, req.user, row);
   assert.equal(canViewAttachment(viewer, row, att), false);

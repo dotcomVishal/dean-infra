@@ -6,10 +6,24 @@ export const ticketNo = (id: number | string) => `#TKT-${String(id).padStart(4, 
 export const inr = (n: number | string | null | undefined) =>
   n == null || n === '' || Number.isNaN(Number(n)) ? '—' : `₹${Number(n).toLocaleString('en-IN')}`;
 
-/** Pulls the server's message out of an axios error. */
+/**
+ * Message to show for a failed request. The server's own message wins; proxy and network
+ * failures have no JSON body, so they are told apart by status. A 5xx carries the request
+ * id so support can find the log line.
+ */
 export const errorMessage = (err: unknown, fallback: string): string => {
-  const e = err as { response?: { data?: { message?: string } } };
-  return e?.response?.data?.message || fallback;
+  const e = err as { response?: { status?: number; data?: { message?: string; requestId?: string } }; request?: unknown };
+  const status = e?.response?.status;
+  const data = e?.response?.data;
+  if (status && status >= 500) {
+    const id = data?.requestId ? ` (ref ${data.requestId.slice(0, 8)})` : '';
+    return `${typeof data?.message === 'string' ? data.message : 'Server error'}${id}`;
+  }
+  if (typeof data?.message === 'string' && data.message) return data.message;
+  if (status === 413) return 'Files are too large. Use fewer or smaller files.';
+  if (status === 429) return 'Too many requests. Wait a minute and try again.';
+  if (!e?.response && e?.request) return 'Network problem. Check your connection and try again.';
+  return fallback;
 };
 
 export const DESK_ORDER = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'] as const;
@@ -17,7 +31,7 @@ export type Desk = (typeof DESK_ORDER)[number];
 export const DESK_RANK: Record<string, number> = { JE: 1, AE: 2, SE: 3, DEAN: 4, DIRECTOR: 5 };
 export const DESK_LABEL: Record<string, string> = {
   JE: 'JE', AE: 'AE', SE: 'SE', DEAN: 'Dean', DIRECTOR: 'Director',
-  CLERICAL: 'Clerical', ACCOUNTANT: 'Accountant', SYSADMIN: 'Sysadmin', APPLICANT: 'Applicant',
+  SYSADMIN: 'Sysadmin', APPLICANT: 'Applicant',
 };
 export const deskLabel = (d?: string | null) => (d ? DESK_LABEL[d] ?? d : '');
 
@@ -46,8 +60,10 @@ const STAFF_STATUS: Record<string, string> = {
   PENDING_DIRECTOR_APPROVAL: 'Waiting for Director',
   APPROVED_FOR_TENDERING: 'Approved — awaiting tender',
   TENDER_PUBLISHED: 'Tender published',
+  TECHNICAL_EVALUATION: 'Technical evaluation',
+  FINANCIAL_EVALUATION: 'Financial evaluation',
   WORK_IN_PROGRESS: 'Work in progress',
-  WORK_COMPLETED: 'Work done — awaiting applicant confirmation',
+  WORK_COMPLETED: 'Resolved, awaiting confirmation',
   CLOSED: 'Closed',
   DENIED: 'Rejected',
 };
@@ -65,8 +81,10 @@ const APPLICANT_STAGE: Record<string, string> = {
   PENDING_DIRECTOR_APPROVAL: 'Under review',
   APPROVED_FOR_TENDERING: 'Approved — tendering',
   TENDER_PUBLISHED: 'Approved — tendering',
+  TECHNICAL_EVALUATION: 'Approved — tendering',
+  FINANCIAL_EVALUATION: 'Approved — tendering',
   WORK_IN_PROGRESS: 'Work in progress',
-  WORK_COMPLETED: 'Work done — please verify',
+  WORK_COMPLETED: 'Resolved — please confirm',
   CLOSED: 'Completed',
   DENIED: 'Rejected',
 };
@@ -108,16 +126,32 @@ export const formatAge = (hours: number) => {
   return h ? `${d}d ${h}h` : `${d}d`;
 };
 
-export const isPostApproval = (status: string) =>
-  ['APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED'].includes(status);
+// One place for the status lists (mirrors config/workflow.js on the server).
+/** After the approval chain, in the order a ticket moves through. */
+export const POST_APPROVAL_STATUSES = [
+  'APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'TECHNICAL_EVALUATION', 'FINANCIAL_EVALUATION',
+  'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED',
+] as const;
+/** A tender can be cancelled in any of these. */
+export const TENDER_STAGES = ['TENDER_PUBLISHED', 'TECHNICAL_EVALUATION', 'FINANCIAL_EVALUATION'] as const;
+/** Every status a ticket can be forced to by the Sysadmin, in journey order. */
+export const ALL_STATUSES = [
+  'UNASSIGNED', 'ASSIGNED_TO_JE', 'PENDING_AE_APPROVAL', 'PENDING_SE_APPROVAL', 'PENDING_DEAN_APPROVAL',
+  'PENDING_DIRECTOR_APPROVAL', 'RETURNED_TO_JE', ...POST_APPROVAL_STATUSES, 'DENIED',
+] as const;
 
-export const mapsHref = (t: { lat?: number | string | null; lng?: number | string | null; location?: string }) => {
-  let q = encodeURIComponent(t.location || '');
+export const isPostApproval = (status: string) => (POST_APPROVAL_STATUSES as readonly string[]).includes(status);
+/** Still moving: not awaiting confirmation, closed or rejected. */
+export const isOpenStatus = (status: string) => !['WORK_COMPLETED', 'CLOSED', 'DENIED'].includes(status);
+
+/** Applicant label for a resolved ticket depends on how it was resolved. */
+export const resolvedApplicantLabel = (kind?: string | null) =>
+  kind === 'TENDER_CANCELLED' ? 'Tender cancelled — please acknowledge' : 'Resolved — please confirm';
+
+/** Coordinates when the raiser pinned them, else a search on campus and landmark. */
+export const mapsHref = (t: { lat?: number | string | null; lng?: number | string | null; campus?: string | null; landmark?: string | null }) => {
+  let q = encodeURIComponent([t.landmark, t.campus && `${t.campus} campus`].filter(Boolean).join(', '));
   if (t.lat != null && t.lng != null && t.lat !== '' && t.lng !== '') q = `${t.lat},${t.lng}`;
-  else {
-    const m = (t.location || '').match(/Lat:\s*([0-9.-]+),\s*Lng:\s*([0-9.-]+)/);
-    if (m) q = `${m[1]},${m[2]}`;
-  }
   return `https://www.google.com/maps/search/?api=1&query=${q}`;
 };
 

@@ -1,27 +1,27 @@
 import express from 'express';
 import pool from '../config/db.js';
-import { upload } from '../middleware/upload.js';
+import { uploadArray, uploadFields } from '../middleware/upload.js';
 import { requireAuth } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimit.js';
 import { requireRole } from '../middleware/rbac.js';
 import { testRoleForTicketParam, rejectStrayTestRole } from '../middleware/testRole.js';
+import { hideDeletedTicketParam } from '../middleware/ticketGuard.js';
 
 // Import actual controllers
 import {
   createTicket,
   getQueue,
   submitReport,
-  updateTenderStatus,
-  publishTender,
-  awardTender,
-  recordBill,
-  updateBillPayment,
-  getAccountantOverview,
   uploadAttachments,
+  checkUploadAllowed,
   confirmCompletion,
 } from '../controllers/ticketController.js';
 import { performTicketAction } from '../controllers/actionController.js';
+import { performLifecycleAction } from '../controllers/lifecycleController.js';
 import { getDeskBoard, getAssignableJes } from '../controllers/deskController.js';
-import { availableActions, approvalLimitFor } from '../config/workflow.js';
+import {
+  availableActions, availableLifecycleActions, approvalLimitFor, AUTO_CLOSE_DAYS, RESOLUTION, STATUS,
+} from '../config/workflow.js';
 import { findDeskOwner, loadAssignees } from '../models/deskModel.js';
 import { loadActionContext } from '../services/actionContext.js';
 import { listForTicket } from '../models/messageModel.js';
@@ -33,11 +33,13 @@ import { sendServerError } from '../utils/httpError.js';
 const router = express.Router();
 
 // EVERY route below this line requires a valid token
-router.use(requireAuth);
+router.use(requireAuth, userLimiter);
 
 // Sysadmin "act as" on mock tickets only (plan2.md F5). Runs before any route-level requireRole.
 router.use(rejectStrayTestRole);
 router.param('ticket_id', testRoleForTicketParam);
+// A deleted ticket answers 404 on every route below, exactly like a missing id.
+router.param('ticket_id', hideDeletedTicketParam);
 
 // 1.5 Applicant Dashboard (Fetch tickets created by this specific user)
 // W15: "My tickets" is open to every authenticated, active role -- being the
@@ -45,7 +47,7 @@ router.param('ticket_id', testRoleForTicketParam);
 router.get('/applicant', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT * FROM tickets WHERE applicant_id = ? AND is_mock = FALSE ORDER BY created_at DESC`,
+      `SELECT * FROM infra_tickets WHERE applicant_id = ? AND is_mock = FALSE AND deleted_at IS NULL ORDER BY created_at DESC`,
       [req.user.id]
     );
     // Applicant view: no assignee / desk-owner ids, stage in plain words (Q11).
@@ -61,14 +63,14 @@ router.get('/desk', getDeskBoard);
 
 // 1. Raise a Ticket (Hooks up to the actual Auto-Assignment & Email logic)
 // W15: any active, authenticated user may raise a ticket -- students, faculty,
-// staff and every internal role (AE/SE/Clerical/Accountant/Dean/Director), not
+// staff and every internal role (AE/SE/Dean/Director), not
 // just APPLICANT/JE/SYSADMIN.
-router.post('/', upload.array('files', 5), createTicket);
+router.post('/', uploadArray('files', 5), createTicket);
 
-// 2. Role Dashboard Queue (Supports AE, SE, DEAN, DIRECTOR, CLERICAL, ACCOUNTANT, SYSADMIN)
+// 2. Role Dashboard Queue (Supports AE, SE, DEAN, DIRECTOR, SYSADMIN)
 router.get(
   '/queue',
-  requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR', 'CLERICAL', 'ACCOUNTANT', 'SYSADMIN']),
+  requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN']),
   getQueue
 );
 
@@ -76,19 +78,20 @@ router.get(
 router.post(
   '/:ticket_id/report',
   requireRole(['JE']),
-  upload.fields([
+  uploadFields([
     { name: 'site_photos', maxCount: 10 },
     { name: 'estimate_docs', maxCount: 10 },
   ]),
   submitReport
 );
 
-// 4. JE Manual Tendering Milestone Update
-router.post('/:ticket_id/tender', requireRole(['JE']), updateTenderStatus);
+// 4. JE steps after approval: publish tender, evaluations, award, cancel tender, resolve.
+//    Files may travel with the step (completion photos).
+router.post('/:ticket_id/lifecycle', requireRole(['JE']), uploadArray('files', 5), performLifecycleAction);
 
-// 4.1 Files from any desk (applicant, JE, AE..Director, Clerical, Accountant).
+// 4.1 Files from any desk (applicant, JE, AE..Director).
 // The controller checks ticket access and picks the category from the uploader.
-router.post('/:ticket_id/attachments', upload.array('files', 10), uploadAttachments);
+router.post('/:ticket_id/attachments', checkUploadAllowed, uploadArray('files', 10), uploadAttachments);
 
 // 4.2 Applicant confirms (closes) or disputes work the JE marked complete.
 router.post('/:ticket_id/confirm-completion', confirmCompletion);
@@ -96,7 +99,7 @@ router.post('/:ticket_id/confirm-completion', confirmCompletion);
 // 4.5 Desk actions (replaces /review): FORWARD, APPROVE, REQUEST_CHANGES,
 // REJECT, ASSIGN_JE. The route only gates the role; the state machine decides
 // whether THIS person may do THIS action on THIS ticket right now.
-router.post('/:ticket_id/actions', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), performTicketAction);
+router.post('/:ticket_id/actions', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), uploadArray('files', 5), performTicketAction);
 
 // 4.6 JE picker for the AE's ASSIGN_JE action on an UNASSIGNED ticket.
 router.get('/:ticket_id/assignable-jes', requireRole(['AE']), getAssignableJes);
@@ -107,15 +110,17 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
   try {
     const [tickets] = await pool.query(
       `SELECT t.*, u.name as applicant_name, u.phone as applicant_phone, u.email as applicant_email,
-              r.estimated_amount, r.nature_of_work
-       FROM tickets t 
-       JOIN users u ON t.applicant_id = u.id 
+              r.estimated_amount, r.nature_of_work,
+              (SELECT m.body FROM infra_ticket_messages m JOIN infra_audit_logs al ON al.id = m.audit_log_id
+                WHERE m.ticket_id = t.id AND al.action = 'WORK_REOPENED' ORDER BY m.id DESC LIMIT 1) AS sent_back_comment
+       FROM infra_tickets t 
+       JOIN infra_users u ON t.applicant_id = u.id 
        LEFT JOIN (
-         SELECT r1.* FROM reports r1
-         JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r2
+         SELECT r1.* FROM infra_reports r1
+         JOIN (SELECT ticket_id, MAX(id) as max_id FROM infra_reports GROUP BY ticket_id) r2
          ON r1.id = r2.max_id
        ) r ON t.id = r.ticket_id
-       WHERE t.assigned_je_id = ? 
+       WHERE t.assigned_je_id = ? AND t.deleted_at IS NULL
        ORDER BY t.created_at DESC`,
       [je_id]
     );
@@ -126,36 +131,20 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 6. CLERICAL TENDER ROUTES
+// 6. TENDER READ
 // -------------------------------------------------------------
-// S1: tendering/award belong to Clerical only. A JE (any JE, not just the
-// assigned one) used to be able to call these directly and skip the whole
-// approval chain -- the status guard in the controller closes that, but the
-// route no longer even offers JE the button.
-router.post(
-  '/:ticket_id/tenders',
-  requireRole(['CLERICAL', 'SYSADMIN']),
-  publishTender
-);
-
-router.post(
-  '/:ticket_id/tenders/award',
-  requireRole(['CLERICAL', 'SYSADMIN']),
-  awardTender
-);
-
 // S6: previously unauthenticated-in-effect -- no role or scope check meant an
 // APPLICANT could read tender data for any ticket id.
 router.get(
   '/:ticket_id/tenders',
-  requireRole(['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'CLERICAL', 'ACCOUNTANT', 'SYSADMIN']),
+  requireRole(['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN']),
   async (req, res) => {
     const { ticket_id } = req.params;
     try {
       const [ticketRows] = await pool.query(
         `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
                 is_mock, current_desk_user_id
-           FROM tickets WHERE id = ?`,
+           FROM infra_tickets WHERE id = ?`,
         [ticket_id]
       );
       if (ticketRows.length === 0) {
@@ -168,8 +157,8 @@ router.get(
 
       const [tenders] = await pool.query(
         `SELECT tn.*, u.name as publisher_name, u.role as publisher_role
-         FROM tenders tn
-         JOIN users u ON tn.created_by = u.id
+         FROM infra_tenders tn
+         JOIN infra_users u ON tn.created_by = u.id
          WHERE tn.ticket_id = ?
          ORDER BY tn.created_at DESC`,
         [ticket_id]
@@ -179,61 +168,6 @@ router.get(
       return sendServerError(req, res, error, 'getTenders error');
     }
   }
-);
-
-// -------------------------------------------------------------
-// 7. ACCOUNTANT & FINANCE BILLING ROUTES
-// -------------------------------------------------------------
-router.get(
-  '/accountant/overview',
-  requireRole(['ACCOUNTANT', 'SYSADMIN', 'DEAN', 'DIRECTOR']),
-  getAccountantOverview
-);
-
-router.get(
-  '/:ticket_id/bills',
-  requireRole(['ACCOUNTANT', 'SYSADMIN', 'CLERICAL', 'AE', 'SE', 'DEAN', 'DIRECTOR']),
-  async (req, res) => {
-    const { ticket_id } = req.params;
-    try {
-      const [ticketRows] = await pool.query(
-        `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
-                is_mock, current_desk_user_id
-           FROM tickets WHERE id = ?`,
-        [ticket_id]
-      );
-      if (ticketRows.length === 0) {
-        return res.status(404).json({ success: false, message: 'Ticket not found' });
-      }
-      const viewer = await loadViewer(pool, req.user, ticketRows[0]);
-      if (!capabilities(viewer, ticketRows[0]).bills) {
-        return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
-      }
-      const [bills] = await pool.query(
-        `SELECT b.*, u.name as accountant_name 
-         FROM bills b 
-         JOIN users u ON b.processed_by = u.id 
-         WHERE b.ticket_id = ? 
-         ORDER BY b.created_at DESC`,
-        [ticket_id]
-      );
-      res.json({ success: true, bills });
-    } catch (error) {
-      return sendServerError(req, res, error, 'ticketRoutes:206');
-    }
-  }
-);
-
-router.post(
-  '/:ticket_id/bills',
-  requireRole(['ACCOUNTANT', 'SYSADMIN']),
-  recordBill
-);
-
-router.patch(
-  '/bills/:bill_id',
-  requireRole(['ACCOUNTANT', 'SYSADMIN']),
-  updateBillPayment
 );
 
 // -------------------------------------------------------------
@@ -247,7 +181,7 @@ router.get('/:ticket_id/details', async (req, res) => {
   try {
     const [tickets] = await pool.query(
       `SELECT t.*, u.name as applicant_name, u.email as applicant_email, u.phone as applicant_phone
-       FROM tickets t JOIN users u ON t.applicant_id = u.id WHERE t.id = ?`,
+       FROM infra_tickets t JOIN infra_users u ON t.applicant_id = u.id WHERE t.id = ?`,
       [ticket_id]
     );
     if (tickets.length === 0) {
@@ -262,24 +196,21 @@ router.get('/:ticket_id/details', async (req, res) => {
     }
 
     const [attachments] = await pool.query(
-      `SELECT a.id, a.file_url, a.uploaded_by, a.created_at, a.document_category, a.report_id,
-              u.role AS uploader_role
-         FROM attachments a LEFT JOIN users u ON u.id = a.uploaded_by
+      `SELECT a.id, a.file_url, a.original_name, a.uploaded_by, a.created_at, a.document_category, a.report_id,
+              a.uploader_desk, a.audit_log_id, al.action AS audit_action,
+              u.role AS uploader_role, u.name AS uploader_name
+         FROM infra_attachments a
+         LEFT JOIN infra_users u ON u.id = a.uploaded_by
+         LEFT JOIN infra_audit_logs al ON al.id = a.audit_log_id
         WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
       [ticket_id]
     );
     const [reports] = await pool.query(
-      'SELECT * FROM reports WHERE ticket_id = ? ORDER BY version DESC LIMIT 1', [ticket_id]);
+      'SELECT * FROM infra_reports WHERE ticket_id = ? ORDER BY version DESC LIMIT 1', [ticket_id]);
 
     let tenders = [];
     try {
-      [tenders] = await pool.query('SELECT * FROM tenders WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
-    } catch (err) {
-      if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
-    }
-    let bills = [];
-    try {
-      [bills] = await pool.query('SELECT * FROM bills WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
+      [tenders] = await pool.query('SELECT * FROM infra_tenders WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
     } catch (err) {
       if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
     }
@@ -287,14 +218,14 @@ router.get('/:ticket_id/details', async (req, res) => {
     const [auditLogs] = await pool.query(
       `SELECT a.action, a.remarks, a.created_at, a.user_id, a.visibility, a.from_desk, a.to_desk, a.is_self_action,
               u.name as actor_name, u.role as actor_role
-         FROM audit_logs a JOIN users u ON a.user_id = u.id
+         FROM infra_audit_logs a JOIN infra_users u ON a.user_id = u.id
         WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
       [ticket_id]
     );
     const messages = await listForTicket(pool, ticket_id);
 
     const ticketData = buildTicketDetails(viewer, ticketRow, {
-      attachments, reports, tenders, bills, auditLogs, messages,
+      attachments, reports, tenders, auditLogs, messages,
     });
 
     // The buttons the UI may render come from the same state machine that
@@ -315,8 +246,23 @@ router.get('/:ticket_id/details', async (req, res) => {
         ticketData.desk_people = people;
       }
       ticketData.assignees = await loadAssignees(pool, ticketRow, staffRole(viewer, ticketRow));
+      // The JE's steps after approval, from the same table the server enforces.
+      ticketData.available_lifecycle_actions = availableLifecycleActions({ user: { id: userId, role: userRole }, ticket: ticketRow });
     } else {
       ticketData.available_actions = { desk: null, actions: [] };
+      ticketData.available_lifecycle_actions = [];
+    }
+
+    // The stored confirmer of a resolved ticket gets the confirm panel, on the staff page as well as
+    // the applicant page (a person who raised a ticket and also has a staff view could not answer before).
+    if (ticketRow.status === STATUS.WORK_COMPLETED && ticketRow.current_desk_user_id === userId) {
+      ticketData.confirmation = {
+        can_confirm: true,
+        can_send_back: ticketRow.resolution_kind !== RESOLUTION.TENDER_CANCELLED,
+        resolution_kind: ticketRow.resolution_kind,
+        auto_close_at: ticketRow.resolved_at
+          ? new Date(new Date(ticketRow.resolved_at).getTime() + AUTO_CLOSE_DAYS * 24 * 3600 * 1000).toISOString() : null,
+      };
     }
 
     res.json({ success: true, ticket: ticketData });

@@ -14,7 +14,6 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { toast } from '../../store/toastStore';
-import { TICKET_CATEGORIES, findCategory } from '../../config/ticketCategories';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -46,8 +45,6 @@ export default function JeRaiseTicket() {
   const [description, setDescription] = useState('');
   const [landmark, setLandmark] = useState('');
   const [campus, setCampus] = useState<'NORTH' | 'SOUTH'>('NORTH');
-  const [building, setBuilding] = useState('');
-  const [category, setCategory] = useState('');
   const [contactPhone, setContactPhone] = useState('');
 
   const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
@@ -56,13 +53,6 @@ export default function JeRaiseTicket() {
 
   const campusCenter: [number, number] = [31.7754, 76.9861];
 
-  const categoryRule = findCategory(category);
-  const handleCategoryChange = (name: string) => {
-    setCategory(name);
-    const rule = findCategory(name);
-    if (rule?.department) setDepartment(rule.department);
-    if (rule?.campus) setCampus(rule.campus);
-  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -113,9 +103,6 @@ export default function JeRaiseTicket() {
     if (!landmark.trim()) {
       return setError('Enter a landmark.');
     }
-    if (!category) {
-      return setError('Select a category.');
-    }
     if (!contactPhone.trim()) {
       return setError('Enter a contact phone number.');
     }
@@ -128,9 +115,7 @@ export default function JeRaiseTicket() {
     formData.append('description', description.trim());
     formData.append('type', 'non-recurring'); // Enforced strictly for JE non-recurring proposal
     formData.append('campus', campus);
-    formData.append('building', building.trim());
     formData.append('landmark', landmark.trim());
-    formData.append('category', category);
     formData.append('contact_phone', contactPhone.trim());
     if (coordinates) {
       formData.append('lat', String(coordinates.lat));
@@ -140,9 +125,7 @@ export default function JeRaiseTicket() {
     files.forEach((file) => formData.append('files', file));
 
     try {
-      const response = await api.post('/tickets', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const response = await api.post('/tickets', formData);
       if (response.data.success) {
         navigate('/je/dashboard');
       }
@@ -207,38 +190,10 @@ export default function JeRaiseTicket() {
           />
         </div>
 
-        {/* 2. Category (sets department / campus when the topic implies them) */}
+        {/* 2. Department */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
-            Category
-          </label>
-          <select
-            required
-            className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white"
-            value={category}
-            onChange={(e) => handleCategoryChange(e.target.value)}
-          >
-            <option value="" disabled>Select a category</option>
-            {TICKET_CATEGORIES.map((c) => (
-              <option key={c.name} value={c.name}>{c.name}</option>
-            ))}
-          </select>
-          {categoryRule?.manualJe && (
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              The Assistant Engineer will assign a Junior Engineer for this category.
-            </p>
-          )}
-          {categoryRule?.department && categoryRule.department !== user?.department && (
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              This category routes to {categoryRule.department}; it will be auto-assigned.
-            </p>
-          )}
-        </div>
-
-        {/* 3. Department */}
-        <div>
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
-            Department{categoryRule?.department && <span className="ml-2 normal-case tracking-normal font-medium">Set by category</span>}
+            Department
           </label>
           <div className="grid grid-cols-3 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
             {['Civil', 'Electrical', 'Horticulture'].map((dept) => (
@@ -246,8 +201,7 @@ export default function JeRaiseTicket() {
                 key={dept}
                 type="button"
                 onClick={() => setDepartment(dept)}
-                disabled={!!categoryRule?.department && categoryRule.department !== dept}
-                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all ${
                   department === dept
                     ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
@@ -259,10 +213,10 @@ export default function JeRaiseTicket() {
           </div>
         </div>
 
-        {/* 4. Campus */}
+        {/* 3. Campus */}
         <div>
           <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 tracking-wider uppercase">
-            Campus{categoryRule?.campus && <span className="ml-2 normal-case tracking-normal font-medium">Set by category</span>}
+            Campus
           </label>
           <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-xl">
             {(['NORTH', 'SOUTH'] as const).map((c) => (
@@ -270,8 +224,7 @@ export default function JeRaiseTicket() {
                 key={c}
                 type="button"
                 onClick={() => setCampus(c)}
-                disabled={!!categoryRule?.campus && categoryRule.campus !== c}
-                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`py-2.5 text-xs md:text-sm font-semibold rounded-lg transition-all ${
                   campus === c
                     ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
@@ -333,13 +286,6 @@ export default function JeRaiseTicket() {
               </div>
             )}
 
-            <input
-              type="text"
-              placeholder="Building (optional)"
-              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-              value={building}
-              onChange={(e) => setBuilding(e.target.value)}
-            />
             <input
               type="text"
               required

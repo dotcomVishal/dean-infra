@@ -10,8 +10,12 @@ function ReportBody({ ticket }: { ticket: TicketDetail }) {
   const [more, setMore] = useState(false);
   const r = ticket.report;
   if (!r) return <p className="text-sm text-slate-400">No report filed yet.</p>;
-  const photos = ticket.attachments.filter((a) => a.document_category === 'JE_SITE_PHOTO');
-  const docs = ticket.attachments.filter((a) => a.document_category === 'JE_ESTIMATE_DOC');
+  // Only the files of THIS report version; earlier versions' files are listed apart below.
+  const mine = (a: { report_id?: number }) => a.report_id === r.id;
+  const photos = ticket.attachments.filter((a) => a.document_category === 'JE_SITE_PHOTO' && mine(a));
+  const docs = ticket.attachments.filter((a) => a.document_category === 'JE_ESTIMATE_DOC' && mine(a));
+  const earlier = ticket.attachments.filter(
+    (a) => (a.document_category === 'JE_SITE_PHOTO' || a.document_category === 'JE_ESTIMATE_DOC') && !mine(a));
   const long = r.nature_of_work.length > 240;
   return (
     <div className="space-y-4">
@@ -42,6 +46,12 @@ function ReportBody({ ticket }: { ticket: TicketDetail }) {
       {docs.length > 0 && (
         <div><Label>Documents ({docs.length})</Label><AttachmentList files={docs} /></div>
       )}
+      {earlier.length > 0 && (
+        <details className="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-500">Files from earlier report versions ({earlier.length})</summary>
+          <div className="mt-2"><AttachmentList files={earlier} /></div>
+        </details>
+      )}
     </div>
   );
 }
@@ -67,7 +77,7 @@ export function DecisionBrief({ ticket }: { ticket: TicketDetail }) {
         <div>
           <Label>Where</Label>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-800 dark:text-slate-200">
-            <span className="flex items-start gap-1.5"><MapPin size={15} className="mt-0.5 shrink-0 text-rose-500" />{ticket.location}</span>
+            <span className="flex items-start gap-1.5"><MapPin size={15} className="mt-0.5 shrink-0 text-rose-500" />{[ticket.campus && `${ticket.campus} campus`, ticket.landmark].filter(Boolean).join(' · ')}</span>
             <a href={mapsHref(ticket)} target="_blank" rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400">
               <ExternalLink size={12} /> Map
@@ -96,7 +106,7 @@ export function DecisionBrief({ ticket }: { ticket: TicketDetail }) {
   );
 }
 
-/** For desks without the brief (JE, Clerical, Accountant): just the filed report. */
+/** For desks without the brief (JE): just the filed report. */
 export function ReportCard({ ticket }: { ticket: TicketDetail }) {
   if (!ticket.report) return null;
   return <Card title="Inspection Report" icon={<ClipboardList size={14} />}><ReportBody ticket={ticket} /></Card>;

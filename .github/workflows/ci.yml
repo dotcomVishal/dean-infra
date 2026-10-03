@@ -21,7 +21,9 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: ci-throwaway
-          MYSQL_DATABASE: deanery_infra
+          MYSQL_DATABASE: infraseva_test
+          # Same zone as the real server (IST), so the UTC-connection test is meaningful.
+          TZ: Asia/Kolkata
         ports:
           - 3306:3306
         options: >-
@@ -40,7 +42,7 @@ jobs:
       DB_PORT: 3306
       DB_USER: root
       DB_PASSWORD: ci-throwaway
-      DB_NAME: deanery_infra
+      DB_NAME: infraseva_test
 
     steps:
       - uses: actions/checkout@v4

@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimit.js';
 import { requireRole } from '../middleware/rbac.js';
 import { requireMockTesting } from '../middleware/testRole.js';
 import {
@@ -17,12 +18,15 @@ import {
   createTestTicket,
   resetTestTicket,
   deleteTestTicket,
+  exportTicketsCsv,
+  deleteTicket,
+  restoreTicket,
 } from '../controllers/adminController.js';
 
 const router = express.Router();
 
 // ALL admin endpoints strictly enforce authentication and SYSADMIN role
-router.use(requireAuth);
+router.use(requireAuth, userLimiter);
 router.use(requireRole(['SYSADMIN']));
 
 // Overview & Metrics
@@ -30,8 +34,11 @@ router.get('/metrics', getAdminMetrics);
 
 // Tickets master control
 router.get('/tickets', getAllTickets);
+router.get('/tickets/export.csv', exportTicketsCsv);
 router.get('/tickets/:ticket_id/details', getTicketMasterDetails);
 router.post('/tickets/:ticket_id/override', overrideTicketStatus);
+router.delete('/tickets/:ticket_id', deleteTicket);
+router.post('/tickets/:ticket_id/restore', restoreTicket);
 
 // Users management
 router.get('/users', getAllUsers);

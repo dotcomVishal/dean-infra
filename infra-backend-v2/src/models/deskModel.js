@@ -15,13 +15,13 @@ const PERSON = 'u.id, u.name, u.email, u.role';
 export async function resolveAeForScope(connection, { department, campus }) {
   const [rows] = await connection.query(
     `SELECT ${PERSON}
-       FROM users u
-       JOIN user_scopes s ON s.user_id = u.id
+       FROM infra_users u
+       JOIN infra_user_scopes s ON s.user_id = u.id
       WHERE u.role = 'AE' AND u.is_active = TRUE
         AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))
       ORDER BY (s.campus = 'BOTH') ASC,
-        (SELECT COUNT(*) FROM tickets t
-          WHERE t.current_desk_user_id = u.id AND t.status IN ('UNASSIGNED', 'PENDING_AE_APPROVAL')) ASC,
+        (SELECT COUNT(*) FROM infra_tickets t
+          WHERE t.current_desk_user_id = u.id AND t.deleted_at IS NULL AND t.status IN ('UNASSIGNED', 'PENDING_AE_APPROVAL')) ASC,
         u.id ASC
       LIMIT 1`,
     [department, campus ?? null, campus ?? null]
@@ -32,7 +32,7 @@ export async function resolveAeForScope(connection, { department, campus }) {
 /** Last-resort desk owner when a desk has nobody active (plan.md §3.3). */
 export async function fallbackSysadmin(connection) {
   const [rows] = await connection.query(
-    `SELECT id, name, email, role FROM users WHERE role = 'SYSADMIN' AND is_active = TRUE ORDER BY id ASC LIMIT 1`
+    `SELECT id, name, email, role FROM infra_users WHERE role = 'SYSADMIN' AND is_active = TRUE ORDER BY id ASC LIMIT 1`
   );
   return rows[0] ?? null;
 }
@@ -41,14 +41,14 @@ export async function fallbackSysadmin(connection) {
 async function findPinned(connection, id, role) {
   if (id == null) return null;
   const [rows] = await connection.query(
-    `SELECT ${PERSON} FROM users u WHERE u.id = ? AND u.role = ? AND u.is_active = TRUE`, [id, role]);
+    `SELECT ${PERSON} FROM infra_users u WHERE u.id = ? AND u.role = ? AND u.is_active = TRUE`, [id, role]);
   return rows[0] ?? null;
 }
 
 // Mock tickets (Sysadmin test tickets) have one person at every desk: the creator.
 async function findMockOwner(connection, ticket) {
   const [rows] = await connection.query(
-    `SELECT ${PERSON} FROM users u WHERE u.id = ? AND u.is_active = TRUE`, [ticket.applicant_id]);
+    `SELECT ${PERSON} FROM infra_users u WHERE u.id = ? AND u.is_active = TRUE`, [ticket.applicant_id]);
   return rows[0] ?? null;
 }
 
@@ -59,7 +59,7 @@ export async function findDeskOwner(connection, ticket, desk) {
     case 'JE': {
       if (ticket.assigned_je_id == null) return null;
       const [rows] = await connection.query(
-        `SELECT ${PERSON} FROM users u WHERE u.id = ? AND u.role = 'JE' AND u.is_active = TRUE`,
+        `SELECT ${PERSON} FROM infra_users u WHERE u.id = ? AND u.role = 'JE' AND u.is_active = TRUE`,
         [ticket.assigned_je_id]
       );
       return rows[0] ?? null;
@@ -71,9 +71,9 @@ export async function findDeskOwner(connection, ticket, desk) {
       const pinned = await findPinned(connection, ticket.assigned_se_id, 'SE');
       if (pinned) return pinned;
       const [rows] = await connection.query(
-        `SELECT ${PERSON} FROM users u
+        `SELECT ${PERSON} FROM infra_users u
           WHERE u.role = 'SE' AND u.is_active = TRUE
-          ORDER BY EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?) DESC, u.id ASC
+          ORDER BY EXISTS (SELECT 1 FROM infra_user_scopes s WHERE s.user_id = u.id AND s.department = ?) DESC, u.id ASC
           LIMIT 1`,
         [ticket.department]
       );
@@ -82,7 +82,7 @@ export async function findDeskOwner(connection, ticket, desk) {
     case 'DEAN':
     case 'DIRECTOR': {
       const [rows] = await connection.query(
-        `SELECT ${PERSON} FROM users u WHERE u.role = ? AND u.is_active = TRUE ORDER BY u.id ASC LIMIT 1`,
+        `SELECT ${PERSON} FROM infra_users u WHERE u.role = ? AND u.is_active = TRUE ORDER BY u.id ASC LIMIT 1`,
         [desk]
       );
       return rows[0] ?? null;
@@ -101,10 +101,10 @@ async function holdsDesk(connection, ticket, desk, userId) {
   const pinned = desk === 'AE' ? ticket.assigned_ae_id : desk === 'SE' ? ticket.assigned_se_id : null;
   const scoped = desk === 'AE' && !(pinned != null && pinned === userId);
   const [rows] = await connection.query(
-    `SELECT 1 FROM users u
+    `SELECT 1 FROM infra_users u
       WHERE u.id = ? AND u.role = ? AND u.is_active = TRUE
         AND (? = FALSE OR EXISTS (
-              SELECT 1 FROM user_scopes s
+              SELECT 1 FROM infra_user_scopes s
                WHERE s.user_id = u.id AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))))`,
     [userId, desk, scoped, ticket.department, campus, campus]
   );
@@ -129,14 +129,14 @@ export async function reconcileDeskOwners(connection) {
   const [tickets] = await connection.query(
     `SELECT id, status, department, campus, applicant_id, is_mock, assigned_je_id, assigned_ae_id, assigned_se_id,
             current_desk_user_id
-       FROM tickets WHERE status IN (?)`,
+       FROM infra_tickets WHERE deleted_at IS NULL AND status IN (?)`,
     [DESK_STATUSES]
   );
   let fixed = 0;
   for (const t of tickets) {
     const id = await effectiveOwnerId(connection, t, deskForStatus(t.status));
     if (id !== t.current_desk_user_id) {
-      await connection.query('UPDATE tickets SET current_desk_user_id = ? WHERE id = ?', [id, t.id]);
+      await connection.query('UPDATE infra_tickets SET current_desk_user_id = ? WHERE id = ?', [id, t.id]);
       fixed += 1;
     }
   }
@@ -162,9 +162,9 @@ export async function findOwners(connection, ticket, desks) {
 /** An active JE whose scope covers this department and the ticket's campus (null campus = any). */
 export async function getEligibleJe(connection, jeId, department, campus = null) {
   const [rows] = await connection.query(
-    `SELECT ${PERSON} FROM users u
+    `SELECT ${PERSON} FROM infra_users u
       WHERE u.id = ? AND u.role = 'JE' AND u.is_active = TRUE
-        AND EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?
+        AND EXISTS (SELECT 1 FROM infra_user_scopes s WHERE s.user_id = u.id AND s.department = ?
                     AND (? IS NULL OR s.campus IN (?, 'BOTH')))`,
     [jeId, department, campus, campus]
   );
@@ -186,7 +186,7 @@ export async function loadAssignees(connection, ticketRow, staff) {
   let holder = null;
   if (ticketRow.current_desk_user_id != null) {
     const [rows] = await connection.query(
-      'SELECT id, name FROM users WHERE id = ?', [ticketRow.current_desk_user_id]);
+      'SELECT id, name FROM infra_users WHERE id = ?', [ticketRow.current_desk_user_id]);
     holder = rows[0] ?? null;
   }
   out.current = desk && holder ? { desk, id: holder.id, name: holder.name } : null;

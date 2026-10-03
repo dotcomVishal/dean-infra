@@ -4,6 +4,7 @@
 // Do not point it at a database holding real pending notifications: the worker pass
 // would mark them sent through the fake mailer.
 import 'dotenv/config';
+import '../src/config/requireTestDb.js';
 import http from 'node:http';
 import pool from '../src/config/db.js';
 import { processDueNotifications, MAX_ATTEMPTS } from '../src/cron/emailReminders.js';
@@ -42,8 +43,8 @@ const act = async (user, ticketId, body) => {
 const created = [];
 const mkTicket = async (applicantId, jeId, deskId, status, extra = {}) => {
   const [r] = await pool.query(
-    `INSERT INTO tickets (applicant_id, assigned_je_id, current_desk_user_id, department, campus, title, description, location, landmark, status)
-     VALUES (?, ?, ?, 'Civil', 'NORTH', ?, 'desc', 'loc', 'Block A', ?)`,
+    `INSERT INTO infra_tickets (applicant_id, assigned_je_id, current_desk_user_id, department, campus, title, description, landmark, status)
+     VALUES (?, ?, ?, 'Civil', 'NORTH', ?, 'desc', 'Block A', ?)`,
     [applicantId, jeId, deskId, extra.title ?? 'Phase5 test', status]);
   created.push(r.insertId);
   return r.insertId;
@@ -58,12 +59,12 @@ async function run() {
   console.log('\n=== Phase 5/6: outbox, reminders, sanitized mail, attachments (live DB, fake mailer) ===');
   // DATETIME has 1 s resolution: keep the fake clock on whole seconds.
   const T0 = new Date(Math.floor(Date.now() / 1000) * 1000);
-  const deepak = await one("SELECT id, name, email, role, department FROM users WHERE email = 'deepak.chauhan@campus.edu'");
-  const kapil = await one("SELECT id, name, email, role, department FROM users WHERE email = 'kapil.verma@campus.edu'");
-  const applicant = await one("SELECT id, name, email, role, department FROM users WHERE role = 'APPLICANT' ORDER BY id LIMIT 1");
+  const deepak = await one("SELECT id, name, email, role, department FROM infra_users WHERE email = 'deepak.chauhan@campus.edu'");
+  const kapil = await one("SELECT id, name, email, role, department FROM infra_users WHERE email = 'kapil.verma@campus.edu'");
+  const applicant = await one("SELECT id, name, email, role, department FROM infra_users WHERE role = 'APPLICANT' ORDER BY id LIMIT 1");
   if (!deepak || !kapil || !applicant) throw new Error('Run scripts/seed-staff.mjs first (and have one APPLICANT user).');
   const T = { department: 'Civil', campus: 'NORTH', assigned_je_id: deepak.id };
-  const ae = await one('SELECT id, name, email, role, department FROM users WHERE id = ?', [(await findDeskOwner(pool, T, 'AE')).id]);
+  const ae = await one('SELECT id, name, email, role, department FROM infra_users WHERE id = ?', [(await findDeskOwner(pool, T, 'AE')).id]);
   const sent = [];
   const send = async (m) => { sent.push(m); };
   const pass_ = (t) => processDueNotifications({ now: new Date(T0.getTime() + t), send });
@@ -72,7 +73,7 @@ async function run() {
   await enqueueCreated(id, { status: 'ASSIGNED_TO_JE', deskUser: deepak }, T0);
 
   await ok('creation queues 1 JE reminder series (instant) + 1 sanitized applicant mail, nothing sent inline', async () => {
-    const rows = await all('SELECT kind, audience, desk, status, reminder_no FROM notifications WHERE ticket_id = ? ORDER BY id', [id]);
+    const rows = await all('SELECT kind, audience, desk, status, reminder_no FROM infra_notifications WHERE ticket_id = ? ORDER BY id', [id]);
     eq(rows.map((r) => `${r.kind}/${r.audience}/${r.desk}/${r.status}/${r.reminder_no}`),
       ['REMINDER/STAFF/JE/PENDING/0', 'EMAIL/APPLICANT/null/PENDING/0'], 'rows');
     eq(sent.length, 0, 'no SMTP call yet');
@@ -89,7 +90,7 @@ async function run() {
       eq(ap.subject.includes(bad) || ap.text.includes(bad), false, `applicant mail must not contain "${bad}"`);
     }
     eq(je.cc, undefined, 'no AE copy on #1');
-    const r = await one("SELECT reminder_no, next_due_at FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER'", [id]);
+    const r = await one("SELECT reminder_no, next_due_at FROM infra_notifications WHERE ticket_id = ? AND kind = 'REMINDER'", [id]);
     eq(r.reminder_no, 1, 'reminder_no'); eq(new Date(r.next_due_at).getTime(), T0.getTime() + 12 * H, 'next due +12h');
   });
 
@@ -101,7 +102,7 @@ async function run() {
     eq((await pass_(48 * H)).sent, 0, 'nothing between #3 and #4');
     eq((await pass_(72 * H)).sent, 1, '#4'); eq(sent.at(-1).cc, ae.email, '#4 copies AE');
     eq((await pass_(96 * H)).sent, 1, '#5'); eq(sent.at(-1).cc, ae.email, '#5 copies AE');
-    const n = await one("SELECT COUNT(*) AS c FROM audit_logs WHERE ticket_id = ? AND action = 'REMINDER_SENT'", [id]);
+    const n = await one("SELECT COUNT(*) AS c FROM infra_audit_logs WHERE ticket_id = ? AND action = 'REMINDER_SENT'", [id]);
     eq(Number(n.c), 5, 'REMINDER_SENT audit rows (#1..#5)');
   });
 
@@ -119,7 +120,7 @@ async function run() {
       body: { nature_of_work: 'Replace sheet', estimated_amount: '15000' },
     }, res);
     eq(res.statusCode, 200, `submitReport http (${JSON.stringify(res.body)})`);
-    const live = await all("SELECT id FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id]);
+    const live = await all("SELECT id FROM infra_notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id]);
     eq(live.length, 0, 'no live reminders');
     sent.length = 0;
     await processDueNotifications({ now: new Date(T0.getTime() + 500 * H), send });
@@ -132,14 +133,14 @@ async function run() {
 
   await ok('retry with backoff, then FAILED after MAX_ATTEMPTS; other mail unaffected', async () => {
     const [ins] = await pool.query(
-      `INSERT INTO notifications (ticket_id, to_user_id, kind, audience, subject, body, next_due_at) VALUES (?, ?, 'EMAIL', 'STAFF', 's', 'b', ?)`,
+      `INSERT INTO infra_notifications (ticket_id, to_user_id, kind, audience, subject, body, next_due_at) VALUES (?, ?, 'EMAIL', 'STAFF', 's', 'b', ?)`,
       [id, deepak.id, T0]);
     const rowId = ins.insertId;
     const boom = async () => { throw new Error('smtp down'); };
     let clock = T0.getTime() + 1000 * H;
     for (let i = 1; i <= MAX_ATTEMPTS; i++) {
       await processDueNotifications({ now: new Date(clock), send: boom });
-      const r = await one('SELECT status, attempts, last_error, next_due_at FROM notifications WHERE id = ?', [rowId]);
+      const r = await one('SELECT status, attempts, last_error, next_due_at FROM infra_notifications WHERE id = ?', [rowId]);
       eq(r.attempts, i, `attempts after failure ${i}`);
       if (i < MAX_ATTEMPTS) {
         eq(r.status, 'PENDING', 'still pending');
@@ -163,24 +164,24 @@ async function run() {
     eq(sent.filter((m) => m.to === ae.email && m.subject.includes('Reminder 2')).length, 1, 'AE reminded at +12h');
     const r = await act(ae, id2, { action: 'ASSIGN_JE', assignee_id: deepak.id });
     eq(r.statusCode, 200, `assign (${JSON.stringify(r.body)})`);
-    const live = await all("SELECT desk, to_user_id FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id2]);
+    const live = await all("SELECT desk, to_user_id FROM infra_notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id2]);
     eq(live.map((x) => `${x.desk}:${x.to_user_id}`), [`JE:${deepak.id}`], 'only the new JE series is live');
   });
 
   await ok('worker cancels a reminder whose stage or recipient no longer applies (belt and braces)', async () => {
     const id3 = await mkTicket(applicant.id, deepak.id, deepak.id, 'ASSIGNED_TO_JE');
     await enqueueCreated(id3, { status: 'ASSIGNED_TO_JE', deskUser: deepak }, T0);
-    await pool.query("UPDATE tickets SET status = 'PENDING_SE_APPROVAL' WHERE id = ?", [id3]); // moved without going through the notifier
+    await pool.query("UPDATE infra_tickets SET status = 'PENDING_SE_APPROVAL' WHERE id = ?", [id3]); // moved without going through the notifier
     sent.length = 0;
     await pass_(0);
     eq(sent.filter((m) => m.to === deepak.email && m.subject.includes('New Ticket')).length, 0, 'no JE mail');
-    eq((await one("SELECT status FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER'", [id3])).status, 'CANCELLED', 'cancelled');
+    eq((await one("SELECT status FROM infra_notifications WHERE ticket_id = ? AND kind = 'REMINDER'", [id3])).status, 'CANCELLED', 'cancelled');
   });
 
   // ---- Phase 6: attachments ---------------------------------------------------------
   const idA = await mkTicket(applicant.id, deepak.id, deepak.id, 'ASSIGNED_TO_JE');
   const addAtt = async (cat, url, by) => (await pool.query(
-    'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)', [idA, url, by, cat]))[0].insertId;
+    'INSERT INTO infra_attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)', [idA, url, by, cat]))[0].insertId;
   const evidence = await addAtt('APPLICANT_EVIDENCE', `/uploads/tickets/${idA}/applicant_evidence/1-2-leak.jpg`, applicant.id);
   const photo = await addAtt('JE_SITE_PHOTO', `/uploads/tickets/${idA}/je_reports/site_photos/1-2-site.png`, deepak.id);
   const doc = await addAtt('JE_ESTIMATE_DOC', `/uploads/tickets/${idA}/je_reports/estimate_docs/1-2-est.pdf`, deepak.id);
@@ -195,7 +196,7 @@ async function run() {
     eq((await fetchAtt(applicant, photo)).statusCode, 404, 'photo hidden'); eq((await fetchAtt(applicant, doc)).statusCode, 404, 'doc hidden');
   });
   await ok('attachments: assigned JE + AE + SYSADMIN read all; pdf is forced to download', async () => {
-    const admin = await one("SELECT id, role FROM users WHERE role = 'SYSADMIN' AND is_active = TRUE LIMIT 1");
+    const admin = await one("SELECT id, role FROM infra_users WHERE role = 'SYSADMIN' AND is_active = TRUE LIMIT 1");
     for (const u of [deepak, ae, admin].filter(Boolean)) {
       for (const a of [evidence, photo, doc]) eq((await fetchAtt(u, a)).statusCode, 200, `${u.role} reads ${a}`);
     }
@@ -203,7 +204,7 @@ async function run() {
   });
   await ok('attachments: unrelated JE and out-of-scope AE get 404; unknown / malformed id 404', async () => {
     eq((await fetchAtt(kapil, evidence)).statusCode, 404, 'other JE');
-    const otherAe = await one("SELECT id, name, email, role, department FROM users WHERE email = 'neeraj.chauhan@campus.edu'");
+    const otherAe = await one("SELECT id, name, email, role, department FROM infra_users WHERE email = 'neeraj.chauhan@campus.edu'");
     eq((await fetchAtt(otherAe, evidence)).statusCode, 404, 'Electrical AE on Civil ticket');
     eq((await fetchAtt(deepak, 99999999)).statusCode, 404, 'unknown'); eq((await fetchAtt(deepak, '1abc')).statusCode, 404, 'malformed');
   });
@@ -229,6 +230,6 @@ async function run() {
 run()
   .catch((e) => { console.error('Fatal:', e); fail++; })
   .finally(async () => {
-    for (const id of created) await pool.query('DELETE FROM tickets WHERE id = ?', [id]).catch((e) => console.error('cleanup failed', e.message));
+    for (const id of created) await pool.query('DELETE FROM infra_tickets WHERE id = ?', [id]).catch((e) => console.error('cleanup failed', e.message));
     process.exit(fail > 0 ? 1 : 0);
   });

@@ -5,7 +5,7 @@ import { useThemeStore } from '../store/themeStore';
 import { 
   LayoutDashboard, PlusCircle, ClipboardList, 
   CheckSquare, FlaskConical, FilePlus2, Menu, Sun, Moon, X, LogOut,
-  FileSpreadsheet, IndianRupee, Users, History
+  FileSpreadsheet, Users, History
 } from 'lucide-react';
 import PwaInstallPrompt from './PwaInstallPrompt';
 
@@ -43,16 +43,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     } else if (['AE', 'SE', 'DEAN', 'DIRECTOR'].includes(role)) {
       base.push(
         { name: 'Approvals', path: '/approvals', icon: CheckSquare },
-        { name: 'Tickets', path: '/tickets', icon: ClipboardList }
-      );
-    } else if (role === 'CLERICAL') {
-      base.push(
-        { name: 'Tenders', path: '/clerical', icon: FileSpreadsheet },
-        { name: 'Tickets', path: '/tickets', icon: ClipboardList }
-      );
-    } else if (role === 'ACCOUNTANT') {
-      base.push(
-        { name: 'Bills', path: '/finance', icon: IndianRupee },
         { name: 'Tickets', path: '/tickets', icon: ClipboardList }
       );
     } else if (role === 'SYSADMIN') {

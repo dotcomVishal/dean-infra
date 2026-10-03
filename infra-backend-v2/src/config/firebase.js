@@ -10,9 +10,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // next to the backend root (S11).
 const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(__dirname, '../../serviceAccountKey.json');
 
+// Tests run without a Firebase key (CI has none). They replace `auth.verifyIdToken`
+// themselves; the stub refuses everything until they do.
+const useStub = process.env.NODE_ENV === 'test' && !fs.existsSync(keyPath);
+
 // Fail fast, fail loud, fail ACTIONABLE. A bare readFileSync here throws a raw
 // ENOENT stack trace that tells a new contributor nothing.
-if (!fs.existsSync(keyPath)) {
+if (!useStub && !fs.existsSync(keyPath)) {
   console.error(`
 ============================================================
  FIREBASE SERVICE ACCOUNT KEY NOT FOUND
@@ -36,13 +40,17 @@ if (!fs.existsSync(keyPath)) {
   process.exit(1);
 }
 
-let serviceAccount;
-try {
-  serviceAccount = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
-} catch (err) {
-  console.error(`[firebase] ${keyPath} exists but is not valid JSON: ${err.message}`);
-  process.exit(1);
+let authInstance;
+if (useStub) {
+  authInstance = { verifyIdToken: async () => { throw new Error('firebase stub: no verifyIdToken installed'); } };
+} else {
+  let serviceAccount;
+  try {
+    serviceAccount = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+  } catch (err) {
+    console.error(`[firebase] ${keyPath} exists but is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
+  authInstance = getAuth(initializeApp({ credential: cert(serviceAccount) }));
 }
-
-const app = initializeApp({ credential: cert(serviceAccount) });
-export const auth = getAuth(app);
+export const auth = authInstance;

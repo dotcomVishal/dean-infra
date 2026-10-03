@@ -11,6 +11,7 @@
 // Run with:
 //   node scripts/test-assignment.mjs
 import 'dotenv/config';
+import '../src/config/requireTestDb.js';
 import pool from '../src/config/db.js';
 import { pickAvailableJe, assignTicket } from '../src/services/assignment.js';
 
@@ -31,27 +32,27 @@ function eq(a, b, msg) {
 }
 
 async function userId(email) {
-  const [rows] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+  const [rows] = await pool.query('SELECT id FROM infra_users WHERE email = ?', [email]);
   if (rows.length === 0) throw new Error(`Fixture user not found: ${email} (run scripts/seed-staff.mjs first)`);
   return rows[0].id;
 }
 
 async function withLeave(userIdValue, fn) {
   const [result] = await pool.query(
-    `INSERT INTO user_availability (user_id, start_at, end_at, reason, created_by)
+    `INSERT INTO infra_user_availability (user_id, start_at, end_at, reason, created_by)
      VALUES (?, NOW() - INTERVAL 1 HOUR, NOW() + INTERVAL 1 DAY, 'test-assignment.mjs', ?)`,
     [userIdValue, userIdValue]
   );
   try {
     await fn();
   } finally {
-    await pool.query('DELETE FROM user_availability WHERE id = ?', [result.insertId]);
+    await pool.query('DELETE FROM infra_user_availability WHERE id = ?', [result.insertId]);
   }
 }
 
 async function resetLastAssigned(...emails) {
   for (const email of emails) {
-    await pool.query('UPDATE users SET last_assigned_at = NULL WHERE email = ?', [email]);
+    await pool.query('UPDATE infra_users SET last_assigned_at = NULL WHERE email = ?', [email]);
   }
 }
 

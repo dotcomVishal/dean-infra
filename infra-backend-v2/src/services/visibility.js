@@ -12,15 +12,10 @@
 //  (applicant view) and hold a staff role that covers it (staff view). The
 //  viewer sees the UNION of the two.
 // ============================================================
-import { DESK_RANK, STATUS, canReadMessage } from '../config/workflow.js';
+import { DESK_RANK, STATUS, POST_APPROVAL_STATUSES, canReadMessage } from '../config/workflow.js';
 
 // AUDIT visibility = executive level: SE and above. (Nothing writes it yet.)
 const AUTHORITY_MIN_RANK = DESK_RANK.SE;
-
-export const POST_APPROVAL_STATUSES = Object.freeze([
-  STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.WORK_IN_PROGRESS,
-  STATUS.WORK_COMPLETED, STATUS.CLOSED,
-]);
 
 // ---- stage in plain words (what an applicant may know) -------------------------
 const STAGE_LABEL = Object.freeze({
@@ -33,12 +28,17 @@ const STAGE_LABEL = Object.freeze({
   [STATUS.PENDING_DIRECTOR_APPROVAL]: 'Under review',
   [STATUS.APPROVED_FOR_TENDERING]:    'Approved — tendering',
   [STATUS.TENDER_PUBLISHED]:          'Approved — tendering',
+  [STATUS.TECHNICAL_EVALUATION]:      'Approved — tendering',
+  [STATUS.FINANCIAL_EVALUATION]:      'Approved — tendering',
   [STATUS.WORK_IN_PROGRESS]:          'Work in progress',
-  [STATUS.WORK_COMPLETED]:            'Work done — please verify',
+  [STATUS.WORK_COMPLETED]:            'Resolved — please confirm',
   [STATUS.CLOSED]:                    'Completed',
   [STATUS.DENIED]:                    'Rejected',
 });
-export const stageLabel = (status) => STAGE_LABEL[status] ?? 'In progress';
+export const stageLabel = (status, resolutionKind = null) =>
+  status === STATUS.WORK_COMPLETED && resolutionKind === 'TENDER_CANCELLED'
+    ? 'Tender cancelled — please acknowledge'
+    : STAGE_LABEL[status] ?? 'In progress';
 
 // ---- viewer ---------------------------------------------------------------------
 
@@ -75,11 +75,11 @@ export async function loadViewer(connection, user, ticket) {
   const facts = {};
   if (user.role === 'AE') {
     const [rows] = await connection.query(
-      'SELECT department, campus FROM user_scopes WHERE user_id = ?', [user.id]);
+      'SELECT department, campus FROM infra_user_scopes WHERE user_id = ?', [user.id]);
     facts.scopes = rows;
   } else if (user.role === 'JE' && ticket.assigned_je_id !== user.id) {
     const [rows] = await connection.query(
-      'SELECT 1 FROM reports WHERE ticket_id = ? AND je_id = ? LIMIT 1', [ticket.id, user.id]);
+      'SELECT 1 FROM infra_reports WHERE ticket_id = ? AND je_id = ? LIMIT 1', [ticket.id, user.id]);
     facts.filedReport = rows.length > 0;
   }
   return buildViewer(user, ticket, facts);
@@ -94,8 +94,6 @@ export function staffRole(viewer, ticket) {
       return viewer.isAssignedJe || viewer.wasJe ? 'JE' : null;
     case 'AE':
       return viewer.aeInScope ? 'AE' : null;
-    case 'CLERICAL': case 'ACCOUNTANT':
-      return POST_APPROVAL_STATUSES.includes(ticket.status) ? viewer.role : null;
     default:
       return null;
   }
@@ -114,10 +112,9 @@ export function capabilities(viewer, ticket) {
     staff,
     rank,
     identities: staff !== null,
-    applicantContact: staff !== null && !['CLERICAL', 'ACCOUNTANT'].includes(staff),
+    applicantContact: staff !== null,
     report: staff !== null,
     tenders: staff !== null,
-    bills: staff !== null && staff !== 'JE',
     reminders: staff === 'SYSADMIN' || rank >= DESK_RANK.AE,
   };
 }
@@ -139,13 +136,10 @@ export function canViewAttachment(viewer, ticket, att) {
       return caps.applicantView || caps.staff !== null;
     case 'JE_SITE_PHOTO':
     case 'JE_ESTIMATE_DOC':
-    case 'CLERK_TENDER_DOC':
     case 'DESK_DOC': // approval-chain files: flow back down to the JE, never to the applicant
       return caps.staff !== null;
     case 'WORK_DOC': // execution / completion proof: the applicant verifies against it
       return caps.applicantView || caps.staff !== null;
-    case 'FINANCE_SANCTION':
-      return caps.bills;
     case 'AUTHORITY_REMARKS':
       // Readable by the uploader's rank and above (plus SYSADMIN); never by JE/applicant.
       return caps.staff === 'SYSADMIN'
@@ -165,8 +159,6 @@ export function uploadCategory(viewer, ticket) {
   switch (staffRole(viewer, ticket)) {
     case null:         return 'APPLICANT_EVIDENCE';
     case 'JE':         return POST_APPROVAL_STATUSES.includes(ticket.status) ? 'WORK_DOC' : 'JE_ESTIMATE_DOC';
-    case 'CLERICAL':   return 'CLERK_TENDER_DOC';
-    case 'ACCOUNTANT': return 'FINANCE_SANCTION';
     default:           return 'DESK_DOC'; // AE / SE / Dean / Director / Sysadmin
   }
 }
@@ -191,15 +183,11 @@ const NEUTRAL_AUDIT = Object.freeze({
   APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REJECTED: 'Rejected',
   TENDER_PUBLISHED: 'Tender published', WORK_AWARDED: 'Work awarded', WORK_COMPLETED: 'Work completed',
   WORK_REOPENED: 'Applicant reports work not done',
-  BILL_RECORDED: 'Bill recorded', BILL_UPDATED: 'Bill updated', CLOSED: 'Closed', OVERRIDE: 'Administrative update',
+  CLOSED: 'Closed', OVERRIDE: 'Administrative update', FILES_ADDED: 'Files added',
   PASSED: 'Forwarded for review', RETURNED: 'Returned to JE', DENIED: 'Rejected',
 });
 // Free text a JE may read: their own, and system lines that carry no authority remark.
-const JE_READABLE_REMARK_ACTIONS = new Set(['CREATED', 'ASSIGNED', 'SUBMITTED', 'REMINDER_SENT', 'WORK_REOPENED', 'CLOSED']);
-// Post-approval trail, the only part of the audit log Clerical/Accountant see.
-const FINANCE_AUDIT_ACTIONS = new Set([
-  'APPROVED', 'TENDER_PUBLISHED', 'WORK_AWARDED', 'WORK_COMPLETED', 'WORK_REOPENED', 'BILL_RECORDED', 'BILL_UPDATED', 'CLOSED',
-]);
+const JE_READABLE_REMARK_ACTIONS = new Set(['CREATED', 'ASSIGNED', 'SUBMITTED', 'REMINDER_SENT', 'WORK_REOPENED', 'CLOSED', 'FILES_ADDED']);
 
 /**
  * @param rows  { action, remarks, created_at, actor_name, actor_role, user_id, visibility, from_desk, to_desk }
@@ -217,12 +205,6 @@ export function filterAudit(viewer, ticket, rows) {
   });
 
   if (staff === 'SYSADMIN') return rows.map((r) => shape(r, { remarks: r.remarks, withName: true }));
-
-  if (staff === 'CLERICAL' || staff === 'ACCOUNTANT') {
-    return rows
-      .filter((r) => FINANCE_AUDIT_ACTIONS.has(r.action) && (r.visibility ?? 'ALL') === 'ALL')
-      .map((r) => shape(r, { remarks: r.remarks, withName: true }));
-  }
 
   const rank = caps.rank;
   const visible = rows.filter((r) => {
@@ -251,25 +233,41 @@ export function filterAudit(viewer, ticket, rows) {
 // ---- ticket row + whole details view ---------------------------------------------------
 
 const APPLICANT_FIELDS = [
-  'id', 'title', 'type', 'category', 'priority', 'department', 'description', 'location',
-  'campus', 'building', 'landmark', 'lat', 'lng', 'contact_phone', 'status', 'created_at', 'updated_at',
+  'id', 'title', 'type', 'priority', 'department', 'description',
+  'campus', 'landmark', 'lat', 'lng', 'contact_phone', 'status', 'created_at', 'updated_at',
+  'resolution_kind', 'resolved_at',
 ];
 
 /** Allow-list projection for a viewer with no staff view: nothing that names a person. */
 export function applicantTicket(ticket) {
   const out = {};
   for (const f of APPLICANT_FIELDS) if (ticket[f] !== undefined) out[f] = ticket[f];
-  out.stage_label = stageLabel(ticket.status);
+  out.stage_label = stageLabel(ticket.status, ticket.resolution_kind);
   return out;
 }
 
 const basename = (url) => String(url ?? '').split('/').pop();
-// Uploads are stored as "<timestamp>-<random>-<original name>".
-const displayName = (url) => basename(url).replace(/^\d+-\d+-/, '');
+// The stored file name carries no user text; the name the uploader chose is `original_name`.
+const displayName = (att) => att.original_name || basename(att.file_url);
+
+/**
+ * Who attached a file, for the "by person and desk" listing. Every staff viewer, the JE included,
+ * sees the person's name. The applicant never gets a staff name or desk: only their own uploads
+ * are labelled.
+ */
+function attachmentOrigin(caps, a) {
+  if (caps.staff === null) return a.uploader_desk === 'APPLICANT' ? { uploader_desk: 'APPLICANT' } : {};
+  return {
+    uploader_desk: a.uploader_desk ?? null,
+    uploader_name: a.uploader_name ?? null,
+    audit_log_id: a.audit_log_id ?? null,
+    audit_action: a.audit_action ?? null,
+  };
+}
 
 /**
  * Builds the whole details payload for one viewer.
- * @param data { attachments (with uploader_role), reports (newest first), tenders, bills, auditLogs, messages }
+ * @param data { attachments (with uploader_role), reports (newest first), tenders, auditLogs, messages }
  * @returns null when the viewer may not see the ticket at all.
  */
 export function buildTicketDetails(viewer, ticket, data) {
@@ -285,7 +283,7 @@ export function buildTicketDetails(viewer, ticket, data) {
       delete out.applicant_phone; delete out.applicant_email; delete out.contact_phone;
     }
   }
-  out.stage_label = stageLabel(ticket.status);
+  out.stage_label = stageLabel(ticket.status, ticket.resolution_kind);
 
   // Files are never addressed by path: the client only ever gets the
   // authenticated endpoint (S2).
@@ -293,23 +291,16 @@ export function buildTicketDetails(viewer, ticket, data) {
     .filter((a) => canViewAttachment(viewer, ticket, a))
     .map((a) => ({
       id: a.id, document_category: a.document_category, created_at: a.created_at,
-      file_name: displayName(a.file_url), download_url: `/api/attachments/${a.id}`,
+      file_name: displayName(a), download_url: `/api/attachments/${a.id}`,
       ...(a.report_id != null ? { report_id: a.report_id } : {}),
+      ...attachmentOrigin(caps, a),
     }));
   out.report = caps.report && data.reports.length > 0 ? data.reports[0] : null;
   out.tenders = caps.tenders ? data.tenders : [];
-  out.bills = caps.bills ? data.bills : [];
   out.audit_logs = filterAudit(viewer, ticket, data.auditLogs);
   out.messages = filterMessages(viewer, ticket, data.messages);
   out.reminder_count = caps.reminders || caps.staff === 'JE'
     ? data.auditLogs.filter((r) => r.action === 'REMINDER_SENT' && (caps.reminders || r.user_id === viewer.id)).length
     : null;
   return out;
-}
-
-/** Queue rows: Clerical/Accountant never see the applicant's contact details. */
-export function redactQueueRow(viewer, row) {
-  if (viewer.role !== 'CLERICAL' && viewer.role !== 'ACCOUNTANT') return row;
-  const { applicant_phone, applicant_email, contact_phone, ...rest } = row;
-  return rest;
 }

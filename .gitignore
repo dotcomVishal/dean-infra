@@ -52,3 +52,6 @@ plan2.md
 # ---- Deploy artefacts (update.sh) ----
 backups/
 .update.lock
+
+# ---- Internal planning (describes the live system); never commit ----
+/Agent/

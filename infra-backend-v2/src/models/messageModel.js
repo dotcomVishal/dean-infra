@@ -7,7 +7,7 @@ export async function insertMessages(connection, { ticketId, auditLogId, authorU
   const ids = [];
   for (const s of specs) {
     const [result] = await connection.query(
-      `INSERT INTO ticket_messages
+      `INSERT INTO infra_ticket_messages
          (ticket_id, audit_log_id, author_user_id, author_desk, to_user_id, to_desk,
           kind, body, visible_from_rank, in_reply_to)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -21,7 +21,7 @@ export async function insertMessages(connection, { ticketId, auditLogId, authorU
 
 export async function getMessage(connection, id) {
   const [rows] = await connection.query(
-    'SELECT id, ticket_id, author_desk, to_desk, kind, in_reply_to FROM ticket_messages WHERE id = ?',
+    'SELECT id, ticket_id, author_desk, to_desk, kind, in_reply_to FROM infra_ticket_messages WHERE id = ?',
     [id]
   );
   return rows[0] ?? null;
@@ -46,9 +46,9 @@ export async function listForTicket(connection, ticketId) {
   const [rows] = await connection.query(
     `SELECT m.id, m.kind, m.body, m.author_desk, m.to_desk, m.visible_from_rank, m.in_reply_to, m.created_at,
             a.name AS author_name, t.name AS to_name
-       FROM ticket_messages m
-       JOIN users a ON a.id = m.author_user_id
-       LEFT JOIN users t ON t.id = m.to_user_id
+       FROM infra_ticket_messages m
+       JOIN infra_users a ON a.id = m.author_user_id
+       LEFT JOIN infra_users t ON t.id = m.to_user_id
       WHERE m.ticket_id = ?
       ORDER BY m.id ASC`,
     [ticketId]

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { api } from '../../services/api';
+import { isPostApproval } from '../../lib/ticketUi';
 import DeskBoard from '../../components/DeskBoard';
 
 export interface JeTicket {
@@ -19,11 +20,16 @@ export interface JeTicket {
   title?: string;
   type: 'recurring' | 'non-recurring';
   description: string;
-  location: string;
+  landmark?: string | null;
+  campus?: string | null;
   status: string;
   created_at: string;
   estimated_amount?: number | string | null;
   nature_of_work?: string | null;
+  applicant_sent_back_at?: string | null;
+  reopen_count?: number;
+  sent_back_comment?: string | null;
+  resolution_kind?: string | null;
 }
 
 export default function JeDashboard() {
@@ -33,7 +39,7 @@ export default function JeDashboard() {
   const [tickets, setTickets] = useState<JeTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'inspections' | 'approvals' | 'tenders'>('inspections');
+  const [activeTab, setActiveTab] = useState<'sent_back' | 'inspections' | 'approvals' | 'tenders' | 'resolved'>('inspections');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'recurring' | 'non-recurring'>('all');
 
@@ -66,15 +72,13 @@ export default function JeDashboard() {
     t.status.startsWith('PENDING_')
   );
 
-  // Tab 3: Active Tenders (APPROVED_FOR_TENDERING, TENDER_PUBLISHED, WORK_IN_PROGRESS, CLOSED)
-  const activeTenders = tickets.filter(
-    (t) =>
-      t.status === 'APPROVED_FOR_TENDERING' ||
-      t.status === 'TENDER_PUBLISHED' ||
-      t.status === 'WORK_IN_PROGRESS' ||
-      t.status === 'WORK_COMPLETED' ||
-      t.status === 'CLOSED'
-  );
+  // Tab 3: Active Tenders: every post-approval status except the resolved ones, which have their own tab.
+  const activeTenders = tickets.filter((t) => isPostApproval(t.status) && t.status !== 'WORK_COMPLETED');
+
+  // Resolved, waiting for the confirmer. And "sent back": the confirmer said it was not resolved.
+  const resolvedWaiting = tickets.filter((t) => t.status === 'WORK_COMPLETED');
+  const sentBack = tickets.filter(
+    (t) => t.applicant_sent_back_at && !['WORK_COMPLETED', 'CLOSED', 'DENIED'].includes(t.status));
 
   const getFilteredList = (list: JeTicket[]) => {
     const term = search.toLowerCase();
@@ -84,7 +88,7 @@ export default function JeDashboard() {
         ticket.description.toLowerCase().includes(term) ||
         ticket.id.toString().includes(term) ||
         ticket.applicant_name.toLowerCase().includes(term) ||
-        (ticket.location && ticket.location.toLowerCase().includes(term));
+        (ticket.landmark && ticket.landmark.toLowerCase().includes(term));
 
       const matchesType = typeFilter === 'all' || ticket.type === typeFilter;
       return matchesSearch && matchesType;
@@ -147,10 +151,17 @@ export default function JeDashboard() {
             Work In Progress
           </span>
         );
+      case 'TECHNICAL_EVALUATION':
+      case 'FINANCIAL_EVALUATION':
+        return (
+          <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-cyan-100 dark:bg-cyan-900/30 text-cyan-800 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800/50">
+            {status === 'TECHNICAL_EVALUATION' ? 'Technical Evaluation' : 'Financial Evaluation'}
+          </span>
+        );
       case 'WORK_COMPLETED':
         return (
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 border-amber-200 dark:border-amber-800/50">
-            Awaiting Applicant
+            Awaiting Confirmation
           </span>
         );
       case 'CLOSED':
@@ -177,10 +188,14 @@ export default function JeDashboard() {
   }
 
   const currentDisplayList =
-    activeTab === 'inspections'
+    activeTab === 'sent_back'
+      ? getFilteredList(sentBack)
+      : activeTab === 'inspections'
       ? getFilteredList(pendingInspections)
       : activeTab === 'approvals'
       ? getFilteredList(awaitingApproval)
+      : activeTab === 'resolved'
+      ? getFilteredList(resolvedWaiting)
       : getFilteredList(activeTenders);
 
   return (
@@ -288,7 +303,20 @@ export default function JeDashboard() {
       <div className="bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl p-4 shadow-sm space-y-3">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           {/* Tabs */}
-          <div className="flex p-1 bg-slate-100 dark:bg-slate-900/60 rounded-xl">
+          <div className="flex flex-wrap p-1 bg-slate-100 dark:bg-slate-900/60 rounded-xl">
+            <button
+              onClick={() => setActiveTab('sent_back')}
+              className={`px-4 py-2 text-xs md:text-sm font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'sent_back'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+              }`}
+            >
+              <span>Sent back</span>
+              <span className="px-1.5 py-0.2 bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300 text-[10px] font-bold rounded-full">
+                {sentBack.length}
+              </span>
+            </button>
             <button
               onClick={() => setActiveTab('inspections')}
               className={`px-4 py-2 text-xs md:text-sm font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
@@ -330,6 +358,19 @@ export default function JeDashboard() {
                 {activeTenders.length}
               </span>
             </button>
+            <button
+              onClick={() => setActiveTab('resolved')}
+              className={`px-4 py-2 text-xs md:text-sm font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'resolved'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+              }`}
+            >
+              <span>Resolved, awaiting confirmation</span>
+              <span className="px-1.5 py-0.2 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-[10px] font-bold rounded-full">
+                {resolvedWaiting.length}
+              </span>
+            </button>
           </div>
 
           {/* Search & Filter */}
@@ -367,11 +408,7 @@ export default function JeDashboard() {
         ) : (
           currentDisplayList.map((ticket) => {
             const isReturned = ticket.status === 'RETURNED_TO_JE';
-            const isTenderStage =
-              ticket.status === 'APPROVED_FOR_TENDERING' ||
-              ticket.status === 'TENDER_PUBLISHED' ||
-              ticket.status === 'WORK_IN_PROGRESS' ||
-              ticket.status === 'WORK_COMPLETED';
+            const isTenderStage = isPostApproval(ticket.status) && ticket.status !== 'CLOSED';
 
             return (
               <div
@@ -410,9 +447,15 @@ export default function JeDashboard() {
                       )}
                     </div>
 
+                    {ticket.applicant_sent_back_at && !['WORK_COMPLETED', 'CLOSED', 'DENIED'].includes(ticket.status) && (
+                      <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950/30 dark:text-red-300">
+                        <strong>Sent back{ticket.reopen_count && ticket.reopen_count > 1 ? ` (${ticket.reopen_count} times)` : ''}:</strong>{' '}
+                        {ticket.sent_back_comment || 'No comment.'}
+                      </p>
+                    )}
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400 pt-1">
                       <span>Applicant: <strong className="text-slate-700 dark:text-slate-300">{ticket.applicant_name}</strong></span>
-                      {ticket.location && <span>Location: <span className="italic">{ticket.location}</span></span>}
+                      {ticket.landmark && <span>Landmark: <span className="italic">{ticket.landmark}</span></span>}
                       <span>Reported: {format(new Date(ticket.created_at), 'MMM dd, yyyy')}</span>
                       {ticket.estimated_amount && (
                         <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
@@ -450,6 +493,18 @@ export default function JeDashboard() {
                       >
                         View Status
                         <ArrowRight size={14} />
+                      </button>
+                    )}
+
+                    {!['CLOSED', 'DENIED', 'WORK_COMPLETED', 'UNASSIGNED'].includes(ticket.status) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(isTenderStage ? `/je/tender/${ticket.id}` : `/je/ticket/${ticket.id}`);
+                        }}
+                        className="px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition"
+                      >
+                        Resolve
                       </button>
                     )}
 

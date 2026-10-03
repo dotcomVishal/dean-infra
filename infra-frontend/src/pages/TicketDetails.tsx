@@ -12,6 +12,8 @@ import ActionPanel from '../components/ticket/ActionPanel';
 import { ChangeRequestBanner, MessagesTimeline } from '../components/ticket/Messages';
 import { DecisionBrief, ReportCard } from '../components/ticket/Brief';
 import PostApproval from '../components/ticket/PostApproval';
+import LifecyclePanel from '../components/ticket/LifecyclePanel';
+import ConfirmPanel from '../components/ticket/ConfirmPanel';
 import ApplicantView from '../components/ticket/ApplicantView';
 import { AttachmentList, GroupedAttachments, UploadFiles } from '../components/ticket/Attachments';
 
@@ -67,7 +69,7 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
   const myDesk = ticket.available_actions?.desk ?? (['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'].includes(role) ? role : null);
   const hasBrief = BRIEF_ROLES.includes(role);
   const applicantPhotos = ticket.attachments.filter((a) => !a.document_category || a.document_category === 'APPLICANT_EVIDENCE');
-  // Everything not shown elsewhere: officers' files, tender/finance docs, JE work photos.
+  // Everything not shown elsewhere: officers' files, tender docs, JE work photos.
   const deskFiles = ticket.attachments.filter(
     (a) => a.document_category && a.document_category !== 'APPLICANT_EVIDENCE' && a.report_id == null);
   const open = ticket.status !== 'CLOSED' && ticket.status !== 'DENIED';
@@ -80,6 +82,9 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
       {/* Above the panel: the return thread that needs an answer. */}
       <ChangeRequestBanner ticket={ticket} myDesk={myDesk} />
       <ActionPanel ticket={ticket} onDone={load} />
+      {/* The stored confirmer answers here too, not only on the applicant page (a JE-raised ticket is confirmed by its AE). */}
+      {ticket.confirmation?.can_confirm && <ConfirmPanel ticketId={ticket.id} confirmation={ticket.confirmation} onDone={load} />}
+      {(ticket.available_lifecycle_actions?.length ?? 0) > 0 && <LifecyclePanel ticket={ticket} onDone={load} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
@@ -97,7 +102,7 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
                 <Label>Location</Label>
                 <p className="flex items-start gap-2 text-sm font-medium text-slate-800 dark:text-slate-200">
                   <MapPin size={15} className="mt-0.5 shrink-0 text-rose-500" />
-                  <span>{[ticket.campus, ticket.building, ticket.landmark, ticket.location].filter(Boolean).join(' · ')}</span>
+                  <span>{[ticket.campus, ticket.landmark].filter(Boolean).join(' · ')}</span>
                 </p>
                 <a href={mapsHref(ticket)} target="_blank" rel="noopener noreferrer"
                   className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400">
@@ -107,7 +112,7 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
             </div>
           </Card>
 
-          <PostApproval ticket={ticket} />
+          {(ticket.available_lifecycle_actions?.length ?? 0) === 0 && <PostApproval ticket={ticket} />}
           <MessagesTimeline ticket={ticket} />
         </div>
 

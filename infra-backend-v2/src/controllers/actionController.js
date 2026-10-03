@@ -19,6 +19,7 @@ import { notifyTransition } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { sendServerError } from '../utils/httpError.js';
 import { testPrefix } from '../middleware/testRole.js';
+import { cleanupTempFiles, storeAttachments, MAX_FILES_PER_TICKET } from '../utils/fileManager.js';
 
 const neutralRemark = (t, actorName) => {
   switch (t.action) {
@@ -44,13 +45,16 @@ export const isSelfAction = (ticketRow, userId) => !ticketRow.is_mock && ticketR
 
 export const performTicketAction = async (req, res) => {
   const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  const files = req.files ?? [];
   if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    cleanupTempFiles(files);
     return res.status(400).json({
       success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
   }
 
   const parsed = actionSchema.safeParse(req.body);
   if (!parsed.success) {
+    cleanupTempFiles(files);
     return res.status(400).json({
       success: false,
       code: 'VALIDATION_ERROR',
@@ -61,6 +65,11 @@ export const performTicketAction = async (req, res) => {
   const { action, to_desk, message, internal_remark, public_note, assignee_id } = parsed.data;
   // Identity comes from the verified token + DB row, never from the payload.
   const user = { id: req.user.id, role: req.user.role };
+  if (files.length > 0 && action === ACTION.ASSIGN_JE) {
+    cleanupTempFiles(files);
+    return res.status(400).json({
+      success: false, code: 'FILES_NOT_ALLOWED', message: 'Files cannot be attached when choosing a JE.' });
+  }
 
   const connection = await pool.getConnection();
   try {
@@ -132,6 +141,18 @@ export const performTicketAction = async (req, res) => {
       isSelfAction: isSelfAction(row, user.id),
     });
 
+    // Files travel with the movement: same transaction, so a failed move leaves no files.
+    if (files.length > 0) {
+      const [[{ n }]] = await connection.query('SELECT COUNT(*) AS n FROM infra_attachments WHERE ticket_id = ?', [ticketId]);
+      if (n + files.length > MAX_FILES_PER_TICKET) {
+        throw new WorkflowError(`This ticket allows ${MAX_FILES_PER_TICKET} files in total (${n} already attached).`,
+          { code: 'TICKET_FILE_LIMIT', status: 409 });
+      }
+      await storeAttachments(connection, {
+        ticketId, files, userId: user.id, category: 'DESK_DOC', desk: t.fromDesk, auditLogId: auditId,
+      });
+    }
+
     // to_user_id is resolved now so the record says exactly who received it.
     for (const spec of specs) {
       if (!spec.to_desk) continue;
@@ -168,6 +189,7 @@ export const performTicketAction = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+    cleanupTempFiles(files);
     if (error instanceof WorkflowError) {
       return res.status(error.status).json({ success: false, code: error.code, message: error.message });
     }

@@ -18,7 +18,7 @@ const ALL_USER_DEPARTMENTS = [
   'General'
 ];
 
-const ROLES = ['APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN', 'CLERICAL', 'ACCOUNTANT'];
+const ROLES = ['APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN'];
 
 export const getDepartmentsForRole = (role: string): string[] => {
   switch (role) {
@@ -31,10 +31,6 @@ export const getDepartmentsForRole = (role: string): string[] => {
     case 'DEAN':
     case 'DIRECTOR':
       return ['General', 'Administration', 'Civil', 'Electrical'];
-    case 'CLERICAL':
-      return ['Stores & Purchase', 'Administration', 'General'];
-    case 'ACCOUNTANT':
-      return ['Finance & Accounts', 'Administration', 'General'];
     case 'SYSADMIN':
       return ['Computer Center', 'Administration', 'General'];
     case 'APPLICANT':
@@ -213,10 +209,6 @@ export default function AdminUsers() {
         return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
       case 'JE':
         return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
-      case 'ACCOUNTANT':
-        return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
-      case 'CLERICAL':
-        return 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20';
       default:
         return 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20';
     }

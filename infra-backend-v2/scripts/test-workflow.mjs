@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STATUS, ROLE, ACTION, WorkflowError, availableActions, resolveAction, planMessages,
-  nextOpenRequestId, canReadMessage, resolveTenderUpdate, resolveCompletionCheck, deskForStatus,
+  nextOpenRequestId, canReadMessage, resolveCompletionCheck, deskForStatus,
 } from '../src/config/workflow.js';
 
 const LIMITS = { SE_APPROVE: 50_000, DEAN_APPROVE: 500_000 };
@@ -271,12 +271,9 @@ const VIS = [
   [{ role: 'SE' },       M('CHANGE_REQUEST', 3),    true],
   [{ role: 'AE' },       M('CHANGE_REQUEST', 1),    true],  // SE -> JE passes through the AE desk
   [{ role: 'SYSADMIN' }, M('INTERNAL_REMARK', 5),   true],
-  [{ role: 'CLERICAL' }, M('CHANGE_REQUEST', 1),    false],
-  [{ role: 'ACCOUNTANT' }, M('REPLY', 1),           false],
   [{ role: 'APPLICANT', isApplicant: true }, M('PUBLIC_NOTE', 0),      true],
   [{ role: 'APPLICANT', isApplicant: true }, M('REJECTION_REASON', 1), false],
   [{ role: 'APPLICANT', isApplicant: true }, M('INTERNAL_REMARK', 1),  false],
-  [{ role: 'CLERICAL' }, M('PUBLIC_NOTE', 0),       false],
   [{ role: 'SE', isApplicant: true }, M('PUBLIC_NOTE', 0), true], // staff-as-applicant keeps the staff view
 ];
 for (const [viewer, msg, expected] of VIS) {
@@ -285,27 +282,21 @@ for (const [viewer, msg, expected] of VIS) {
   });
 }
 
-// ---- post-approval ladder -----------------------------------------------------------------------------
-test('tender ladder is forward-only and maps to the new audit actions', () => {
-  assert.deepEqual(resolveTenderUpdate({ currentStatus: STATUS.APPROVED_FOR_TENDERING, milestone: STATUS.TENDER_PUBLISHED }),
-    { status: STATUS.TENDER_PUBLISHED, logAction: 'TENDER_PUBLISHED' });
-  assert.equal(resolveTenderUpdate({ currentStatus: STATUS.TENDER_PUBLISHED, milestone: STATUS.WORK_IN_PROGRESS }).logAction, 'WORK_AWARDED');
-  assert.equal(resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.WORK_COMPLETED }).logAction, 'WORK_COMPLETED');
-  // Only the applicant closes: the JE can no longer pick CLOSED, nor move a completed ticket.
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.CLOSED }), 'INVALID_MILESTONE');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_COMPLETED, milestone: STATUS.WORK_COMPLETED }), 'NOT_APPROVED_YET');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.TENDER_PUBLISHED }), 'BACKWARD_TRANSITION');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.CLOSED, milestone: STATUS.CLOSED }), 'NOT_APPROVED_YET');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.ASSIGNED_TO_JE, milestone: STATUS.CLOSED }), 'NOT_APPROVED_YET');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.APPROVED_FOR_TENDERING, milestone: 'BANANA' }), 'INVALID_MILESTONE');
-});
+// ---- post-approval: see test/unit/lifecycle.test.mjs for the tender lifecycle and resolve rules
 
-test('applicant completion check: confirm closes, dispute reopens with a reason', () => {
+test('confirmer completion check: confirm closes, send-back returns to where it was resolved from, with a reason', () => {
   const at = STATUS.WORK_COMPLETED;
-  assert.deepEqual(resolveCompletionCheck({ currentStatus: at, accepted: true }), { status: STATUS.CLOSED, logAction: 'CLOSED' });
-  assert.deepEqual(resolveCompletionCheck({ currentStatus: at, accepted: false, remarks: 'Tap still leaks' }),
+  const t = (extra = {}) => ({ status: at, resolved_from_status: STATUS.WORK_IN_PROGRESS, resolution_kind: 'COMPLETED', ...extra });
+  assert.deepEqual(resolveCompletionCheck({ ticket: t(), accepted: true }), { status: STATUS.CLOSED, logAction: 'CLOSED' });
+  assert.deepEqual(resolveCompletionCheck({ ticket: t(), accepted: false, remarks: 'Tap still leaks' }),
     { status: STATUS.WORK_IN_PROGRESS, logAction: 'WORK_REOPENED' });
-  throwsCode(() => resolveCompletionCheck({ currentStatus: at, accepted: false, remarks: '  ' }), 'MESSAGE_REQUIRED');
-  throwsCode(() => resolveCompletionCheck({ currentStatus: at, accepted: 'yes' }), 'VALIDATION_ERROR');
-  throwsCode(() => resolveCompletionCheck({ currentStatus: STATUS.WORK_IN_PROGRESS, accepted: true }), 'NOT_COMPLETED_YET');
+  // F7: a ticket resolved while at the SE desk goes back to the SE desk, never to a status it had not earned.
+  assert.equal(resolveCompletionCheck({ ticket: t({ resolved_from_status: STATUS.PENDING_SE_APPROVAL, resolution_kind: 'OVERRIDE' }),
+    accepted: false, remarks: 'Not resolved' }).status, STATUS.PENDING_SE_APPROVAL);
+  throwsCode(() => resolveCompletionCheck({ ticket: t(), accepted: false, remarks: '  ' }), 'MESSAGE_REQUIRED');
+  throwsCode(() => resolveCompletionCheck({ ticket: t(), accepted: 'yes' }), 'VALIDATION_ERROR');
+  throwsCode(() => resolveCompletionCheck({ ticket: t({ status: STATUS.WORK_IN_PROGRESS }), accepted: true }), 'NOT_COMPLETED_YET');
+  // A cancelled tender can only be acknowledged.
+  throwsCode(() => resolveCompletionCheck({ ticket: t({ resolution_kind: 'TENDER_CANCELLED' }), accepted: false, remarks: 'x' }), 'SEND_BACK_NOT_ALLOWED');
+  assert.equal(resolveCompletionCheck({ ticket: t({ resolution_kind: 'TENDER_CANCELLED' }), accepted: true }).status, STATUS.CLOSED);
 });

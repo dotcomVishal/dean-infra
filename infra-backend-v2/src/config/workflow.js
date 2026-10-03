@@ -17,6 +17,8 @@ export const STATUS = Object.freeze({
   PENDING_DIRECTOR_APPROVAL: 'PENDING_DIRECTOR_APPROVAL',
   APPROVED_FOR_TENDERING:    'APPROVED_FOR_TENDERING',
   TENDER_PUBLISHED:          'TENDER_PUBLISHED',
+  TECHNICAL_EVALUATION:      'TECHNICAL_EVALUATION',
+  FINANCIAL_EVALUATION:      'FINANCIAL_EVALUATION',
   WORK_IN_PROGRESS:          'WORK_IN_PROGRESS',
   WORK_COMPLETED:            'WORK_COMPLETED',
   RETURNED_TO_JE:            'RETURNED_TO_JE',
@@ -27,7 +29,6 @@ export const STATUS = Object.freeze({
 export const ROLE = Object.freeze({
   APPLICANT: 'APPLICANT', JE: 'JE', AE: 'AE', SE: 'SE',
   DEAN: 'DEAN', DIRECTOR: 'DIRECTOR', SYSADMIN: 'SYSADMIN',
-  CLERICAL: 'CLERICAL', ACCOUNTANT: 'ACCOUNTANT',
 });
 
 /** A "desk" is an approval-chain position; desk names equal role names. */
@@ -53,8 +54,11 @@ export const LOG_ACTION = Object.freeze({
   REMINDER_SENT: 'REMINDER_SENT', SUBMITTED: 'SUBMITTED', FORWARDED: 'FORWARDED',
   APPROVED: 'APPROVED', CHANGES_REQUESTED: 'CHANGES_REQUESTED', REJECTED: 'REJECTED',
   TENDER_PUBLISHED: 'TENDER_PUBLISHED', WORK_AWARDED: 'WORK_AWARDED',
-  WORK_COMPLETED: 'WORK_COMPLETED', WORK_REOPENED: 'WORK_REOPENED', BILL_RECORDED: 'BILL_RECORDED',
-  BILL_UPDATED: 'BILL_UPDATED', CLOSED: 'CLOSED', OVERRIDE: 'OVERRIDE',
+  WORK_COMPLETED: 'WORK_COMPLETED', WORK_REOPENED: 'WORK_REOPENED',
+  CLOSED: 'CLOSED', OVERRIDE: 'OVERRIDE', FILES_ADDED: 'FILES_ADDED',
+  TECH_EVAL_STARTED: 'TECH_EVAL_STARTED', FIN_EVAL_STARTED: 'FIN_EVAL_STARTED',
+  TENDER_CANCELLED: 'TENDER_CANCELLED', RESOLVED: 'RESOLVED', AUTO_CLOSED: 'AUTO_CLOSED',
+  DELETED: 'DELETED', RESTORED: 'RESTORED',
 });
 
 /** Thrown for every rule violation, so handlers can map it to a 4xx. */
@@ -374,72 +378,207 @@ export function canReadMessage(viewer, message) {
   return rank >= 1 && rank >= message.visible_from_rank;
 }
 
-// ---- post-approval ladder (tender milestones) ---------------------------------
+// ---- status lists and labels (one place; mirrored in the frontend's lib/ticketUi.ts) ----
 
-// Tender milestones updated by JE post-approval. CLOSED is not one of them:
-// only the applicant closes, by confirming the work (resolveCompletionCheck).
-export const TENDER_MILESTONES = Object.freeze([
-  STATUS.TENDER_PUBLISHED,
-  STATUS.WORK_IN_PROGRESS,
-  STATUS.WORK_COMPLETED,
+/** Statuses after the approval chain, in the order a ticket moves through them. */
+export const POST_APPROVAL_STATUSES = Object.freeze([
+  STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.TECHNICAL_EVALUATION,
+  STATUS.FINANCIAL_EVALUATION, STATUS.WORK_IN_PROGRESS, STATUS.WORK_COMPLETED, STATUS.CLOSED,
 ]);
+/** The tender stages: a tender can be cancelled in any of them. */
+export const TENDER_STAGES = Object.freeze([
+  STATUS.TENDER_PUBLISHED, STATUS.TECHNICAL_EVALUATION, STATUS.FINANCIAL_EVALUATION,
+]);
+/** Nothing more happens on these without the confirmer or an admin. */
+const TERMINAL_STATUSES = Object.freeze([STATUS.CLOSED, STATUS.DENIED]);
+/** Statuses the JE may resolve from: everything open except awaiting-confirmation, closed, denied, and no-JE-yet. */
+export const RESOLVABLE_STATUSES = Object.freeze(
+  Object.values(STATUS).filter((st) => ![STATUS.WORK_COMPLETED, STATUS.UNASSIGNED, ...TERMINAL_STATUSES].includes(st)));
 
-// W6: forward-only. CLOSED is terminal and deliberately absent from the
-// "may move" set, so a closed ticket can never accept another milestone.
-const TENDER_LADDER = [
-  STATUS.APPROVED_FOR_TENDERING,
-  STATUS.TENDER_PUBLISHED,
-  STATUS.WORK_IN_PROGRESS,
-  STATUS.WORK_COMPLETED,
-  STATUS.CLOSED,
-];
-const TENDER_LOG_ACTION = Object.freeze({
-  [STATUS.TENDER_PUBLISHED]: LOG_ACTION.TENDER_PUBLISHED,
-  [STATUS.WORK_IN_PROGRESS]: LOG_ACTION.WORK_AWARDED,
-  [STATUS.WORK_COMPLETED]:   LOG_ACTION.WORK_COMPLETED,
+export const STATUS_LABEL = Object.freeze({
+  [STATUS.UNASSIGNED]: 'Unassigned',
+  [STATUS.ASSIGNED_TO_JE]: 'With JE',
+  [STATUS.RETURNED_TO_JE]: 'Returned to JE',
+  [STATUS.PENDING_AE_APPROVAL]: 'Pending AE',
+  [STATUS.PENDING_SE_APPROVAL]: 'Pending SE',
+  [STATUS.PENDING_DEAN_APPROVAL]: 'Pending Dean',
+  [STATUS.PENDING_DIRECTOR_APPROVAL]: 'Pending Director',
+  [STATUS.APPROVED_FOR_TENDERING]: 'Approved for tendering',
+  [STATUS.TENDER_PUBLISHED]: 'Tender published',
+  [STATUS.TECHNICAL_EVALUATION]: 'Technical evaluation',
+  [STATUS.FINANCIAL_EVALUATION]: 'Financial evaluation',
+  [STATUS.WORK_IN_PROGRESS]: 'Work in progress',
+  [STATUS.WORK_COMPLETED]: 'Resolved, awaiting confirmation',
+  [STATUS.CLOSED]: 'Closed',
+  [STATUS.DENIED]: 'Rejected',
 });
 
-/** Guard for the JE's tender endpoint — the S1 fix. */
-export function resolveTenderUpdate({ currentStatus, milestone }) {
-  const currentIdx = TENDER_LADDER.indexOf(currentStatus);
-  if (currentIdx === -1 || currentStatus === STATUS.CLOSED || currentStatus === STATUS.WORK_COMPLETED) {
-    throw new WorkflowError(
-      `Tender milestones can only be set after approval and before the work is marked complete (ticket is at ${currentStatus}).`,
-      { code: 'NOT_APPROVED_YET', status: 403 }
-    );
+/** Days a resolved ticket waits for its confirmer before it closes itself. */
+export const AUTO_CLOSE_DAYS = 7;
+
+// ---- tender lifecycle, resolve and confirm (Master plan, section 7) -----------------
+
+export const LIFECYCLE = Object.freeze({
+  PUBLISH_TENDER:       'PUBLISH_TENDER',
+  START_TECHNICAL_EVAL: 'START_TECHNICAL_EVAL',
+  START_FINANCIAL_EVAL: 'START_FINANCIAL_EVAL',
+  AWARD:                'AWARD',
+  CANCEL_TENDER:        'CANCEL_TENDER',
+  RESOLVE:              'RESOLVE',
+});
+
+export const RESOLUTION = Object.freeze({
+  COMPLETED: 'COMPLETED', TENDER_CANCELLED: 'TENDER_CANCELLED', OVERRIDE: 'OVERRIDE',
+});
+
+// Where each action may start, and what it produces. The one table behind both
+// resolveLifecycleAction (what the server accepts) and availableLifecycleActions (what the UI shows).
+const LIFECYCLE_RULES = Object.freeze({
+  [LIFECYCLE.PUBLISH_TENDER]:       { from: [STATUS.APPROVED_FOR_TENDERING], to: STATUS.TENDER_PUBLISHED, log: LOG_ACTION.TENDER_PUBLISHED },
+  [LIFECYCLE.START_TECHNICAL_EVAL]: { from: [STATUS.TENDER_PUBLISHED], to: STATUS.TECHNICAL_EVALUATION, log: LOG_ACTION.TECH_EVAL_STARTED },
+  [LIFECYCLE.START_FINANCIAL_EVAL]: { from: [STATUS.TECHNICAL_EVALUATION], to: STATUS.FINANCIAL_EVALUATION, log: LOG_ACTION.FIN_EVAL_STARTED },
+  [LIFECYCLE.AWARD]:                { from: [STATUS.FINANCIAL_EVALUATION], to: STATUS.WORK_IN_PROGRESS, log: LOG_ACTION.WORK_AWARDED },
+  [LIFECYCLE.CANCEL_TENDER]:        { from: TENDER_STAGES, to: STATUS.WORK_COMPLETED, log: LOG_ACTION.TENDER_CANCELLED },
+  [LIFECYCLE.RESOLVE]:              { from: RESOLVABLE_STATUSES, to: STATUS.WORK_COMPLETED, log: LOG_ACTION.RESOLVED },
+});
+
+const MAX_AWARD = 999_999_999_999.99; // DECIMAL(14,2)
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const bad = (message, code = 'VALIDATION_ERROR', status = 400) => new WorkflowError(message, { code, status });
+const text = (v) => (typeof v === 'string' ? v.trim() : '');
+
+function validDate(v, field) {
+  const d = text(v);
+  const t = DATE_ONLY.test(d) ? Date.parse(`${d}T00:00:00Z`) : NaN;
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== d) {
+    throw bad(`${field} must be a date (YYYY-MM-DD).`, 'INVALID_DATE');
   }
-  if (!TENDER_MILESTONES.includes(milestone)) {
-    throw new WorkflowError(
-      `'${milestone}' is not a valid milestone. Allowed: ${TENDER_MILESTONES.join(', ')}.`,
-      { code: 'INVALID_MILESTONE', status: 400 }
-    );
-  }
-  const milestoneIdx = TENDER_LADDER.indexOf(milestone);
-  if (milestoneIdx <= currentIdx) {
-    throw new WorkflowError(
-      `Cannot move ticket from ${currentStatus} to ${milestone}. The tender ladder is forward-only.`,
-      { code: 'BACKWARD_TRANSITION', status: 409 }
-    );
-  }
-  return { status: milestone, logAction: TENDER_LOG_ACTION[milestone] };
+  return d;
 }
 
 /**
- * The applicant's answer once the JE marked the work complete.
- * accepted -> CLOSED; not accepted -> back to WORK_IN_PROGRESS with a reason.
+ * Decides every JE lifecycle step. Pure: no DB. Throws WorkflowError.
+ *
+ * @param {{id:number, role:string}} user
+ * @param {{status:string, assigned_je_id:(number|null)}} ticket
+ * @param {string} action   one of LIFECYCLE
+ * @param {object} payload  tender_created_date, tender_end_date, nit_number, portal_type, award_amount,
+ *                          awarded_agency, reason, note
+ * @returns {{action, fromStatus, toStatus, logAction, resolution:(string|null), tender:object, note:(string|null)}}
  */
-export function resolveCompletionCheck({ currentStatus, accepted, remarks }) {
-  if (currentStatus !== STATUS.WORK_COMPLETED) {
+export function resolveLifecycleAction({ user, ticket, action, payload = {} }) {
+  const rule = LIFECYCLE_RULES[action];
+  if (!rule) throw bad(`Unknown action '${action}'.`, 'INVALID_ACTION');
+  // Only the ticket's own JE. Even a Sysadmin goes through the admin override instead.
+  if (user.role !== ROLE.JE || ticket.assigned_je_id == null || ticket.assigned_je_id !== user.id) {
+    throw new WorkflowError('Only the JE assigned to this ticket can do this.', { code: 'NOT_YOUR_TICKET', status: 403 });
+  }
+  const from = ticket.status;
+  if (!rule.from.includes(from)) {
+    throw new WorkflowError(`${action} is not possible while the ticket is at ${from}.`,
+      { code: 'INVALID_TRANSITION', status: 409 });
+  }
+  const out = { action, fromStatus: from, toStatus: rule.to, logAction: rule.log, resolution: null, tender: {}, note: null };
+
+  switch (action) {
+    case LIFECYCLE.PUBLISH_TENDER: {
+      const created = validDate(payload.tender_created_date, 'tender_created_date');
+      const end = validDate(payload.tender_end_date, 'tender_end_date');
+      if (end < created) throw bad('tender_end_date must be on or after tender_created_date.', 'INVALID_DATE_RANGE');
+      const portal = text(payload.portal_type) || 'GeM';
+      if (!['GeM', 'CPP Portal', 'State Tender'].includes(portal)) throw bad('portal_type is not recognised.', 'INVALID_PORTAL');
+      const nit = text(payload.nit_number);
+      if (nit.length > 100) throw bad('nit_number must be 100 characters or fewer.');
+      out.tender = { tender_created_date: created, tender_end_date: end, portal_type: portal, nit_number: nit || null };
+      break;
+    }
+    case LIFECYCLE.AWARD: {
+      const raw = payload.award_amount;
+      if (raw === undefined || raw === null || text(String(raw)) === '') throw bad('award_amount is required.', 'AWARD_AMOUNT_REQUIRED');
+      const amount = Number(raw);
+      if (!Number.isFinite(amount) || amount <= 0) throw bad('award_amount must be a number above 0.', 'AWARD_AMOUNT_INVALID');
+      if (amount > MAX_AWARD) throw bad(`award_amount must be no greater than ${MAX_AWARD}.`, 'AWARD_AMOUNT_TOO_LARGE');
+      const agency = text(payload.awarded_agency);
+      if (!agency) throw bad('awarded_agency is required.', 'AGENCY_REQUIRED');
+      if (agency.length > 255) throw bad('awarded_agency must be 255 characters or fewer.');
+      out.tender = { award_amount: Math.round(amount * 100) / 100, awarded_agency: agency };
+      break;
+    }
+    case LIFECYCLE.CANCEL_TENDER: {
+      const reason = text(payload.reason);
+      if (!reason) throw bad('Give the reason for cancelling the tender.', 'REASON_REQUIRED');
+      if (reason.length > 2000) throw bad('The reason must be 2000 characters or fewer.');
+      out.resolution = RESOLUTION.TENDER_CANCELLED;
+      out.tender = { cancel_reason: reason };
+      out.note = reason;
+      break;
+    }
+    case LIFECYCLE.RESOLVE: {
+      const note = text(payload.note ?? payload.reason);
+      if (note.length > 2000) throw bad('The note must be 2000 characters or fewer.');
+      if (from === STATUS.WORK_IN_PROGRESS) {
+        out.resolution = RESOLUTION.COMPLETED;
+      } else {
+        // Skipping steps is allowed, but never without saying why.
+        if (!note) throw bad('Give the reason for resolving the ticket here.', 'REASON_REQUIRED');
+        out.resolution = RESOLUTION.OVERRIDE;
+      }
+      out.note = note || null;
+      break;
+    }
+    default: {
+      const note = text(payload.note);
+      out.note = note || null;
+    }
+  }
+  return out;
+}
+
+/**
+ * What the JE may do to this ticket now, from the same table the server enforces.
+ * The UI renders only this list.
+ * @returns {Array<{action:string, resolution?:string, requires:string[]}>}
+ */
+export function availableLifecycleActions({ user, ticket }) {
+  if (user.role !== ROLE.JE || ticket.assigned_je_id == null || ticket.assigned_je_id !== user.id) return [];
+  const needs = {
+    [LIFECYCLE.PUBLISH_TENDER]: ['tender_created_date', 'tender_end_date'],
+    [LIFECYCLE.AWARD]: ['award_amount', 'awarded_agency'],
+    [LIFECYCLE.CANCEL_TENDER]: ['reason'],
+  };
+  return Object.entries(LIFECYCLE_RULES)
+    .filter(([, rule]) => rule.from.includes(ticket.status))
+    .map(([action]) => {
+      if (action !== LIFECYCLE.RESOLVE) return { action, requires: needs[action] ?? [] };
+      const completed = ticket.status === STATUS.WORK_IN_PROGRESS;
+      return { action, resolution: completed ? RESOLUTION.COMPLETED : RESOLUTION.OVERRIDE, requires: completed ? [] : ['note'] };
+    });
+}
+
+/**
+ * The confirmer's answer once the ticket was resolved.
+ * accepted -> CLOSED. Not accepted -> back to the status it was resolved from (never a status it had
+ * not earned), with a reason. A cancelled tender can only be acknowledged: nothing more can happen on it.
+ * @param {{status:string, resolved_from_status:(string|null), resolution_kind:(string|null)}} ticket
+ */
+export function resolveCompletionCheck({ ticket, accepted, remarks }) {
+  if (ticket.status !== STATUS.WORK_COMPLETED) {
     throw new WorkflowError(
-      `Only work marked complete can be confirmed (ticket is at ${currentStatus}).`,
+      `Only a resolved ticket can be confirmed (ticket is at ${ticket.status}).`,
       { code: 'NOT_COMPLETED_YET', status: 409 });
   }
   if (accepted === true) return { status: STATUS.CLOSED, logAction: LOG_ACTION.CLOSED };
   if (accepted !== false) {
     throw new WorkflowError('accepted must be true or false.', { code: 'VALIDATION_ERROR', status: 400 });
   }
+  if (ticket.resolution_kind === RESOLUTION.TENDER_CANCELLED) {
+    throw new WorkflowError('This tender was cancelled; acknowledge it to close the ticket and raise a new ticket for a new tender.',
+      { code: 'SEND_BACK_NOT_ALLOWED', status: 409 });
+  }
   if (typeof remarks !== 'string' || remarks.trim() === '') {
     throw new WorkflowError('Say what is still not done.', { code: 'MESSAGE_REQUIRED', status: 400 });
   }
-  return { status: STATUS.WORK_IN_PROGRESS, logAction: LOG_ACTION.WORK_REOPENED };
+  const back = ticket.resolved_from_status && ticket.resolved_from_status !== STATUS.WORK_COMPLETED
+    ? ticket.resolved_from_status : STATUS.WORK_IN_PROGRESS;
+  return { status: back, logAction: LOG_ACTION.WORK_REOPENED };
 }

@@ -12,7 +12,7 @@ const SINGLE_HOLDER_ROLES = ['DEAN', 'DIRECTOR'];
  */
 export async function checkSingleHolders(connection) {
   const [rows] = await connection.query(
-    `SELECT role, email FROM users WHERE role IN (?) AND is_active = TRUE`, [SINGLE_HOLDER_ROLES]);
+    `SELECT role, email FROM infra_users WHERE role IN (?) AND is_active = TRUE`, [SINGLE_HOLDER_ROLES]);
   const out = {};
   for (const role of SINGLE_HOLDER_ROLES) {
     const holders = rows.filter((r) => r.role === role);

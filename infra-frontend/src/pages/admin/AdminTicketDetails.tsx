@@ -4,30 +4,15 @@ import { format } from 'date-fns';
 import { 
   Loader2, ArrowLeft, MapPin, User, Building2, 
   History, Mail, Phone, Image as ImageIcon,
-  ShieldAlert, RefreshCw, FileCheck
+  ShieldAlert, RefreshCw, FileCheck, Trash2, Undo2, X
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
 import { DocLink } from '../../components/ticket/Attachments';
 import ReassignFields from '../../components/admin/ReassignFields';
 import { NO_REASSIGN, reassignBody, type ReassignValue } from '../../lib/reassign';
-import { deskLabel, staffStatusLabel } from '../../lib/ticketUi';
+import { ALL_STATUSES, deskLabel, errorMessage, staffStatusLabel, ticketNo } from '../../lib/ticketUi';
 
-const ALL_STATUSES = [
-  'UNASSIGNED',
-  'ASSIGNED_TO_JE',
-  'PENDING_AE_APPROVAL',
-  'PENDING_SE_APPROVAL',
-  'PENDING_DEAN_APPROVAL',
-  'PENDING_DIRECTOR_APPROVAL',
-  'APPROVED_FOR_TENDERING',
-  'TENDER_PUBLISHED',
-  'WORK_IN_PROGRESS',
-  'WORK_COMPLETED',
-  'RETURNED_TO_JE',
-  'DENIED',
-  'CLOSED'
-];
 
 export default function AdminTicketDetails() {
   const { id } = useParams();
@@ -42,6 +27,13 @@ export default function AdminTicketDetails() {
   const [reassign, setReassign] = useState<ReassignValue>(NO_REASSIGN);
   const [overrideRemarks, setOverrideRemarks] = useState('');
   const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
+
+  // Delete (hide) and restore
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [typedNo, setTypedNo] = useState('');
+  const [restoreReason, setRestoreReason] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const fetchDetails = async () => {
     setLoading(true);
@@ -64,6 +56,34 @@ export default function AdminTicketDetails() {
   useEffect(() => {
     fetchDetails();
   }, [id]);
+
+  const typedMatches = typedNo.replace(/\D/g, '') !== '' && Number(typedNo.replace(/\D/g, '')) === Number(id);
+  const deleteTicket = async () => {
+    setBusy(true);
+    try {
+      await api.delete(`/admin/tickets/${id}`, { data: { confirm_ticket_id: typedNo.trim(), reason: deleteReason.trim() } });
+      toast.success('Ticket deleted. Only the Sysadmin can see it now.');
+      setDeleteOpen(false); setDeleteReason(''); setTypedNo('');
+      fetchDetails();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not delete the ticket.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const restoreTicket = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/admin/tickets/${id}/restore`, { reason: restoreReason.trim() });
+      toast.success('Ticket restored.');
+      setRestoreReason('');
+      fetchDetails();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not restore the ticket.'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleExecuteOverride = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,6 +160,23 @@ export default function AdminTicketDetails() {
         </button>
       </div>
 
+      {ticket.deleted_at && (
+        <div role="alert" className="space-y-3 rounded-2xl border border-rose-300 bg-rose-50 p-5 dark:border-rose-900/60 dark:bg-rose-950/30">
+          <p className="flex items-center gap-2 text-sm font-bold text-rose-800 dark:text-rose-300">
+            <Trash2 size={16} /> Deleted on {format(new Date(ticket.deleted_at), 'PPP · p')}. Nobody else can see this ticket.
+          </p>
+          {ticket.delete_reason && <p className="text-xs text-rose-700 dark:text-rose-300">Reason: {ticket.delete_reason}</p>}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input value={restoreReason} onChange={(e) => setRestoreReason(e.target.value)} placeholder="Reason for restoring"
+              className="flex-1 rounded-xl border border-rose-200 bg-white p-2.5 text-xs dark:border-rose-900/60 dark:bg-slate-900 dark:text-white" />
+            <button type="button" disabled={busy || restoreReason.trim() === ''} onClick={restoreTicket}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+              <Undo2 size={14} /> Restore
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Ticket Banner */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700 pb-4">
@@ -179,7 +216,7 @@ export default function AdminTicketDetails() {
           </div>
           <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 px-3 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
             <MapPin size={15} className="text-slate-400" />
-            <span>Location: <strong className="text-slate-800 dark:text-slate-100">{ticket.location || 'Campus'}</strong></span>
+            <span>Landmark: <strong className="text-slate-800 dark:text-slate-100">{ticket.landmark || 'Campus'}</strong></span>
           </div>
         </div>
       </div>
@@ -381,7 +418,7 @@ export default function AdminTicketDetails() {
                         id: file.id,
                         created_at: file.created_at,
                         document_category: file.document_category,
-                        file_name: String(file.file_url).split('/').pop()?.replace(/^\d+-\d+-/, '') || 'file',
+                        file_name: file.original_name || String(file.file_url).split('/').pop() || 'file',
                         download_url: `/api/attachments/${file.id}`,
                       }}
                     />
@@ -400,7 +437,53 @@ export default function AdminTicketDetails() {
 
         </div>
 
+        {!ticket.deleted_at && !ticket.is_mock && (
+          <div className="rounded-2xl border border-rose-200 bg-white p-6 shadow-sm dark:border-rose-900/50 dark:bg-slate-800 lg:col-span-3">
+            <h2 className="mb-1 flex items-center gap-2 text-base font-bold text-rose-700 dark:text-rose-400"><Trash2 size={18} /> Delete ticket</h2>
+            <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+              Hides the ticket from everyone except the Sysadmin. Nothing is removed, and you can restore it.
+            </p>
+            <button type="button" onClick={() => setDeleteOpen(true)}
+              className="rounded-xl border border-rose-300 px-4 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30">
+              Delete this ticket…
+            </button>
+          </div>
+        )}
+
       </div>
+
+      {deleteOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true" aria-label="Delete ticket">
+          <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-800">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Delete {ticketNo(ticket.id)}?</h3>
+              <button type="button" aria-label="Close" onClick={() => setDeleteOpen(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              This hides the ticket together with {ticket.counts?.reports ?? 0} report{ticket.counts?.reports === 1 ? '' : 's'},{' '}
+              {ticket.counts?.files ?? 0} file{ticket.counts?.files === 1 ? '' : 's'} and {ticket.counts?.messages ?? 0} message{ticket.counts?.messages === 1 ? '' : 's'}.
+              Pending reminders are cancelled. Nothing is removed, and you can restore it.
+            </p>
+            <div>
+              <label htmlFor="delreason" className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason (10 to 1000 characters)</label>
+              <textarea id="delreason" rows={3} value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)}
+                className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+            </div>
+            <div>
+              <label htmlFor="delno" className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Type the ticket number to confirm: {ticketNo(ticket.id)}</label>
+              <input id="delno" value={typedNo} onChange={(e) => setTypedNo(e.target.value)} autoComplete="off"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setDeleteOpen(false)} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">Cancel</button>
+              <button type="button" disabled={busy || !typedMatches || deleteReason.trim().length < 10} onClick={deleteTicket}
+                className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50">
+                {busy ? 'Deleting…' : 'Delete ticket'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

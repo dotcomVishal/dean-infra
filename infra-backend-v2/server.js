@@ -10,7 +10,7 @@ import logger, { errorFields } from './src/utils/logger.js';
 
 const PORT = process.env.PORT || 5000;
 
-// Run migrations/*.sql (schema_migrations tracks what's applied), then start
+// Run migrations/*.sql (infra_schema_migrations tracks what's applied), then start
 // accepting requests. Schema is owned by migrations only (D1, D2) — nothing
 // here patches the schema at request time.
 (async () => {

@@ -11,13 +11,18 @@ function mock({ selectRows = [], affectedRows = 1, messages = [], nextVersion = 
     query: async (sql, params) => {
       const norm = sql.replace(/\s+/g, ' ').trim();
       calls.push({ sql: norm, params });
-      if (norm.includes('FROM tickets')) return [selectRows.map(r => ({ assigned_je_id: 3, department: 'Civil', campus: 'NORTH', current_desk_user_id: null, open_change_request_id: null, ...r }))];
-      if (norm.includes('FROM ticket_messages')) return [messages];
+      // resolveAeForScope's ranking subquery also mentions infra_tickets: match the AE lookup first
+      if (norm.includes("u.role = 'AE'")) return [[{ id: 20, name: 'AE Person', email: 'ae@campus.edu', role: 'AE' }]];
+      if (norm.includes('FROM infra_tickets')) return [selectRows.map(r => ({ assigned_je_id: 3, department: 'Civil', campus: 'NORTH', current_desk_user_id: null, open_change_request_id: null, ...r }))];
+      if (norm.includes('FROM infra_ticket_messages')) return [messages];
       if (norm.includes('MAX(version)')) return [[{ next: nextVersion }]];
-      if (norm.includes('FROM users')) return [[{ id: 20, name: 'AE Person', email: 'ae@campus.edu' }]];
+      // desk-holder checks (loadActionContext): the assigned JE holds the JE desk
+      if (norm.includes("u.role = 'JE'")) return [[{ id: params[0], name: 'JE Person', email: 'je@campus.edu', role: 'JE' }]];
+      if (norm.includes('SELECT 1 FROM infra_users u WHERE u.id = ? AND u.role = ?')) return [[{ ok: 1 }]];
+      if (norm.includes('FROM infra_users')) return [[{ id: 20, name: 'AE Person', email: 'ae@campus.edu' }]];
       if (norm.startsWith('UPDATE')) return [{ affectedRows }];
-      if (norm.startsWith('INSERT INTO reports')) return [{ insertId: 55 }];
-      if (norm.startsWith('INSERT INTO audit_logs')) return [{ insertId: 66 }];
+      if (norm.startsWith('INSERT INTO infra_reports')) return [{ insertId: 55 }];
+      if (norm.startsWith('INSERT INTO infra_audit_logs')) return [{ insertId: 66 }];
       return [{ insertId: 77 }];
     } };
 }
@@ -39,10 +44,10 @@ await t('JE files a report -> report row + status to AE + audit SUBMITTED', asyn
   const out = await applyReportSubmission(c, good);
   eq(out.nextStatus, STATUS.PENDING_AE_APPROVAL, 'next status');
   eq(out.reportId, 55, 'report id returned');
-  if (!ran(c, 'INSERT INTO reports')) throw new Error('no report row written');
-  eq(args(c, 'INSERT INTO reports')[4], 18500, 'estimate stored');
-  eq(args(c, 'INSERT INTO reports')[2], 1, 'first report is version 1');
-  eq(args(c, 'INSERT INTO audit_logs')[2], 'SUBMITTED', 'audit action');
+  if (!ran(c, 'INSERT INTO infra_reports')) throw new Error('no report row written');
+  eq(args(c, 'INSERT INTO infra_reports')[4], 18500, 'estimate stored');
+  eq(args(c, 'INSERT INTO infra_reports')[2], 1, 'first report is version 1');
+  eq(args(c, 'INSERT INTO infra_audit_logs')[2], 'SUBMITTED', 'audit action');
 });
 await t('B6: a RETURNED ticket can be re-filed', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.RETURNED_TO_JE }] });
@@ -52,15 +57,15 @@ await t('B6: a RETURNED ticket can be re-filed', async () => {
 await t('re-filing keeps history: a second report row is INSERTed, not updated', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.RETURNED_TO_JE }] });
   await applyReportSubmission(c, good);
-  eq(c.calls.filter(x => x.sql.startsWith('INSERT INTO reports')).length, 1, 'insert count');
-  if (ran(c, 'UPDATE reports')) throw new Error('overwrote the previous report');
+  eq(c.calls.filter(x => x.sql.startsWith('INSERT INTO infra_reports')).length, 1, 'insert count');
+  if (ran(c, 'UPDATE infra_reports')) throw new Error('overwrote the previous report');
 });
 
 console.log('\n=== versioning + change requests (plan.md Phase 4 item 4) ===');
 await t('re-filed report gets the NEXT version number', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.RETURNED_TO_JE }], nextVersion: 3 });
   await applyReportSubmission(c, good);
-  eq(args(c, 'INSERT INTO reports')[2], 3, 'version');
+  eq(args(c, 'INSERT INTO infra_reports')[2], 3, 'version');
 });
 await t('a report answering a change request links answers_message_id and writes a REPLY', async () => {
   const c = mock({
@@ -69,10 +74,10 @@ await t('a report answering a change request links answers_message_id and writes
     nextVersion: 2,
   });
   await applyReportSubmission(c, { ...good, remarks: 'Replaced the breaker as asked.' });
-  const reportArgs = args(c, 'INSERT INTO reports');
+  const reportArgs = args(c, 'INSERT INTO infra_reports');
   eq(reportArgs[6], 9, 'answers_message_id');
   eq(reportArgs[5], 'Replaced the breaker as asked.', 'remarks stored on the report');
-  const msg = args(c, 'INSERT INTO ticket_messages');
+  const msg = args(c, 'INSERT INTO infra_ticket_messages');
   eq(msg[6], 'REPLY', 'reply kind');
   eq(msg[9], 9, 'in_reply_to');
 });
@@ -82,18 +87,18 @@ await t('answering a change request WITHOUT remarks is refused, nothing written'
     messages: [{ id: 9, ticket_id: 7, author_desk: 'AE', to_desk: 'JE', kind: 'CHANGE_REQUEST', in_reply_to: null }],
   });
   await rejects(applyReportSubmission(c, good), 'MESSAGE_REQUIRED');
-  if (ran(c, 'INSERT INTO reports')) throw new Error('report written without the mandatory reply');
+  if (ran(c, 'INSERT INTO infra_reports')) throw new Error('report written without the mandatory reply');
 });
 await t('a first report (no open request) has answers_message_id NULL and writes no message', async () => {
   const c = mock(atJE);
   await applyReportSubmission(c, good);
-  eq(args(c, 'INSERT INTO reports')[6], null, 'answers_message_id');
-  if (ran(c, 'INSERT INTO ticket_messages')) throw new Error('unexpected message');
+  eq(args(c, 'INSERT INTO infra_reports')[6], null, 'answers_message_id');
+  if (ran(c, 'INSERT INTO infra_ticket_messages')) throw new Error('unexpected message');
 });
 await t('ticket lands on the AE desk person', async () => {
   const c = mock(atJE);
   await applyReportSubmission(c, good);
-  const up = c.calls.find(x => x.sql.startsWith('UPDATE tickets'));
+  const up = c.calls.find(x => x.sql.startsWith('UPDATE infra_tickets'));
   eq(up.params[0], STATUS.PENDING_AE_APPROVAL, 'to status');
   eq(up.params[1], 20, 'current_desk_user_id = resolved AE');
 });
@@ -102,7 +107,7 @@ console.log('\n=== validation ===');
 await t('missing nature_of_work -> 400, nothing written', async () => {
   const c = mock(atJE);
   await rejects(applyReportSubmission(c, { ...good, natureOfWork: '   ' }), 'NATURE_OF_WORK_REQUIRED');
-  if (ran(c, 'INSERT INTO reports')) throw new Error('report row written for an invalid submission');
+  if (ran(c, 'INSERT INTO infra_reports')) throw new Error('report row written for an invalid submission');
 });
 await t('missing estimate -> ESTIMATE_REQUIRED (the v1 NaN bug)', async () => {
   const c = mock(atJE);
@@ -137,12 +142,12 @@ console.log('\n=== authorisation ===');
 await t('JE does not own the ticket -> 404, nothing written', async () => {
   const c = mock({ selectRows: [] });
   await rejects(applyReportSubmission(c, good), 'NOT_FOUND');
-  if (ran(c, 'INSERT INTO reports')) throw new Error('report written for a ticket we do not own');
+  if (ran(c, 'INSERT INTO infra_reports')) throw new Error('report written for a ticket we do not own');
 });
 await t('role is checked by the state machine, NOT assumed from the route', async () => {
   const c = mock(atJE);
   await rejects(applyReportSubmission(c, { ...good, role: ROLE.APPLICANT }), 'NOT_YOUR_DESK');
-  if (ran(c, 'INSERT INTO reports')) throw new Error('an APPLICANT filed a JE report');
+  if (ran(c, 'INSERT INTO infra_reports')) throw new Error('an APPLICANT filed a JE report');
 });
 await t('JE cannot re-file onto a ticket already at the AE desk', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.PENDING_AE_APPROVAL }] });
@@ -159,7 +164,7 @@ console.log('\n=== concurrency ===');
 await t('CAS affectedRows=0 -> 409 and NO audit row', async () => {
   const c = mock({ ...atJE, affectedRows: 0 });
   await rejects(applyReportSubmission(c, good), 'CONFLICT');
-  if (ran(c, 'INSERT INTO audit_logs')) throw new Error('audit row written for a write that never happened');
+  if (ran(c, 'INSERT INTO infra_audit_logs')) throw new Error('audit row written for a write that never happened');
 });
 await t('the locking SELECT binds assigned_je_id and uses FOR UPDATE', async () => {
   const c = mock({ selectRows: [{ id: 7, status: STATUS.ASSIGNED_TO_JE, assigned_je_id: 42 }] });

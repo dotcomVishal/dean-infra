@@ -22,10 +22,8 @@ import AdminTicketDetails from './pages/admin/AdminTicketDetails';
 import AdminUsers from './pages/admin/AdminUsers';
 import AdminAuditLogs from './pages/admin/AdminAuditLogs';
 import AdminTestTicket from './pages/admin/AdminTestTicket';
-// Approvals, tenders and bills
+// Approvals
 import AuthorityDashboard from './pages/authority/AuthorityDashboard';
-import ClericalDashboard from './pages/clerical/ClericalDashboard';
-import AccountantDashboard from './pages/finance/AccountantDashboard';
 
 // Old per-role ticket URL: keep bookmarks and emailed links working.
 function TicketRedirect({ base }: { base: string }) {
@@ -44,8 +42,6 @@ export default function App() {
   const isAuthenticated = useIsSignedIn();
   const isJe = user?.role === 'JE';
   const isSysAdmin = user?.role === 'SYSADMIN';
-  const isClerical = user?.role === 'CLERICAL';
-  const isAccountant = user?.role === 'ACCOUNTANT';
   const isAuthority = ['AE', 'SE', 'DEAN', 'DIRECTOR'].includes(user?.role || '');
 
   return (
@@ -70,10 +66,6 @@ export default function App() {
                   <AdminDashboard />
                 ) : isJe ? (
                   <JeDashboard />
-                ) : isClerical ? (
-                  <ClericalDashboard />
-                ) : isAccountant ? (
-                  <AccountantDashboard />
                 ) : isAuthority ? (
                   <AuthorityDashboard />
                 ) : (
@@ -208,30 +200,6 @@ export default function App() {
               element={
                 <Layout>
                   <AuthorityDashboard />
-                </Layout>
-              } 
-            />
-          </Route>
-
-          {/* 7. Tenders (Clerical) */}
-          <Route element={<ProtectedRoute allowedRoles={['CLERICAL', 'SYSADMIN']} />}>
-            <Route 
-              path="/clerical" 
-              element={
-                <Layout>
-                  <ClericalDashboard />
-                </Layout>
-              } 
-            />
-          </Route>
-
-          {/* 8. Bills (Accountant, Dean, Director) */}
-          <Route element={<ProtectedRoute allowedRoles={['ACCOUNTANT', 'SYSADMIN', 'DEAN', 'DIRECTOR']} />}>
-            <Route 
-              path="/finance" 
-              element={
-                <Layout>
-                  <AccountantDashboard />
                 </Layout>
               } 
             />

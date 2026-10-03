@@ -4,14 +4,14 @@ const COLUMNS = `id, status, department, campus, applicant_id, assigned_je_id, a
   is_mock, current_desk_user_id, open_change_request_id`;
 
 export async function lockById(connection, ticketId) {
-  const [rows] = await connection.query(`SELECT ${COLUMNS} FROM tickets WHERE id = ? FOR UPDATE`, [ticketId]);
+  const [rows] = await connection.query(`SELECT ${COLUMNS} FROM infra_tickets WHERE id = ? FOR UPDATE`, [ticketId]);
   return rows[0] ?? null;
 }
 
 /** Locks the ticket only if it is assigned to this JE (ownership in the SELECT). */
 export async function lockForJe(connection, ticketId, jeId) {
   const [rows] = await connection.query(
-    `SELECT ${COLUMNS} FROM tickets WHERE id = ? AND assigned_je_id = ? FOR UPDATE`,
+    `SELECT ${COLUMNS} FROM infra_tickets WHERE id = ? AND assigned_je_id = ? FOR UPDATE`,
     [ticketId, jeId]
   );
   return rows[0] ?? null;
@@ -29,7 +29,7 @@ export async function applyTransition(connection, {
   const setsAe = assignedAeId !== undefined;
   const setsSe = assignedSeId !== undefined;
   const [result] = await connection.query(
-    `UPDATE tickets
+    `UPDATE infra_tickets
         SET status = ?, current_desk_user_id = ?, open_change_request_id = ?, status_changed_at = NOW()
             ${setsAssignee ? ', assigned_je_id = ?, assigned_at = NOW()' : ''}
             ${setsAe ? ', assigned_ae_id = ?' : ''}
@@ -42,5 +42,5 @@ export async function applyTransition(connection, {
 }
 
 export async function setOpenChangeRequest(connection, ticketId, messageId) {
-  await connection.query('UPDATE tickets SET open_change_request_id = ? WHERE id = ?', [messageId, ticketId]);
+  await connection.query('UPDATE infra_tickets SET open_change_request_id = ? WHERE id = ?', [messageId, ticketId]);
 }

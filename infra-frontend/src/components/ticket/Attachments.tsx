@@ -15,6 +15,13 @@ export interface Attachment {
   file_name: string;
   download_url: string;
   report_id?: number;
+  /** Desk the person acted as when attaching. Present for staff viewers; the applicant only gets 'APPLICANT'. */
+  uploader_desk?: string | null;
+  /** Staff viewers only (the JE included). Never sent to the applicant. */
+  uploader_name?: string | null;
+  /** The timeline entry the file travelled with (one upload event = one id). */
+  audit_log_id?: number | null;
+  audit_action?: string | null;
 }
 
 // axios already prefixes its baseURL (which ends in /api).
@@ -163,29 +170,67 @@ export function AttachmentList({
   );
 }
 
-// Who uploaded what, in words. The server picks the category from the uploader.
-const CATEGORY_LABEL: Record<string, string> = {
-  APPLICANT_EVIDENCE: 'Applicant', JE_SITE_PHOTO: 'JE site photo', JE_ESTIMATE_DOC: 'JE estimate',
-  WORK_DOC: 'JE work / completion', DESK_DOC: 'Approving officer', CLERK_TENDER_DOC: 'Tender (Clerical)',
-  FINANCE_SANCTION: 'Finance', AUTHORITY_REMARKS: 'Authority',
+// Who attached what, by desk in the order the ticket travels, then one row per upload event.
+const DESK_ORDER = ['APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'SYSADMIN'];
+const DESK_NAME: Record<string, string> = {
+  APPLICANT: 'Applicant', JE: 'JE', AE: 'AE', SE: 'SE', DEAN: 'Dean', DIRECTOR: 'Director', SYSADMIN: 'Sysadmin',
+};
+// Files from before desks were recorded fall back to their category.
+const CATEGORY_DESK: Record<string, string> = {
+  APPLICANT_EVIDENCE: 'APPLICANT', JE_SITE_PHOTO: 'JE', JE_ESTIMATE_DOC: 'JE', WORK_DOC: 'JE', DESK_DOC: 'OTHER',
+};
+const WITH_ACTION: Record<string, string> = {
+  CREATED: 'when raising the ticket', SUBMITTED: 'with the report', FORWARDED: 'with Forward', APPROVED: 'with Approve',
+  CHANGES_REQUESTED: 'with Request changes', REJECTED: 'with Reject', FILES_ADDED: 'added',
 };
 
-/** Files grouped by who uploaded them. */
+const deskOf = (f: Attachment) => f.uploader_desk ?? CATEGORY_DESK[f.document_category ?? 'APPLICANT_EVIDENCE'] ?? 'OTHER';
+const stamp = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
+
+/** Files grouped by the desk that attached them, and under each desk by upload event. */
 export function GroupedAttachments({ files, empty }: { files: Attachment[]; empty?: string }) {
   if (files.length === 0) return empty ? <p className="text-xs text-slate-400">{empty}</p> : null;
-  const groups = new Map<string, Attachment[]>();
-  for (const f of files) {
-    const k = f.document_category ?? 'APPLICANT_EVIDENCE';
-    groups.set(k, [...(groups.get(k) ?? []), f]);
-  }
+
+  const byDesk = new Map<string, Attachment[]>();
+  for (const f of files) byDesk.set(deskOf(f), [...(byDesk.get(deskOf(f)) ?? []), f]);
+  const desks = [...byDesk.keys()].sort((a, b) => {
+    const ia = DESK_ORDER.indexOf(a); const ib = DESK_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+
   return (
-    <div className="space-y-3">
-      {[...groups].map(([k, list]) => (
-        <div key={k}>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{CATEGORY_LABEL[k] ?? k}</p>
-          <AttachmentList files={list} cols="grid-cols-3" />
-        </div>
-      ))}
+    <div className="space-y-4">
+      {desks.map((desk) => {
+        // One event = one timeline entry; files without one are grouped by uploader and minute.
+        const events = new Map<string, Attachment[]>();
+        for (const f of byDesk.get(desk)!) {
+          const key = f.audit_log_id != null ? `a${f.audit_log_id}` : `u${f.uploader_name ?? ''}${f.created_at.slice(0, 16)}`;
+          events.set(key, [...(events.get(key) ?? []), f]);
+        }
+        return (
+          <div key={desk}>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">{DESK_NAME[desk] ?? 'Other'}</p>
+            <div className="space-y-3">
+              {[...events.values()].map((list) => {
+                const first = list[0];
+                const action = first.audit_action ? WITH_ACTION[first.audit_action] : null;
+                return (
+                  <div key={first.id}>
+                    <p className="mb-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      {first.uploader_name && <span className="font-semibold text-slate-700 dark:text-slate-200">{first.uploader_name}</span>}
+                      {first.uploader_name && ' '}{action ?? 'attached'} · {stamp(first.created_at)}
+                    </p>
+                    <AttachmentList files={list} cols="grid-cols-3" />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -202,7 +247,7 @@ export function UploadFiles({ ticketId, onDone, label = 'Add files' }: { ticketI
     files.forEach((f) => fd.append('files', f));
     setBusy(true);
     try {
-      await api.post(`/tickets/${ticketId}/attachments`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await api.post(`/tickets/${ticketId}/attachments`, fd);
       toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded.`);
       setFiles([]);
       setInputKey((k) => k + 1);
