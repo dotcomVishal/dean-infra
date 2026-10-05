@@ -445,7 +445,7 @@ export default function AdminUsers() {
 
                 <div>
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                    Department {newUserData.role === 'JE' && <span className="text-[10px] text-amber-500 font-semibold">(Engineering Wing)</span>}
+                    Department
                   </label>
                   <select
                     value={newUserData.department}
@@ -527,7 +527,7 @@ export default function AdminUsers() {
 
                 <div>
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                    Department {editUserData.role === 'JE' && <span className="text-[10px] text-amber-500 font-semibold">(Engineering Wing)</span>}
+                    Department
                   </label>
                   <select
                     value={editUserData.department}
