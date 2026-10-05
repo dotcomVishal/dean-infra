@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import {
-  Search, RefreshCw, FileText, PlusCircle,
+  Search, RefreshCw, PlusCircle,
   Clock, CheckCircle2, X,
-  Receipt, Landmark
+  Receipt, Landmark, Loader2
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
-import { errorMessage, inr } from '../../lib/ticketUi';
+import { errorMessage, inr, ticketNo } from '../../lib/ticketUi';
+
+const BILL_TYPE: Record<string, string> = {
+  RA_BILL: 'Running bill', FINAL_BILL: 'Final bill', ADVANCE: 'Advance', SECURITY_REFUND: 'Security refund',
+};
 
 interface FinanceTicket {
   id: number;
@@ -237,30 +241,19 @@ export default function AccountantDashboard() {
   return (
     <div className="max-w-7xl mx-auto w-full space-y-6 animate-in fade-in duration-300 pb-16">
       
-      {/* Top Header Card */}
-      <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-700/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-              <Landmark size={22} />
-            </span>
-            <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">
-              Bills
-            </h1>
-          </div>
-          <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Bills, vouchers and payments.
-          </p>
+          <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">Bills</h1>
+          <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-0.5">Bills, vouchers and payments.</p>
         </div>
-
         <button
           onClick={() => {
             fetchOverview();
             fetchTickets();
           }}
-          className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition self-start md:self-auto shadow-sm"
+          className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition"
         >
-          <RefreshCw size={14} /> Refresh Ledger
+          <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
@@ -268,42 +261,38 @@ export default function AccountantDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
           <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1 flex items-center gap-1">
-            <Landmark size={13} className="text-blue-500" /> Total Approved Amount
+            <Landmark size={13} className="text-blue-500" /> Approved
           </span>
           <p className="text-xl md:text-2xl font-black text-slate-900 dark:text-white font-mono">
-            ₹{(summary?.totalSanctioned || 0).toLocaleString('en-IN')}
+            {inr(summary?.totalSanctioned || 0)}
           </p>
-          <span className="text-[10px] text-slate-500">Approved by competent authority</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
           <span className="text-[10px] uppercase font-bold text-cyan-600 dark:text-cyan-400 block mb-1 flex items-center gap-1">
-            <Receipt size={13} /> Awarded Contract Values
+            <Receipt size={13} /> Awarded
           </span>
           <p className="text-xl md:text-2xl font-black text-cyan-700 dark:text-cyan-300 font-mono">
-            ₹{(summary?.totalContractValue || 0).toLocaleString('en-IN')}
+            {inr(summary?.totalContractValue || 0)}
           </p>
-          <span className="text-[10px] text-slate-500">Active agency commitments</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
           <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 block mb-1 flex items-center gap-1">
-            <CheckCircle2 size={13} /> Total Disbursed
+            <CheckCircle2 size={13} /> Paid
           </span>
           <p className="text-xl md:text-2xl font-black text-emerald-700 dark:text-emerald-300 font-mono">
-            ₹{(summary?.totalDisbursed || 0).toLocaleString('en-IN')}
+            {inr(summary?.totalDisbursed || 0)}
           </p>
-          <span className="text-[10px] text-slate-500">PFMS / Bank payments cleared</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
           <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400 block mb-1 flex items-center gap-1">
-            <Clock size={13} /> Pending Disbursement
+            <Clock size={13} /> To pay
           </span>
           <p className="text-xl md:text-2xl font-black text-amber-700 dark:text-amber-300 font-mono">
-            ₹{(summary?.totalPendingDisbursement || 0).toLocaleString('en-IN')}
+            {inr(summary?.totalPendingDisbursement || 0)}
           </p>
-          <span className="text-[10px] text-slate-500">{summary?.totalBillsCount || 0} bills booked in total</span>
         </div>
       </div>
 
@@ -311,46 +300,46 @@ export default function AccountantDashboard() {
       <div className="flex flex-wrap gap-1 p-1.5 bg-slate-200/60 dark:bg-slate-800/60 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-700/80">
         <button
           onClick={() => setActiveTab('sanctioned')}
-          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all ${
             activeTab === 'sanctioned'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
-          <Landmark size={16} /> Approved Works
+          Approved
         </button>
 
         <button
           onClick={() => setActiveTab('wip')}
-          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all ${
             activeTab === 'wip'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
-          <Clock size={16} /> Works In Execution (Under Billing)
+          In progress
         </button>
 
         <button
           onClick={() => setActiveTab('closed')}
-          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all ${
             activeTab === 'closed'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
-          <CheckCircle2 size={16} /> Financially Settled Works
+          Closed
         </button>
 
         <button
           onClick={() => setActiveTab('all')}
-          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all ${
             activeTab === 'all'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
-          <FileText size={16} /> Complete Accounts Directory
+          All
         </button>
       </div>
 
@@ -363,7 +352,7 @@ export default function AccountantDashboard() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && fetchTickets()}
-            placeholder="Search by ticket ID, work title, or agency name..."
+            placeholder="Search by ticket no. or title"
             className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs md:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -377,10 +366,10 @@ export default function AccountantDashboard() {
 
       {/* Tickets & Billing Table */}
       {loading ? (
-        <div className="p-12 text-center text-slate-400">Loading accounts ledger...</div>
+        <div className="flex justify-center p-12 text-blue-600 dark:text-blue-400"><Loader2 className="animate-spin" size={32} /></div>
       ) : tickets.length === 0 ? (
         <div className="p-12 text-center bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-400">
-          No works found for this financial category.
+          No tickets.
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
@@ -389,12 +378,12 @@ export default function AccountantDashboard() {
               <thead>
                 <tr className="bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase font-bold text-slate-400">
                   <th className="py-3 px-4">Ticket</th>
-                  <th className="py-3 px-4">Work Description</th>
+                  <th className="py-3 px-4">Title</th>
                   <th className="py-3 px-4">Department</th>
-                  <th className="py-3 px-4">Approved Amount</th>
-                  <th className="py-3 px-4">Agency & Contract</th>
-                  <th className="py-3 px-4">Billed Amount</th>
-                  <th className="py-3 px-4 text-right">Accounts Actions</th>
+                  <th className="py-3 px-4">Approved</th>
+                  <th className="py-3 px-4">Award</th>
+                  <th className="py-3 px-4">Billed</th>
+                  <th className="py-3 px-4 text-right">Bills</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -402,10 +391,10 @@ export default function AccountantDashboard() {
                   <tr key={t.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition">
                     <td className="py-3 px-4 whitespace-nowrap">
                       <span className="font-mono font-bold text-blue-600 dark:text-blue-400 block">
-                        #TKT-{t.id.toString().padStart(4, '0')}
+                        {ticketNo(t.id)}
                       </span>
                       <span className="text-[10px] text-slate-400">
-                        {format(new Date(t.created_at), 'MMM dd, yyyy')}
+                        {format(new Date(t.created_at), 'd MMM yyyy')}
                       </span>
                     </td>
 
@@ -425,13 +414,7 @@ export default function AccountantDashboard() {
                     </td>
 
                     <td className="py-3 px-4 whitespace-nowrap font-mono">
-                      {t.estimated_amount ? (
-                        <span className="font-bold text-slate-900 dark:text-white">
-                          ₹{parseFloat(String(t.estimated_amount)).toLocaleString('en-IN')}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">-</span>
-                      )}
+                      <span className="font-bold text-slate-900 dark:text-white">{inr(t.estimated_amount)}</span>
                     </td>
 
                     <td className="py-3 px-4 whitespace-nowrap">
@@ -448,10 +431,10 @@ export default function AccountantDashboard() {
                     <td className="py-3 px-4 whitespace-nowrap font-mono">
                       <div>
                         <span className="font-bold text-emerald-600 dark:text-emerald-400 block">
-                          ₹{parseFloat(String(t.total_billed_amount || 0)).toLocaleString('en-IN')}
+                          {inr(t.total_billed_amount || 0)}
                         </span>
                         <span className="text-[10px] text-slate-400 font-sans">
-                          {t.bills_count} bills booked
+                          {t.bills_count} bills
                         </span>
                       </div>
                     </td>
@@ -460,7 +443,7 @@ export default function AccountantDashboard() {
                       <button
                         onClick={() => handleOpenDetails(t)}
                         className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition"
-                        title="View Bills Ledger"
+                        title="Bills"
                       >
                         <Receipt size={14} />
                       </button>
@@ -490,7 +473,7 @@ export default function AccountantDashboard() {
                   <Receipt className="text-emerald-600" size={18} /> Record Bill & Payment Voucher
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  #TKT-{selectedTicket.id.toString().padStart(4, '0')} · {selectedTicket.title || selectedTicket.description}
+                  {ticketNo(selectedTicket.id)} · {selectedTicket.title || selectedTicket.description}
                 </p>
               </div>
               <button onClick={() => setBillModalOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600">
@@ -639,7 +622,7 @@ export default function AccountantDashboard() {
                   disabled={submittingBill}
                   className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition disabled:opacity-50"
                 >
-                  {submittingBill ? 'Recording...' : 'Commit Bill to Ledger'}
+                  {submittingBill ? 'Recording...' : 'Save bill'}
                 </button>
               </div>
             </form>
@@ -654,7 +637,7 @@ export default function AccountantDashboard() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
               <div>
                 <span className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
-                  #TKT-{selectedTicket.id.toString().padStart(4, '0')}
+                  {ticketNo(selectedTicket.id)}
                 </span>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
                   {selectedTicket.title || selectedTicket.description}
@@ -689,7 +672,7 @@ export default function AccountantDashboard() {
             <div>
               <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">Bills</h4>
               {loadingBills ? (
-                <div className="p-6 text-center text-slate-400">Loading bills...</div>
+                <div className="p-6 text-center text-slate-400"><Loader2 className="mx-auto animate-spin" size={20} /></div>
               ) : ticketBills.length === 0 ? (
                 <div className="p-6 text-center bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-dashed border-slate-200 text-slate-400">
                   No bills have been booked for this ticket yet.
@@ -702,7 +685,7 @@ export default function AccountantDashboard() {
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-slate-900 dark:text-white">{b.bill_number}</span>
                           <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-semibold">
-                            {b.bill_type.replace('_', ' ')}
+                            {BILL_TYPE[b.bill_type] ?? b.bill_type}
                           </span>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                             b.payment_status === 'DISBURSED'
