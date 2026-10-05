@@ -1,4 +1,4 @@
-// Migrations 010-014 are additive and re-runnable (a crash mid-file must be safe to repeat),
+// Migrations 010-015 are additive and re-runnable (a crash mid-file must be safe to repeat),
 // and 013 repairs a ticket foreign key whose delete rule is not CASCADE.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,7 +20,7 @@ const sqlOf = (file) => fs.readFileSync(new URL(`../../migrations/${file}`, impo
 
 for (const file of [
   '010_attachment_attribution.sql', '011_notifications_digest.sql', '012_tender_lifecycle.sql', '013_ticket_deletions.sql',
-  '014_demo_world.sql',
+  '014_demo_world.sql', '015_tender_optional_limits_editor.sql',
 ]) {
   test(`${file}: running the file again changes nothing and does not fail`, async () => {
     const conn = await open();
