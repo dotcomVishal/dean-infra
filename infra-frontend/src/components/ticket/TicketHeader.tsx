@@ -1,9 +1,9 @@
 import { format } from 'date-fns';
-import { ArrowLeft, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { TicketDetail } from './types';
 import {
-  deskLabel, formatAge, hoursSince, isPostApproval, SLA_CLASS, slaOf, staffStatusLabel, STATUS_DESK, ticketNo,
+  deskLabel, formatAge, hoursSince, SLA_CLASS, slaOf, staffStatusLabel, STATUS_DESK, ticketNo,
 } from '../../lib/ticketUi';
 
 const PRIORITY: Record<string, string> = {
@@ -12,7 +12,7 @@ const PRIORITY: Record<string, string> = {
   LOW: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400',
 };
 
-export default function TicketHeader({ ticket, role }: { ticket: TicketDetail; role: string }) {
+export default function TicketHeader({ ticket }: { ticket: TicketDetail }) {
   const navigate = useNavigate();
   const closed = ticket.status === 'CLOSED' || ticket.status === 'DENIED';
   const held = hoursSince(ticket.status_changed_at ?? ticket.assigned_at ?? ticket.created_at);
@@ -51,12 +51,6 @@ export default function TicketHeader({ ticket, role }: { ticket: TicketDetail; r
           </p>
         </div>
       </div>
-      {role === 'JE' && isPostApproval(ticket.status) && (
-        <button onClick={() => navigate(`/je/tender/${ticket.id}`)}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 sm:w-auto sm:px-5">
-          <FileSpreadsheet size={16} /> Tender milestones
-        </button>
-      )}
     </div>
   );
 }

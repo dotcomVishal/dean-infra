@@ -225,7 +225,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
 
       {hasTenderSteps && (
         <Link to={`/je/tender/${ticket.id}`} className="mt-3 flex items-center justify-between rounded-xl border-2 border-emerald-500/40 bg-emerald-50 p-3 text-sm font-bold text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300">
-          Open tender control <ArrowRight size={16} />
+          Update tender stage <ArrowRight size={16} />
         </Link>
       )}
 

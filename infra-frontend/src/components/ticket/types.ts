@@ -66,8 +66,8 @@ export interface ReportVersion {
 
 export interface Tender {
   id: number;
-  nit_number: string;
-  portal_type: string;
+  nit_number?: string | null;
+  portal_type?: string | null;
   status?: string;
   published_date?: string | null;
   bid_end_date?: string | null;

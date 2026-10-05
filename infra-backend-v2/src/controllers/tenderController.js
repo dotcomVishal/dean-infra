@@ -38,10 +38,10 @@ async function moveStatus(connection, { ticketId, from, to, extra = '', params =
 
 const describe = (stage, p, t) => {
   switch (stage) {
-    case 'PUBLISH': return `Tender published on ${t.portal_type}: NIT ${t.nit_number}, open ${t.published_date} to ${t.bid_end_date}`;
+    case 'PUBLISH': return `Tender published${t.nit_number ? `, NIT ${t.nit_number}` : ''}${t.portal_type ? ` on ${t.portal_type}` : ''}, open ${t.published_date} to ${t.bid_end_date}`;
     case 'TECHNICAL': return 'Technical evaluation started';
     case 'FINANCIAL': return 'Financial evaluation started';
-    case 'AWARD': return `Work awarded to ${t.awarded_agency}, INR ${t.work_order_value}`;
+    case 'AWARD': return `Work awarded${t.awarded_agency ? ` to ${t.awarded_agency}` : ''}, INR ${t.work_order_value}`;
     default: return `Tender cancelled: ${t.cancel_reason}`;
   }
 };
@@ -65,10 +65,12 @@ export const applyTenderStage = async (req, res) => {
     const t = step.tender;
     let tenderId;
     if (t.op === 'insert') {
+      // portal_type is left out when none was sent, so the column default applies.
+      const cols = ['ticket_id', 'nit_number', 'published_date', 'bid_end_date', 'status', 'remarks', 'created_by'];
+      const vals = [ticketId, t.nit_number, t.published_date, t.bid_end_date, 'PUBLISHED', t.remarks, req.user.id];
+      if (t.portal_type) { cols.push('portal_type'); vals.push(t.portal_type); }
       const [ins] = await connection.query(
-        `INSERT INTO tenders (ticket_id, nit_number, portal_type, published_date, bid_end_date, status, remarks, created_by)
-         VALUES (?, ?, ?, ?, ?, 'PUBLISHED', ?, ?)`,
-        [ticketId, t.nit_number, t.portal_type, t.published_date, t.bid_end_date, t.remarks, req.user.id]);
+        `INSERT INTO tenders (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, vals);
       tenderId = ins.insertId;
     } else {
       const [[latest]] = await connection.query(

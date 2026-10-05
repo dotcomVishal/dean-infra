@@ -335,9 +335,14 @@ test('tender transition table: every refused move', () => {
   throwsCode(() => stageOf(STATUS.TENDER_PUBLISHED, undefined), 'INVALID_STAGE');
 });
 
-test('tender data gates: publish needs NIT, portal, both dates in order; award needs agency and a positive amount; cancel a reason', () => {
+test('tender data gates: publish needs both dates in order; award needs a positive amount; cancel a reason', () => {
   const at = STATUS.APPROVED_FOR_TENDERING;
-  throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, nit_number: '  ' }), 'NIT_REQUIRED');
+  const dates = { published_date: '2026-10-01', bid_end_date: '2026-10-20' };
+  const bare = stageOf(at, 'PUBLISH', dates); // NIT number and portal are optional
+  assert.equal(bare.tender.nit_number, null);
+  assert.equal(bare.tender.portal_type, null);
+  assert.equal(stageOf(at, 'PUBLISH', { ...dates, nit_number: ' N-1 ' }).tender.nit_number, 'N-1');
+  throwsCode(() => stageOf(at, 'PUBLISH', {}), 'CREATED_DATE_REQUIRED');
   throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, portal_type: 'Newspaper' }), 'PORTAL_REQUIRED');
   throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, published_date: undefined }), 'CREATED_DATE_REQUIRED');
   throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, bid_end_date: '2026-13-40' }), 'END_DATE_REQUIRED');
@@ -345,7 +350,9 @@ test('tender data gates: publish needs NIT, portal, both dates in order; award n
   assert.equal(stageOf(at, 'PUBLISH', { ...publishData, bid_end_date: '2026-10-01' }).toStatus, STATUS.TENDER_PUBLISHED); // same day is fine
 
   const f = STATUS.FINANCIAL_EVALUATION;
-  throwsCode(() => stageOf(f, 'AWARD', { award_amount: 5 }), 'AGENCY_REQUIRED');
+  const noAgency = stageOf(f, 'AWARD', { award_amount: 5 }); // agency is optional
+  assert.equal(noAgency.toStatus, STATUS.WORK_IN_PROGRESS);
+  assert.equal('awarded_agency' in noAgency.tender, false);
   for (const bad of [undefined, null, '', '  ', 'lots', NaN, Infinity]) {
     throwsCode(() => stageOf(f, 'AWARD', { awarded_agency: 'A', award_amount: bad }), 'AWARD_AMOUNT_REQUIRED');
   }

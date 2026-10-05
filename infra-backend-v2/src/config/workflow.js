@@ -470,10 +470,10 @@ export function resolveTenderStage({ currentStatus, stage, payload = {} }) {
 
   switch (stage) {
     case TENDER_STAGES.PUBLISH: {
-      const nit = text(payload.nit_number);
-      if (!nit) throw bad('NIT / bid number is required.', 'NIT_REQUIRED');
-      const portal = text(payload.portal_type);
-      if (!TENDER_PORTALS.includes(portal)) {
+      // NIT number and portal are optional records: stored when sent, never required.
+      const nit = text(payload.nit_number) || null;
+      const portal = text(payload.portal_type) || null;
+      if (portal && !TENDER_PORTALS.includes(portal)) {
         throw bad(`Portal must be one of ${TENDER_PORTALS.join(', ')}.`, 'PORTAL_REQUIRED');
       }
       if (!validDate(payload.published_date)) throw bad('Created date is required (YYYY-MM-DD).', 'CREATED_DATE_REQUIRED');
@@ -494,15 +494,14 @@ export function resolveTenderStage({ currentStatus, stage, payload = {} }) {
       return { stage, toStatus: STATUS.FINANCIAL_EVALUATION, logAction: LOG_ACTION.FIN_EVALUATION,
         tender: { op: 'update', status: 'FINANCIAL_EVALUATION', remarks } };
     case TENDER_STAGES.AWARD: {
-      const agency = text(payload.awarded_agency);
-      if (!agency) throw bad('Awarded agency is required.', 'AGENCY_REQUIRED');
+      const agency = text(payload.awarded_agency) || undefined;
       const raw = payload.award_amount;
       const amount = raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '') ? NaN : Number(raw);
       if (!Number.isFinite(amount)) throw bad('Award amount is required and must be a number.', 'AWARD_AMOUNT_REQUIRED');
       if (amount <= 0) throw bad('Award amount must be greater than zero.', 'AWARD_AMOUNT_INVALID');
       if (amount > MAX_AMOUNT) throw bad(`Award amount must be no greater than ${MAX_AMOUNT}.`, 'AWARD_AMOUNT_TOO_LARGE');
       return { stage, toStatus: STATUS.WORK_IN_PROGRESS, logAction: LOG_ACTION.WORK_AWARDED,
-        tender: { op: 'update', status: 'AWARDED', awarded_agency: agency, work_order_value: amount, remarks } };
+        tender: { op: 'update', status: 'AWARDED', ...(agency && { awarded_agency: agency }), work_order_value: amount, remarks } };
     }
     case TENDER_STAGES.CANCEL: {
       const reason = text(payload.reason);

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
-import { errorMessage } from '../../lib/ticketUi';
+import { errorMessage, inr } from '../../lib/ticketUi';
 
 interface FinanceTicket {
   id: number;
@@ -152,7 +152,7 @@ export default function AccountantDashboard() {
     setBillData({
       bill_number: `BILL/${new Date().getFullYear()}/${ticket.id.toString().padStart(4, '0')}-${ticket.bills_count + 1}`,
       voucher_number: '',
-      agency_name: ticket.awarded_agency || '',
+      agency_name: '',
       bill_type: 'RA_BILL',
       gross_amount: '',
       deductions: '0',
@@ -435,17 +435,13 @@ export default function AccountantDashboard() {
                     </td>
 
                     <td className="py-3 px-4 whitespace-nowrap">
-                      {t.awarded_agency ? (
+                      {t.work_order_value ? (
                         <div>
-                          <p className="font-semibold text-slate-800 dark:text-slate-200">{t.awarded_agency}</p>
-                          {t.work_order_value && (
-                            <span className="font-mono text-[10px] text-slate-500">
-                              WO: ₹{parseFloat(String(t.work_order_value)).toLocaleString('en-IN')}
-                            </span>
-                          )}
+                          {t.awarded_agency && <p className="font-semibold text-slate-800 dark:text-slate-200">{t.awarded_agency}</p>}
+                          <span className="font-mono text-[10px] text-slate-500">{inr(t.work_order_value)}</span>
                         </div>
                       ) : (
-                        <span className="text-slate-400 italic">Not Awarded</span>
+                        <span className="text-slate-400">—</span>
                       )}
                     </td>
 
@@ -683,9 +679,9 @@ export default function AccountantDashboard() {
                 </span>
               </div>
               <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Agency</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Awarded</span>
                 <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block">
-                  {selectedTicket.awarded_agency || 'N/A'}
+                  {selectedTicket.awarded_agency ? `${selectedTicket.awarded_agency} · ` : ''}{inr(selectedTicket.work_order_value)}
                 </span>
               </div>
             </div>

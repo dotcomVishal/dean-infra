@@ -45,7 +45,7 @@ test('full walk: publish, technical, financial, award with files; every refusal 
   const stage = (fields, ...files) => call(tokens.je, 'POST', `/api/tickets/${id}/tender-stage`, form(fields, ...files));
 
   // Missing data: nothing moves.
-  assert.equal((await stage({ ...PUBLISH, nit_number: '' })).status, 400);
+  assert.equal((await stage({ stage: 'PUBLISH' })).body.code, 'CREATED_DATE_REQUIRED');
   assert.equal((await stage({ ...PUBLISH, bid_end_date: '2026-09-01' })).body.code, 'END_BEFORE_CREATED');
   assert.equal((await row(id)).status, 'APPROVED_FOR_TENDERING');
 
@@ -86,6 +86,27 @@ test('full walk: publish, technical, financial, award with files; every refusal 
   const log = (await pool.query('SELECT action FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0].map((r) => r.action);
   assert.deepEqual(log, ['TENDER_PUBLISHED', 'TECH_EVALUATION', 'FIN_EVALUATION', 'WORK_AWARDED']);
   void je;
+});
+
+test('publish needs only the two dates; award needs only an amount; empty NIT is stored as NULL', async () => {
+  const dates = { stage: 'PUBLISH', published_date: '2026-10-01', bid_end_date: '2026-10-20' };
+  const a = await approvedTicket();
+  const b = await approvedTicket();
+  const stageOn = (t) => (fields) => call(t.tokens.je, 'POST', `/api/tickets/${t.id}/tender-stage`, form(fields));
+  const sa = stageOn(a);
+  const sb = stageOn(b);
+  assert.equal((await sa(dates)).status, 200);
+  // Two tenders with no NIT: the UNIQUE index must not refuse the second.
+  assert.equal((await sb({ ...dates, nit_number: '  ' })).status, 200);
+  assert.equal((await tenders(a.id))[0].nit_number, null);
+  assert.equal((await tenders(b.id))[0].nit_number, null);
+
+  assert.equal((await sa({ stage: 'TECHNICAL' })).status, 200);
+  assert.equal((await sa({ stage: 'FINANCIAL' })).status, 200);
+  const award = await sa({ stage: 'AWARD', award_amount: '75' });
+  assert.equal(award.status, 200, award.text);
+  const [t] = await tenders(a.id);
+  assert.deepEqual([t.status, t.awarded_agency, Number(t.work_order_value)], ['AWARDED', null, 75]);
 });
 
 test('cancel needs a reason; a cancelled tender can be published again and keeps its history', async () => {

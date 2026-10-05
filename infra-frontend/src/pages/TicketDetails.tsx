@@ -75,7 +75,7 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4 pb-16 animate-in fade-in duration-300">
-      <TicketHeader ticket={ticket} role={role} />
+      <TicketHeader ticket={ticket} />
 
       {/* Above the panel: the return thread that needs an answer. */}
       <ChangeRequestBanner ticket={ticket} myDesk={myDesk} />
