@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from '../../src/services/emailTemplates.js';
 import { EVENT } from '../../src/services/emailPolicy.js';
-import { buildDigest, isoWeekKey, weekRangeLabel } from '../../src/cron/weeklyDigest.js';
+import { buildDigest, isoWeekKey, weekRangeLabel } from '../../src/services/digestBuilder.js';
 
 process.env.FRONTEND_URL = 'https://portal.example';
 
