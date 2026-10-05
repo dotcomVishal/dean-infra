@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { 
-  ShieldAlert, Users, ClipboardList, IndianRupee, 
-  Activity, ArrowUpRight, CheckCircle2, 
-  RefreshCw, BarChart3, History,
-  HardHat, Server, AlertTriangle
+import { format } from 'date-fns';
+import {
+  Users, ClipboardList, IndianRupee,
+  Activity, RefreshCw, BarChart3,
+  HardHat, AlertTriangle, Scale, Loader2
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 import { toast } from '../../store/toastStore';
-import { errorMessage } from '../../lib/ticketUi';
+import { errorMessage, inr } from '../../lib/ticketUi';
 
 interface AdminMetrics {
   totalTickets: number;
@@ -61,34 +61,19 @@ export default function AdminDashboard() {
   return (
     <div className="max-w-7xl mx-auto w-full space-y-6 animate-in fade-in duration-200 pb-16">
       
-      {/* Top Banner */}
-      <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-700/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5">
-            <span className="p-2 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-              <ShieldAlert size={22} />
-            </span>
-            <div>
-              <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">
-                Administration
-              </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Deanery of Infrastructure
-              </p>
-            </div>
-          </div>
+          <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">Administration</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Deanery of Infrastructure</p>
         </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchMetrics}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700/60 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-        </div>
+        <button
+          onClick={fetchMetrics}
+          disabled={loading}
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700/60 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
       </div>
 
       {/* Dean / Director must each have exactly one real holder. */}
@@ -115,7 +100,6 @@ export default function AdminDashboard() {
             <span className="text-3xl font-black text-slate-900 dark:text-white">
               {metrics?.totalTickets ?? '—'}
             </span>
-            <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">All time</span>
           </div>
           <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -152,7 +136,6 @@ export default function AdminDashboard() {
             <span className="text-3xl font-black text-slate-900 dark:text-white">
               {metrics?.inTendering ?? '—'}
             </span>
-            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Open</span>
           </div>
           <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -171,64 +154,12 @@ export default function AdminDashboard() {
             <span className="text-3xl font-black text-slate-900 dark:text-white">
               {metrics?.totalUsers ?? '—'}
             </span>
-            <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">Accounts</span>
           </div>
           <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
             {metrics?.selfActions30d ?? 0} self actions in 30 days
           </p>
         </div>
-      </div>
-
-      {/* Quick Access Modules Navigation */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Link
-          to="/admin/tickets"
-          className="group p-5 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm hover:border-blue-500 dark:hover:border-blue-500 transition-all flex items-center justify-between"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
-              <ClipboardList size={22} />
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">Tickets</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Search, filter and override.</p>
-            </div>
-          </div>
-          <ArrowUpRight size={18} className="text-slate-400 group-hover:text-blue-600 transition" />
-        </Link>
-
-        <Link
-          to="/admin/users"
-          className="group p-5 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm hover:border-emerald-500 dark:hover:border-emerald-500 transition-all flex items-center justify-between"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
-              <Users size={22} />
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">Users</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Roles, departments and access.</p>
-            </div>
-          </div>
-          <ArrowUpRight size={18} className="text-slate-400 group-hover:text-emerald-600 transition" />
-        </Link>
-
-        <Link
-          to="/admin/audit"
-          className="group p-5 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm hover:border-purple-500 dark:hover:border-purple-500 transition-all flex items-center justify-between"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 group-hover:scale-105 transition-transform">
-              <History size={22} />
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">Recent Activity</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Open the audit log.</p>
-            </div>
-          </div>
-          <ArrowUpRight size={18} className="text-slate-400 group-hover:text-purple-600 transition" />
-        </Link>
       </div>
 
       {/* Tickets by status and JE workloads */}
@@ -329,37 +260,119 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* System Health Card */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 p-5 shadow-sm space-y-3">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Server size={16} className="text-emerald-500" /> Service Status
-            </h2>
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-700/60">
-                <span className="text-slate-600 dark:text-slate-400">MySQL Database Pool</span>
-                <span className="flex items-center gap-1.5 text-emerald-600 font-bold">
-                  <CheckCircle2 size={13} /> Connected (Healthy)
-                </span>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-700/60">
-                <span className="text-slate-600 dark:text-slate-400">Authentication Service</span>
-                <span className="flex items-center gap-1.5 text-emerald-600 font-bold">
-                  <CheckCircle2 size={13} /> Google OAuth SSO
-                </span>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-700/60">
-                <span className="text-slate-600 dark:text-slate-400">Nginx Reverse Proxy</span>
-                <span className="flex items-center gap-1.5 text-emerald-600 font-bold">
-                  <CheckCircle2 size={13} /> Active (:8085)
-                </span>
-              </div>
-            </div>
-          </div>
+          <ApprovalLimits />
 
         </div>
 
       </div>
 
+    </div>
+  );
+}
+
+interface LimitRow { amount: number | null; updated_at: string | null; updated_by: string | null }
+type Limits = { SE_APPROVE: LimitRow; DEAN_APPROVE: LimitRow };
+
+/** The SE and Dean approval limits. The Director has none. Edit is hidden for the read-only demo Sysadmin. */
+function ApprovalLimits() {
+  const isDemo = useAuthStore((s) => !!s.user?.is_demo);
+  const [limits, setLimits] = useState<Limits | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [se, setSe] = useState('');
+  const [dean, setDean] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get('/admin/limits')
+      .then((res) => setLimits(res.data.limits))
+      .catch((err) => toast.error(errorMessage(err, 'Could not load the approval limits.')));
+  }, []);
+
+  const startEdit = () => {
+    setSe(String(limits?.SE_APPROVE.amount ?? ''));
+    setDean(String(limits?.DEAN_APPROVE.amount ?? ''));
+    setEditing(true);
+  };
+
+  const invalid = !(Number(se) > 0) || !(Number(dean) > 0) || Number(se) >= Number(dean);
+
+  const save = async () => {
+    if (invalid || busy) return;
+    if (!window.confirm('Change approval limits? This applies to open tickets now.')) return;
+    setBusy(true);
+    try {
+      const res = await api.put('/admin/limits', { SE_APPROVE: Number(se), DEAN_APPROVE: Number(dean) });
+      setLimits(res.data.limits);
+      setEditing(false);
+      toast.success(res.data.message || 'Limits saved.');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not save the limits.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changed = limits
+    ? [limits.SE_APPROVE, limits.DEAN_APPROVE].filter((r) => r.updated_by && r.updated_at)
+      .sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0]
+    : undefined;
+  const inputCls = 'w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-mono text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
+
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 p-5 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <Scale size={16} className="text-blue-500" /> Approval limits
+        </h2>
+        {!editing && !isDemo && limits && (
+          <button onClick={startEdit} className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400">Edit</button>
+        )}
+      </div>
+
+      {!limits ? (
+        <div className="flex justify-center py-4 text-blue-600"><Loader2 className="animate-spin" size={20} /></div>
+      ) : editing ? (
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="limit-se" className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500">SE (₹)</label>
+            <input id="limit-se" type="number" min="0" step="0.01" className={inputCls} value={se} onChange={(e) => setSe(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="limit-dean" className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Dean (₹)</label>
+            <input id="limit-dean" type="number" min="0" step="0.01" className={inputCls} value={dean} onChange={(e) => setDean(e.target.value)} />
+          </div>
+          {Number(se) > 0 && Number(dean) > 0 && Number(se) >= Number(dean) && (
+            <p className="text-xs text-rose-600">The SE limit must be lower than the Dean limit.</p>
+          )}
+          <div className="flex gap-2">
+            <button onClick={save} disabled={invalid || busy}
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+              {busy && <Loader2 size={13} className="animate-spin" />} Save
+            </button>
+            <button onClick={() => setEditing(false)} className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2 text-xs">
+          <div className="flex items-center justify-between border-b border-slate-100 py-1.5 dark:border-slate-700/60">
+            <span className="text-slate-600 dark:text-slate-400">SE</span>
+            <span className="font-mono font-bold text-slate-900 dark:text-white">{inr(limits.SE_APPROVE.amount)}</span>
+          </div>
+          <div className="flex items-center justify-between border-b border-slate-100 py-1.5 dark:border-slate-700/60">
+            <span className="text-slate-600 dark:text-slate-400">Dean</span>
+            <span className="font-mono font-bold text-slate-900 dark:text-white">{inr(limits.DEAN_APPROVE.amount)}</span>
+          </div>
+          <div className="flex items-center justify-between py-1.5">
+            <span className="text-slate-600 dark:text-slate-400">Director</span>
+            <span className="text-slate-500">No limit</span>
+          </div>
+          {changed?.updated_by && (
+            <p className="pt-1 text-[11px] text-slate-400">Changed {format(new Date(changed.updated_at!), 'd MMM yyyy')} by {changed.updated_by}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
