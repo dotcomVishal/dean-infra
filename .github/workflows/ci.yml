@@ -58,3 +58,25 @@ jobs:
 
       - name: "Integration tests (MySQL service container): assignment + schema/state-machine agreement"
         run: npm run test:integration
+
+  frontend-build:
+    name: Frontend type-check + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: infra-frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra-frontend/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build
