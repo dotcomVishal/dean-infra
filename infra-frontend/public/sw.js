@@ -1,6 +1,6 @@
 // IIT Mandi Deanery of Infrastructure Service Worker
-// v2.0.2: attachments are private (S14) -- bumping the name makes activate() delete every older cache, including any /uploads copies.
-const CACHE_NAME = 'dean-infra-v2.0.2';
+// v2.0.4: tender stages moved to /tender-stage and /resolve (old endpoints answer 410). Bumping the name makes activate() delete every older cache (v2.0.3: form lost category and building; v2.0.2: private attachments, S14).
+const CACHE_NAME = 'dean-infra-v2.0.4';
 
 const CORE_ASSETS = [
   '/',

@@ -4,7 +4,7 @@ import path from 'path';
 import pool from '../src/config/db.js';
 import { runMigrations } from '../src/config/migrate.js';
 import { moveFile } from '../src/utils/fileManager.js';
-import { resolveAction, availableActions, resolveTenderUpdate, STATUS, ROLE, WorkflowError } from '../src/config/workflow.js';
+import { resolveAction, availableActions, STATUS, ROLE, WorkflowError } from '../src/config/workflow.js';
 
 let passed = 0;
 let failed = 0;

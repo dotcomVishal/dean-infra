@@ -3,7 +3,7 @@
 // a desk may DO live in config/workflow.js.
 
 import logger from '../utils/logger.js';
-import { STATUS, deskForStatus } from '../config/workflow.js';
+import { STATUS, deskForStatus, AE_STAGE } from '../config/workflow.js';
 
 const PERSON = 'u.id, u.name, u.email, u.role';
 
@@ -21,10 +21,10 @@ export async function resolveAeForScope(connection, { department, campus }) {
         AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))
       ORDER BY (s.campus = 'BOTH') ASC,
         (SELECT COUNT(*) FROM tickets t
-          WHERE t.current_desk_user_id = u.id AND t.status IN ('UNASSIGNED', 'PENDING_AE_APPROVAL')) ASC,
+          WHERE t.current_desk_user_id = u.id AND t.status IN (?, ?)) ASC,
         u.id ASC
       LIMIT 1`,
-    [department, campus ?? null, campus ?? null]
+    [department, campus ?? null, campus ?? null, ...AE_STAGE]
   );
   return rows[0] ?? null;
 }

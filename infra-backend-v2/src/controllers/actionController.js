@@ -17,8 +17,10 @@ import * as deskModel from '../models/deskModel.js';
 import { insertAudit } from '../models/auditModel.js';
 import { notifyTransition } from '../services/notifier.js';
 import { kickOutbox } from '../cron/emailReminders.js';
-import { sendServerError } from '../utils/httpError.js';
+import { sendServerError, sendWorkflowError } from '../utils/httpError.js';
 import { testPrefix } from '../middleware/testRole.js';
+import { attachFiles } from '../services/attachments.js';
+import { cleanupTempFiles } from '../utils/fileManager.js';
 
 const neutralRemark = (t, actorName) => {
   switch (t.action) {
@@ -49,8 +51,10 @@ export const performTicketAction = async (req, res) => {
       success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
   }
 
+  const files = req.files ?? [];
   const parsed = actionSchema.safeParse(req.body);
   if (!parsed.success) {
+    cleanupTempFiles(files);
     return res.status(400).json({
       success: false,
       code: 'VALIDATION_ERROR',
@@ -58,7 +62,12 @@ export const performTicketAction = async (req, res) => {
       errors: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
     });
   }
-  const { action, to_desk, message, internal_remark, public_note, assignee_id } = parsed.data;
+  const { action, to_desk, message, internal_remark, public_note, assignee_id, restricted_files } = parsed.data;
+  if (files.length > 0 && action === ACTION.ASSIGN_JE) {
+    cleanupTempFiles(files);
+    return res.status(400).json({
+      success: false, code: 'FILES_NOT_ALLOWED', message: 'Choosing a JE takes no files.', requestId: req.id });
+  }
   // Identity comes from the verified token + DB row, never from the payload.
   const user = { id: req.user.id, role: req.user.role };
 
@@ -132,6 +141,12 @@ export const performTicketAction = async (req, res) => {
       isSelfAction: isSelfAction(row, user.id),
     });
 
+    // Files travel with the movement: same transaction, linked to its audit row (Issue 2).
+    await attachFiles(connection, {
+      ticketId, files, userId: user.id, desk: t.fromDesk,
+      category: restricted_files ? 'AUTHORITY_REMARKS' : 'DESK_DOC', auditLogId: auditId,
+    });
+
     // to_user_id is resolved now so the record says exactly who received it.
     for (const spec of specs) {
       if (!spec.to_desk) continue;
@@ -168,9 +183,8 @@ export const performTicketAction = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
-    if (error instanceof WorkflowError) {
-      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
-    }
+    cleanupTempFiles(files);
+    if (error instanceof WorkflowError) return sendWorkflowError(req, res, error);
     return sendServerError(req, res, error, 'performTicketAction');
   } finally {
     connection.release();

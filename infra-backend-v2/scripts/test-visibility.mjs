@@ -7,8 +7,8 @@ import {
   buildViewer, canViewTicket, capabilities, canViewAttachment, filterMessages, filterAudit,
   buildTicketDetails, redactQueueRow, stageLabel, uploadCategory,
 } from '../src/services/visibility.js';
-import { reminderDueAt, copiesAe } from '../src/services/notifier.js';
-import { applicantStageEmail } from '../src/services/emailTemplates.js';
+import { reminderDueAt } from '../src/services/notifier.js';
+import { applicantEventEmail } from '../src/services/emailTemplates.js';
 import { fileFilter } from '../src/middleware/upload.js';
 
 const ticket = (o = {}) => ({
@@ -92,7 +92,9 @@ test('uploadCategory: decided by who uploads, refused on closed tickets and to o
   const pre = ticket();
   const cat = (u, t, facts = {}) => uploadCategory(V(u, t, facts), t);
   assert.equal(cat(applicant, wip), 'APPLICANT_EVIDENCE');
-  assert.equal(cat(je, pre), 'JE_ESTIMATE_DOC');
+  assert.equal(cat(je, pre), null);                       // R1: on the JE desk the report form is the only way
+  assert.equal(cat(je, ticket({ status: 'RETURNED_TO_JE' })), null);
+  assert.equal(cat(je, ticket({ status: 'PENDING_AE_APPROVAL', current_desk_user_id: 20 })), 'JE_ESTIMATE_DOC');
   assert.equal(cat(je, wip), 'WORK_DOC');
   assert.equal(cat(ae, wip, { scopes: scopesNorthCivil }), 'DESK_DOC');
   for (const u of [se, dean, dir, admin]) assert.equal(cat(u, wip), 'DESK_DOC');
@@ -205,19 +207,18 @@ test('details payload: JE gets no bills; Clerical loses applicant contact', () =
   assert.equal(redactQueueRow({ role: 'DEAN' }, { id: 1, applicant_phone: '1' }).applicant_phone, '1');
 });
 
-test('reminder schedule: instant, +12h, +24h, +72h, then every 24h; AE copied from #4', () => {
+test('reminder schedule: instant, +12h, +24h, +72h, then every 24h', () => {
   const t0 = new Date('2026-01-01T00:00:00Z');
   const h = (n) => (reminderDueAt(t0, n) - t0) / 3600e3;
   assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map(h), [0, 12, 24, 72, 96, 120, 144]);
-  assert.deepEqual([1, 2, 3, 4, 5, 10].map(copiesAe), [false, false, false, true, true, true]);
 });
 
-test('applicant email: stage + portal link only, whatever the ticket holds', () => {
+test('applicant email: event + portal link only, whatever the ticket holds', () => {
   process.env.FRONTEND_URL = 'https://portal.example';
-  for (const status of ['ASSIGNED_TO_JE', 'PENDING_DEAN_APPROVAL', 'APPROVED_FOR_TENDERING', 'DENIED', 'CLOSED']) {
-    const { subject, body } = applicantStageEmail(42, status);
-    assert.ok(body.includes(stageLabel(status)));
+  for (const event of ['RECEIVED', 'RESOLVED', 'REJECTED', 'CLOSED']) {
+    const { subject, body } = applicantEventEmail(42, event);
     assert.ok(body.includes('https://portal.example/ticket/42'));
+    assert.ok(subject.startsWith('[Infra] TKT-0042: '));
     assert.ok(!/₹|INR|Rs\.?\s?\d|@|Phone|Engineer|Dean |Director|remark/i.test(subject + body), body);
   }
   assert.equal(stageLabel('PENDING_SE_APPROVAL'), stageLabel('PENDING_DEAN_APPROVAL'));

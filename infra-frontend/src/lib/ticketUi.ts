@@ -1,15 +1,33 @@
 // Shared, presentation-only helpers. Nothing here decides who may do what:
 // permissions and limits always come from the API payload.
 
+import { POST_APPROVAL } from './statuses';
+
 export const ticketNo = (id: number | string) => `#TKT-${String(id).padStart(4, '0')}`;
 
 export const inr = (n: number | string | null | undefined) =>
   n == null || n === '' || Number.isNaN(Number(n)) ? '—' : `₹${Number(n).toLocaleString('en-IN')}`;
 
-/** Pulls the server's message out of an axios error. */
+// X4: bodies that are not JSON (nginx 413, gateway errors) carry no message,
+// so fall back by status instead of showing one generic line for everything.
+const STATUS_MESSAGE: Record<number, string> = {
+  413: 'Files are too large. Remove some files or use smaller ones.',
+  415: 'One of the files is not an allowed type.',
+  429: 'Too many requests. Wait a minute and try again.',
+  502: 'Server is not reachable. Try again shortly.',
+  503: 'Server is not reachable. Try again shortly.',
+  504: 'Server is not reachable. Try again shortly.',
+};
+
+/** Pulls the server's message out of an axios error, with the request id when known. */
 export const errorMessage = (err: unknown, fallback: string): string => {
-  const e = err as { response?: { data?: { message?: string } } };
-  return e?.response?.data?.message || fallback;
+  const e = err as {
+    response?: { status?: number; data?: { message?: string; requestId?: string }; headers?: Record<string, string> };
+  };
+  const res = e?.response;
+  const base = res?.data?.message || (res?.status ? STATUS_MESSAGE[res.status] : undefined) || fallback;
+  const rid = res?.data?.requestId || res?.headers?.['x-request-id'];
+  return rid ? `${base} (ref ${String(rid).slice(0, 8)})` : base;
 };
 
 export const DESK_ORDER = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'] as const;
@@ -36,42 +54,7 @@ export const STATUS_DESK: Record<string, string> = {
   PENDING_DIRECTOR_APPROVAL: 'DIRECTOR',
 };
 
-const STAFF_STATUS: Record<string, string> = {
-  UNASSIGNED: 'Unassigned — waiting for AE to choose a JE',
-  ASSIGNED_TO_JE: 'With JE for inspection',
-  RETURNED_TO_JE: 'Changes requested — with JE',
-  PENDING_AE_APPROVAL: 'Waiting for AE',
-  PENDING_SE_APPROVAL: 'Waiting for SE',
-  PENDING_DEAN_APPROVAL: 'Waiting for Dean',
-  PENDING_DIRECTOR_APPROVAL: 'Waiting for Director',
-  APPROVED_FOR_TENDERING: 'Approved — awaiting tender',
-  TENDER_PUBLISHED: 'Tender published',
-  WORK_IN_PROGRESS: 'Work in progress',
-  WORK_COMPLETED: 'Work done — awaiting applicant confirmation',
-  CLOSED: 'Closed',
-  DENIED: 'Rejected',
-};
-export const staffStatusLabel = (status: string) => STAFF_STATUS[status] ?? status.replace(/_/g, ' ');
-
-// Plain-words stage for the applicant. The API sends `stage_label`; this is
-// only the fallback if an older payload lacks it. Never names a person.
-const APPLICANT_STAGE: Record<string, string> = {
-  UNASSIGNED: 'Received',
-  ASSIGNED_TO_JE: 'Under JE inspection',
-  RETURNED_TO_JE: 'Under JE inspection',
-  PENDING_AE_APPROVAL: 'Under review',
-  PENDING_SE_APPROVAL: 'Under review',
-  PENDING_DEAN_APPROVAL: 'Under review',
-  PENDING_DIRECTOR_APPROVAL: 'Under review',
-  APPROVED_FOR_TENDERING: 'Approved — tendering',
-  TENDER_PUBLISHED: 'Approved — tendering',
-  WORK_IN_PROGRESS: 'Work in progress',
-  WORK_COMPLETED: 'Work done — please verify',
-  CLOSED: 'Completed',
-  DENIED: 'Rejected',
-};
-export const applicantStage = (status: string, stageLabel?: string) =>
-  stageLabel || APPLICANT_STAGE[status] || 'In progress';
+export { staffStatusLabel, applicantStage } from './statuses';
 
 // ---- SLA ageing -----------------------------------------------------------
 export type Sla = 'ok' | 'warn' | 'late';
@@ -108,8 +91,14 @@ export const formatAge = (hours: number) => {
   return h ? `${d}d ${h}h` : `${d}d`;
 };
 
-export const isPostApproval = (status: string) =>
-  ['APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED'].includes(status);
+export const isPostApproval = (status: string) => POST_APPROVAL.includes(status);
+
+/** "North · near A1 gate". Tickets raised before the form change may carry a building and a combined location; they still read correctly. */
+export const placeLabel = (t: { campus?: string | null; building?: string | null; landmark?: string | null; location?: string | null }) =>
+  (t.landmark
+    ? [t.campus, t.building, t.landmark]
+    : [t.campus, t.location]
+  ).filter(Boolean).join(' · ') || 'Campus';
 
 export const mapsHref = (t: { lat?: number | string | null; lng?: number | string | null; location?: string }) => {
   let q = encodeURIComponent(t.location || '');

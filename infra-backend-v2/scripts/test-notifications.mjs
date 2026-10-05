@@ -83,24 +83,23 @@ async function run() {
     eq(t.sent, 2, 'two sent');
     const je = sent.find((m) => m.to === deepak.email);
     const ap = sent.find((m) => m.to === applicant.email);
-    eq(!!je && je.text.includes('New Ticket') || je.subject.includes('New Ticket'), true, 'JE assignment mail');
-    eq(ap.text.includes('Under JE inspection') && ap.text.includes(`/ticket/${id}`), true, 'stage + link');
+    eq(je.subject.includes('Assigned to you'), true, 'JE assignment mail');
+    eq(ap.subject.includes('Received') && ap.text.includes(`/ticket/${id}`), true, 'event + link');
     for (const bad of [deepak.name, deepak.email, ae.name, 'Phone', 'INR', '₹', 'Leaking roof', 'desc']) {
       eq(ap.subject.includes(bad) || ap.text.includes(bad), false, `applicant mail must not contain "${bad}"`);
     }
-    eq(je.cc, undefined, 'no AE copy on #1');
     const r = await one("SELECT reminder_no, next_due_at FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER'", [id]);
     eq(r.reminder_no, 1, 'reminder_no'); eq(new Date(r.next_due_at).getTime(), T0.getTime() + 12 * H, 'next due +12h');
   });
 
-  await ok('cadence with fake clock: nothing at +11h59m; #2 at +12h, #3 at +24h (no cc); #4 at +72h copies the AE; #5 at +96h copies the AE', async () => {
+  await ok('cadence with fake clock: nothing at +11h59m; #2 at +12h, #3 at +24h, #4 at +72h, #5 at +96h; nobody is ever copied', async () => {
     sent.length = 0;
     eq((await pass_(12 * H - 60e3)).sent, 0, 'not yet at 11:59');
     eq((await pass_(12 * H)).sent, 1, '#2'); eq(sent.at(-1).cc, undefined, '#2 no cc'); eq(sent.at(-1).subject.includes('Reminder 2'), true, 'subject #2');
     eq((await pass_(24 * H)).sent, 1, '#3'); eq(sent.at(-1).cc, undefined, '#3 no cc');
     eq((await pass_(48 * H)).sent, 0, 'nothing between #3 and #4');
-    eq((await pass_(72 * H)).sent, 1, '#4'); eq(sent.at(-1).cc, ae.email, '#4 copies AE');
-    eq((await pass_(96 * H)).sent, 1, '#5'); eq(sent.at(-1).cc, ae.email, '#5 copies AE');
+    eq((await pass_(72 * H)).sent, 1, '#4'); eq(sent.at(-1).cc, undefined, '#4 no AE copy (digest covers overdue tickets)');
+    eq((await pass_(96 * H)).sent, 1, '#5'); eq(sent.at(-1).cc, undefined, '#5 no AE copy');
     const n = await one("SELECT COUNT(*) AS c FROM audit_logs WHERE ticket_id = ? AND action = 'REMINDER_SENT'", [id]);
     eq(Number(n.c), 5, 'REMINDER_SENT audit rows (#1..#5)');
   });
@@ -112,7 +111,7 @@ async function run() {
     eq(sent.length, 1, 'one SMTP call');
   });
 
-  await ok('JE files the report -> reminders stop; AE gets one movement mail; applicant told stage change', async () => {
+  await ok('JE files the report -> reminders stop; AE gets one arrival mail; applicant gets nothing for internal movement', async () => {
     const res = fakeRes();
     await submitReport({
       user: deepak, params: { ticket_id: String(id) },
@@ -124,10 +123,9 @@ async function run() {
     sent.length = 0;
     await processDueNotifications({ now: new Date(T0.getTime() + 500 * H), send });
     eq(sent.filter((m) => m.to === deepak.email && m.subject.includes('Reminder')).length, 0, 'JE not reminded after report');
-    eq(sent.some((m) => m.to === ae.email && m.subject.includes('awaiting your review')), true, 'AE told');
-    const apMail = sent.find((m) => m.to === applicant.email);
-    eq(apMail.text.includes('Under review'), true, 'applicant: Under review');
-    eq(/₹|15000|Replace sheet|Phone/.test(apMail.text), false, 'no amount / remark in applicant mail');
+    eq(sent.filter((m) => m.to === ae.email && m.subject.includes('Awaiting your review')).length, 1, 'AE told once');
+    eq(sent.some((m) => m.to === applicant.email), false, 'applicant: no mail for internal movement (R9)');
+    eq(sent.some((m) => /₹|15000|Replace sheet|Phone/.test(m.text)), false, 'no amount / remark in any mail');
   });
 
   await ok('retry with backoff, then FAILED after MAX_ATTEMPTS; other mail unaffected', async () => {
@@ -151,16 +149,16 @@ async function run() {
     }
   });
 
-  await ok('UNASSIGNED: AE gets the notice + reminders; ASSIGN_JE replaces them with a JE series', async () => {
+  await ok('UNASSIGNED: AE gets one notice and no reminders; ASSIGN_JE starts a JE series', async () => {
     const id2 = await mkTicket(applicant.id, null, ae.id, 'UNASSIGNED');
     await enqueueCreated(id2, { status: 'UNASSIGNED', deskUser: ae }, T0);
     sent.length = 0;
     await pass_(0);
-    eq(sent.some((m) => m.to === ae.email && m.subject.includes('UNASSIGNED')), true, 'AE UNASSIGNED mail');
-    eq(sent.find((m) => m.to === applicant.email).text.includes('Received'), true, 'applicant: Received');
+    eq(sent.some((m) => m.to === ae.email && m.subject.includes('Needs a JE')), true, 'AE arrival mail');
+    eq(sent.find((m) => m.to === applicant.email).subject.includes('Received'), true, 'applicant: Received');
     sent.length = 0;
     await pass_(12 * H);
-    eq(sent.filter((m) => m.to === ae.email && m.subject.includes('Reminder 2')).length, 1, 'AE reminded at +12h');
+    eq(sent.filter((m) => m.to === ae.email).length, 0, 'AE is not reminded');
     const r = await act(ae, id2, { action: 'ASSIGN_JE', assignee_id: deepak.id });
     eq(r.statusCode, 200, `assign (${JSON.stringify(r.body)})`);
     const live = await all("SELECT desk, to_user_id FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id2]);
@@ -173,7 +171,7 @@ async function run() {
     await pool.query("UPDATE tickets SET status = 'PENDING_SE_APPROVAL' WHERE id = ?", [id3]); // moved without going through the notifier
     sent.length = 0;
     await pass_(0);
-    eq(sent.filter((m) => m.to === deepak.email && m.subject.includes('New Ticket')).length, 0, 'no JE mail');
+    eq(sent.filter((m) => m.to === deepak.email && m.subject.includes('Assigned to you')).length, 0, 'no JE mail');
     eq((await one("SELECT status FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER'", [id3])).status, 'CANCELLED', 'cancelled');
   });
 

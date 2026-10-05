@@ -8,7 +8,7 @@
 //
 //  Reminder rows (kind = REMINDER) stay PENDING and move next_due_at forward
 //  after each send (see services/notifier.js for the cadence) until the ticket
-//  leaves the stage being nagged. From the 4th reminder the AE is copied.
+//  leaves the stage being nagged. Only the JE is reminded (services/emailPolicy.js).
 //  Each reminder sent writes REMINDER_SENT to the audit log.
 //
 //  At-least-once: a crash between "SMTP accepted" and "row updated" re-sends
@@ -19,10 +19,11 @@ import pool from '../config/db.js';
 import logger, { errorFields } from '../utils/logger.js';
 import { deliverEmail, isPlaceholderEmail } from '../utils/mailer.js';
 import * as notificationModel from '../models/notificationModel.js';
-import { findDeskOwner } from '../models/deskModel.js';
 import { insertAudit } from '../models/auditModel.js';
-import { reminderDueAt, copiesAe } from '../services/notifier.js';
-import { reminderEmail, applicantVerifyEmail } from '../services/emailTemplates.js';
+import { reminderDueAt } from '../services/notifier.js';
+import { jeReminderEmail } from '../services/emailTemplates.js';
+import { remindersAllowed } from '../services/emailPolicy.js';
+import { startWeeklyDigest } from './weeklyDigest.js';
 
 export const MAX_ATTEMPTS = 5;
 const HOUR = 60 * 60 * 1000;
@@ -40,10 +41,8 @@ function reminderStillApplies(row, ticket) {
   if (!ticket) return false;
   const stop = (row.stop_when_status_not_in ?? '').split(',').filter(Boolean);
   if (!stop.includes(ticket.status)) return false;
-  const holder = row.desk === 'JE' ? ticket.assigned_je_id
-    : row.desk === 'APPLICANT' ? ticket.applicant_id
-      : ticket.current_desk_user_id;
-  return holder === row.to_user_id;
+  // Only the JE is reminded; a row for any other desk predates the policy.
+  return row.desk === 'JE' && ticket.assigned_je_id === row.to_user_id;
 }
 
 async function sendOne(row, { now, send }) {
@@ -55,28 +54,19 @@ async function sendOne(row, { now, send }) {
   const isReminder = row.kind === 'REMINDER';
   let subject = row.subject;
   let body = row.body;
-  let cc;
   const number = row.reminder_no + 1;
   let ticket = null;
 
   if (isReminder) {
     ticket = await loadTicket(pool, row.ticket_id);
-    if (!reminderStillApplies(row, ticket) || !row.to_active) {
+    if (!reminderStillApplies(row, ticket) || !row.to_active || !remindersAllowed('JE')) {
       await notificationModel.markCancelled(pool, row.id, 'stage left or recipient changed');
       return 'cancelled';
     }
-    if (number > 1 && row.desk === 'APPLICANT') {
-      ({ subject, body } = applicantVerifyEmail(ticket.id, number));
-    } else if (number > 1) {
-      ({ subject, body } = reminderEmail({
-        ticketId: ticket.id, title: ticket.title, recipientName: row.to_name, desk: row.desk, number,
-        hoursPending: Math.floor((now - new Date(row.anchor_at)) / HOUR),
-        escalated: row.desk === 'JE' && copiesAe(number),
+    if (number > 1) {
+      ({ subject, body } = jeReminderEmail({
+        ticketId: ticket.id, number, hoursPending: Math.floor((now - new Date(row.anchor_at)) / HOUR),
       }));
-    }
-    if (row.desk === 'JE' && copiesAe(number)) {
-      const ae = await findDeskOwner(pool, ticket, 'AE');
-      if (ae && ae.email !== row.to_email && !isPlaceholderEmail(ae.email)) cc = ae.email;
     }
   } else if (!row.to_active) {
     await notificationModel.markFailure(pool, row.id, {
@@ -85,7 +75,7 @@ async function sendOne(row, { now, send }) {
   }
 
   try {
-    await send({ to: row.to_email, cc, subject, text: body });
+    await send({ to: row.to_email, subject, text: body });
   } catch (err) {
     const attempts = row.attempts + 1;
     const giveUp = attempts >= MAX_ATTEMPTS;
@@ -109,12 +99,17 @@ async function sendOne(row, { now, send }) {
     });
     await insertAudit(conn, {
       ticketId: row.ticket_id, userId: row.to_user_id, action: 'REMINDER_SENT',
-      remarks: `Reminder ${number} sent to ${row.desk}${cc ? ' (AE copied)' : ''}`,
+      remarks: `Reminder ${number} sent to ${row.desk}`,
       visibility: 'INTERNAL',
     });
     await conn.commit();
   } catch (err) {
     await conn.rollback();
+    // The ticket was deleted between the send and the bookkeeping: nothing is wrong, nothing to retry.
+    if (err.code === 'ER_NO_REFERENCED_ROW_2' || err.code === 'ER_NO_REFERENCED_ROW') {
+      logger.info('reminder bookkeeping skipped: the ticket no longer exists', { notificationId: row.id, ticketId: row.ticket_id });
+      return 'cancelled';
+    }
     throw err;
   } finally {
     conn.release();
@@ -163,6 +158,7 @@ export function startEmailWorker() {
   if (started || process.env.DISABLE_EMAIL_WORKER === 'true') return;
   started = true;
   cron.schedule('* * * * *', tick);
+  startWeeklyDigest();
   tick();
 }
 

@@ -18,6 +18,7 @@ export const requestId = (req, res, next) => {
       status: res.statusCode,
       ms: Number(process.hrtime.bigint() - start) / 1e6,
       userId: req.user?.id,
+      ip: req.ip, // X1: shows which address the backend sees behind the proxies
     });
   });
   next();

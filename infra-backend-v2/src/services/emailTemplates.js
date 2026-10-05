@@ -1,187 +1,117 @@
 // Pure email builders: (plain data in) -> { subject, body }. No DB, no SMTP.
 //
-// Two audiences, two different contracts:
-//   - applicantStageEmail() takes ONLY (ticketId, status). It has no parameter
+// Plain text, short, one link. Rules (enforced by test/unit/email-templates.test.mjs):
+//   - no "<", no "=====", no bullets, no emoji
+//   - subject "[Infra] TKT-0042: <event>", at most 70 characters
+//   - body at most 6 lines for an event mail, one link, a one-line signature
+//   - no description text, no phone numbers, no applicant e-mail address
+//
+// Two audiences, two contracts:
+//   - applicantEventEmail() takes ONLY (ticketId, event). It has no parameter
 //     that could carry a staff name, an amount or a remark, so an applicant
-//     mail cannot leak one -- redaction by construction, not by filtering
-//     (plan.md Q11).
-//   - Staff mails may name people and quote the request; they go to people
-//     who are allowed to see that (visibility matrix).
-import { stageLabel } from './visibility.js';
-import { isManualJeCategory } from '../config/ticketCategories.js';
+//     mail cannot leak one (redaction by construction, plan.md Q11).
+//   - Staff mails may name the ticket and quote a change request; they go to
+//     people allowed to see that (visibility matrix).
+import { EVENT } from './emailPolicy.js';
 
-const FOOTER = 'Deanery of Infrastructure, IIT Mandi\nThis is an automated operational notification.';
+export const SIGNATURE = 'Deanery of Infrastructure, IIT Mandi';
 
 export const portalUrl = () => process.env.FRONTEND_URL || 'http://localhost:5173';
-export const ticketRef = (id) => `#TKT-${String(id).padStart(4, '0')}`;
+export const ticketRef = (id) => `TKT-${String(id).padStart(4, '0')}`;
+export const ticketLink = (id) => `${portalUrl()}/ticket/${id}`;
 
-/** Where a desk should click to act on a ticket. */
-export function linkForDesk(desk, ticketId) {
-  const base = portalUrl();
-  switch (desk) {
-    case 'JE':         return `${base}/je/ticket/${ticketId}`;
-    case 'AE': case 'SE': case 'DEAN': case 'DIRECTOR': return `${base}/approvals`;
-    case 'CLERICAL':   return `${base}/clerical`;
-    case 'ACCOUNTANT': return `${base}/finance`;
-    default:           return `${base}/ticket/${ticketId}`;
-  }
-}
+const subjectFor = (ticketId, what) => `[Infra] ${ticketRef(ticketId)}: ${what}`.slice(0, 70);
+const oneLine = (text, max) => {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
+};
+const campusName = (campus) => (campus ? `${String(campus)[0]}${String(campus).slice(1).toLowerCase()} campus` : '');
+const compose = (...lines) => `${lines.filter((l) => l !== null && l !== undefined).join('\n')}\n\n${SIGNATURE}`;
 
-// ---- applicant: stage + portal link, nothing else --------------------------------------
-export function applicantStageEmail(ticketId, status) {
-  const stage = stageLabel(status);
+// ---- JE ---------------------------------------------------------------------------------
+/** New or reassigned-to JE: what to inspect, one link. `t` = { id, title, department, campus, landmark }. */
+export function jeAssignedEmail(t) {
   return {
-    subject: `[Deanery of Infrastructure] Ticket ${ticketRef(ticketId)}: ${stage}`,
-    body: `Your ticket ${ticketRef(ticketId)} is now: ${stage}.
-
-Track it on the portal:
-${portalUrl()}/ticket/${ticketId}
-
-${FOOTER}`,
+    subject: subjectFor(t.id, 'Assigned to you'),
+    body: compose(
+      `${ticketRef(t.id)}, ${oneLine(t.title, 80)}.`,
+      `${t.department}, ${campusName(t.campus)}.${t.landmark ? ` ${oneLine(t.landmark, 80)}.` : ''}`,
+      'Inspect and file your report:',
+      ticketLink(t.id),
+    ),
   };
 }
 
-/** Work marked complete: nag the applicant to check it. Same contract as above: id (+ reminder number) only. */
-export function applicantVerifyEmail(ticketId, number = 1) {
+export function jeReassignedAwayEmail(ticketId) {
   return {
-    subject: `[ACTION REQUIRED]${number > 1 ? ` Reminder ${number} —` : ''} Ticket ${ticketRef(ticketId)}: please verify the completed work`,
-    body: `The work on your ticket ${ticketRef(ticketId)} has been marked complete.
-
-Please check the site, then confirm on the portal that the work is done, or tell us what is still pending.
-The ticket is closed only after you confirm. You will keep receiving this reminder until then.
-
-${portalUrl()}/ticket/${ticketId}
-
-${FOOTER}`,
+    subject: subjectFor(ticketId, 'Reassigned'),
+    body: compose(`${ticketRef(ticketId)} has been reassigned to another engineer. No action is needed from you.`),
   };
 }
 
-// ---- staff ---------------------------------------------------------------------------
-const ist = () => new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-
-export function jeAssignmentEmail(t) {
+export function changesRequestedEmail({ ticketId, fromDesk, message }) {
   return {
-    subject: `[Deanery of Infrastructure] New Ticket #${t.id} Assigned: ${t.title}`,
-    body: `Dear ${t.recipientName},
-
-A ticket has been assigned to you for inspection.
-
-======================================================================
-TICKET INFORMATION
-======================================================================
-• Ticket ID:      ${ticketRef(t.id)}
-• Title:          ${t.title}
-• Department:     ${t.department}
-• Category:       ${t.category}
-• Work Type:      ${t.type === 'non-recurring' ? 'Proposal' : 'Recurring'}
-• Reported By:    ${t.reporterLine}
-• Contact Phone:  ${t.contactPhone}
-• Location:       ${t.locationBlock}
-• Date & Time:    ${ist()}
-
-======================================================================
-DESCRIPTION
-======================================================================
-${t.description}
-
-======================================================================
-ACTION REQUIRED
-======================================================================
-Inspect the site, then submit your findings and estimate on the portal:
-
-Open the ticket: ${linkForDesk('JE', t.id)}
-
-${FOOTER}`,
+    subject: subjectFor(ticketId, `Changes requested by ${fromDesk}`),
+    body: compose(
+      `${fromDesk} has returned ${ticketRef(ticketId)} for changes:`,
+      `"${oneLine(message, 300)}"`,
+      ticketLink(ticketId),
+    ),
   };
 }
 
-export function unassignedEmail(t) {
-  const manual = isManualJeCategory(t.category);
+/** Outcome for the JE who did the site work. The remark stays in the portal. */
+export function jeOutcomeEmail({ ticketId, approved }) {
   return {
-    subject: manual
-      ? `[Deanery of Infrastructure] Ticket #${t.id} needs a JE: ${t.title}`
-      : `[Deanery of Infrastructure] Ticket #${t.id} UNASSIGNED — no JE available: ${t.title}`,
-    body: `Dear ${t.recipientName},
-
-${manual
-  ? `Category ${t.category} is assigned by the AE. Choose a JE for this ticket.`
-  : `No JE is available for ${t.department} / ${t.campus} campus (all are busy or on leave). Choose a JE for this ticket.`}
-
-======================================================================
-TICKET INFORMATION
-======================================================================
-• Ticket ID:      ${ticketRef(t.id)}
-• Title:          ${t.title}
-• Department:     ${t.department}
-• Category:       ${t.category}
-• Reported By:    ${t.reporterLine}
-• Contact Phone:  ${t.contactPhone}
-• Location:       ${t.locationBlock}
-• Date & Time:    ${ist()}
-
-======================================================================
-DESCRIPTION
-======================================================================
-${t.description}
-
-======================================================================
-ACTION REQUIRED
-======================================================================
-Choose a JE on the portal:
-
-Open the ticket: ${linkForDesk('AE', t.id)}
-
-${FOOTER}`,
+    subject: subjectFor(ticketId, approved ? 'Approved' : 'Rejected'),
+    body: compose(`${ticketRef(ticketId)} was ${approved ? 'approved' : 'rejected'}.`, ticketLink(ticketId)),
   };
 }
 
-/** Change request addressed to a desk: carries the sender's name and message. */
-export function changeRequestEmail({ ticketId, title, recipientName, desk, fromDesk, fromName, message }) {
+export function jeSentBackEmail({ ticketId, comment }) {
   return {
-    subject: `[Deanery of Infrastructure] Changes requested on Ticket #${ticketId}: ${title}`,
-    body: `Dear ${recipientName},
-
-${fromDesk} ${fromName} has requested changes on ticket ${ticketRef(ticketId)} (${title}).
-
-Message:
-${message}
-
-Open the ticket:
-${linkForDesk(desk, ticketId)}
-
-${FOOTER}`,
+    subject: subjectFor(ticketId, 'Sent back by the applicant'),
+    body: compose(
+      `The applicant says the work on ${ticketRef(ticketId)} is not done:`,
+      `"${oneLine(comment, 300)}"`,
+      ticketLink(ticketId),
+    ),
   };
 }
 
-/** A ticket landed on a desk, or moved on. No remark text: the portal holds that. */
-export function movementEmail({ ticketId, title, recipientName, desk, headline }) {
+/** Reminder number `number` (1 is the instant notice, which is jeAssignedEmail). */
+export function jeReminderEmail({ ticketId, number, hoursPending }) {
   return {
-    subject: `[Deanery of Infrastructure] Ticket #${ticketId}: ${headline}`,
-    body: `Dear ${recipientName},
-
-Ticket ${ticketRef(ticketId)} (${title}): ${headline}.
-
-Open the ticket:
-${linkForDesk(desk, ticketId)}
-
-${FOOTER}`,
+    subject: subjectFor(ticketId, `Reminder ${number}, pending ${hoursPending} hours`),
+    body: compose(`${ticketRef(ticketId)} is waiting for your report.`, ticketLink(ticketId)),
   };
 }
 
-/** Reminder #2 onwards. `escalated` = the AE is copied (4th reminder onwards). */
-export function reminderEmail({ ticketId, title, recipientName, desk, number, hoursPending, escalated }) {
-  const what = desk === 'AE'
-    ? 'This ticket still has no JE. Choose one on the portal.'
-    : 'Submit your findings and estimate as soon as possible.';
+// ---- AE / SE / Dean: one mail when a ticket lands on the desk --------------------------------------
+export function arrivalEmail({ ticketId, title, unassigned = false }) {
   return {
-    subject: `[ACTION REQUIRED] Reminder ${number} — Ticket #${ticketId}: ${title}`,
-    body: `Dear ${recipientName},
+    subject: subjectFor(ticketId, unassigned ? 'Needs a JE' : 'Awaiting your review'),
+    body: compose(
+      `${ticketRef(ticketId)}, ${oneLine(title, 80)}.`,
+      unassigned ? 'No JE is available. Choose one on the portal:' : 'It is on your desk:',
+      ticketLink(ticketId),
+    ),
+  };
+}
 
-This is reminder ${number} for ticket ${ticketRef(ticketId)} (${title}), pending at your desk for about ${hoursPending} hours.
-${escalated ? '\nThe AE of this ticket is copied on this reminder.\n' : ''}
-${what}
-${linkForDesk(desk, ticketId)}
+// ---- applicant: event + portal link, nothing else ---------------------------------------------------------
+const APPLICANT_COPY = Object.freeze({
+  [EVENT.RECEIVED]: { what: 'Received', line: (r) => `We have received your ticket ${r}.` },
+  [EVENT.RESOLVED]: { what: 'Resolved, please verify', line: (r) => `Your ticket ${r} has been marked resolved.\nClose it, or send it back with a comment:` },
+  [EVENT.REJECTED]: { what: 'Rejected', line: (r) => `Your ticket ${r} was rejected.` },
+  [EVENT.CLOSED]: { what: 'Closed', line: (r) => `Your ticket ${r} is closed.` },
+});
 
-${FOOTER}`,
+export function applicantEventEmail(ticketId, event) {
+  const copy = APPLICANT_COPY[event];
+  if (!copy) throw new Error(`No applicant mail for event ${event}`);
+  return {
+    subject: subjectFor(ticketId, copy.what),
+    body: compose(copy.line(ticketRef(ticketId)), ticketLink(ticketId)),
   };
 }

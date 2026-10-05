@@ -4,11 +4,10 @@
 // Anything the viewer may not see answers 404, exactly like a missing id, so
 // ids cannot be probed.
 import path from 'path';
+import { UPLOAD_ROOT } from '../config/paths.js';
 import pool from '../config/db.js';
 import { loadViewer, canViewAttachment } from '../services/visibility.js';
 import { sendServerError } from '../utils/httpError.js';
-
-const UPLOAD_ROOT = path.resolve(process.cwd(), 'uploads');
 
 // Served type comes from OUR extension table, never from what the uploader claimed.
 const INLINE_TYPES = Object.freeze({
@@ -29,7 +28,7 @@ export const downloadAttachment = async (req, res) => {
 
   try {
     const [rows] = await pool.query(
-      `SELECT a.id, a.file_url, a.document_category, a.uploaded_by, u.role AS uploader_role,
+      `SELECT a.id, a.file_url, a.document_category, a.uploaded_by, a.uploader_desk, u.role AS uploader_role,
               t.id AS ticket_id, t.applicant_id, t.assigned_je_id, t.assigned_ae_id, t.current_desk_user_id,
               t.department, t.campus, t.status
          FROM attachments a

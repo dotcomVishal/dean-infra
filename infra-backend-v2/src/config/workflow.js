@@ -17,12 +17,35 @@ export const STATUS = Object.freeze({
   PENDING_DIRECTOR_APPROVAL: 'PENDING_DIRECTOR_APPROVAL',
   APPROVED_FOR_TENDERING:    'APPROVED_FOR_TENDERING',
   TENDER_PUBLISHED:          'TENDER_PUBLISHED',
-  WORK_IN_PROGRESS:          'WORK_IN_PROGRESS',
-  WORK_COMPLETED:            'WORK_COMPLETED',
+  TECHNICAL_EVALUATION:      'TECHNICAL_EVALUATION',
+  FINANCIAL_EVALUATION:      'FINANCIAL_EVALUATION',
+  TENDER_CANCELLED:          'TENDER_CANCELLED',
+  WORK_IN_PROGRESS:          'WORK_IN_PROGRESS',  // shown as "Awarded"
+  WORK_COMPLETED:            'WORK_COMPLETED',    // shown as "Resolved"
   RETURNED_TO_JE:            'RETURNED_TO_JE',
   DENIED:                    'DENIED',
   CLOSED:                    'CLOSED',
 });
+
+// X2: status groups. Every list of statuses elsewhere (queues, metrics, desk
+// boards, visibility, mail) is built from these, so adding a status means
+// editing this block and nothing else.
+const group = (...statuses) => Object.freeze(statuses);
+export const JE_STAGE = group(STATUS.ASSIGNED_TO_JE, STATUS.RETURNED_TO_JE);
+export const AE_STAGE = group(STATUS.UNASSIGNED, STATUS.PENDING_AE_APPROVAL);
+export const APPROVAL_STAGE = group(
+  STATUS.PENDING_AE_APPROVAL, STATUS.PENDING_SE_APPROVAL,
+  STATUS.PENDING_DEAN_APPROVAL, STATUS.PENDING_DIRECTOR_APPROVAL);
+export const TENDER_STAGE = group(
+  STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.TECHNICAL_EVALUATION,
+  STATUS.FINANCIAL_EVALUATION, STATUS.TENDER_CANCELLED);
+/** The stages in which a tender is live (can be moved on or cancelled). */
+export const TENDER_OPEN = group(STATUS.TENDER_PUBLISHED, STATUS.TECHNICAL_EVALUATION, STATUS.FINANCIAL_EVALUATION);
+export const IN_WORK = group(STATUS.WORK_IN_PROGRESS, STATUS.WORK_COMPLETED);
+/** Approved tickets, including the finished ones. */
+export const POST_APPROVAL = group(...TENDER_STAGE, ...IN_WORK, STATUS.CLOSED);
+export const AWAITING_APPLICANT = group(STATUS.WORK_COMPLETED);
+export const TERMINAL = group(STATUS.CLOSED, STATUS.DENIED);
 
 export const ROLE = Object.freeze({
   APPLICANT: 'APPLICANT', JE: 'JE', AE: 'AE', SE: 'SE',
@@ -55,6 +78,8 @@ export const LOG_ACTION = Object.freeze({
   TENDER_PUBLISHED: 'TENDER_PUBLISHED', WORK_AWARDED: 'WORK_AWARDED',
   WORK_COMPLETED: 'WORK_COMPLETED', WORK_REOPENED: 'WORK_REOPENED', BILL_RECORDED: 'BILL_RECORDED',
   BILL_UPDATED: 'BILL_UPDATED', CLOSED: 'CLOSED', OVERRIDE: 'OVERRIDE',
+  TECH_EVALUATION: 'TECH_EVALUATION', FIN_EVALUATION: 'FIN_EVALUATION', TENDER_CANCELLED: 'TENDER_CANCELLED',
+  RESOLVED: 'RESOLVED', SENT_BACK: 'SENT_BACK',
 });
 
 /** Thrown for every rule violation, so handlers can map it to a 4xx. */
@@ -269,6 +294,18 @@ export function resolveAction({ user, ticket, limits = {}, action, to_desk, esti
 // ---- messages (plan.md §3.1 ticket_messages, §3.6 message rules) --------------
 
 /**
+ * Does this move answer an open change request addressed to the mover's desk?
+ * One rule for planMessages (which enforces it) and the details payload (which
+ * tells the form), so the two cannot drift (R8).
+ * `action` is the final action (an escalating APPROVE is a FORWARD).
+ */
+export function replyRequirement({ action, fromDesk, openRequest }) {
+  const answers = openRequest != null && openRequest.to_desk === fromDesk
+    && (action === ACTION.FORWARD || action === ACTION.SUBMIT_REPORT);
+  return { reply_required: answers, reply_to_desk: answers ? openRequest.author_desk : null };
+}
+
+/**
  * Which ticket_messages rows does this action write?  Pure; enforces the
  * payload rules and stamps each row with the visible_from_rank it will keep
  * forever.
@@ -283,7 +320,7 @@ export function resolveAction({ user, ticket, limits = {}, action, to_desk, esti
 export function planMessages({ action, fromDesk, toDesk, payload = {}, openRequest = null }) {
   const { message, internal_remark, public_note } = payload;
   const rank = DESK_RANK[fromDesk];
-  const replying = openRequest != null && openRequest.to_desk === fromDesk;
+  const replying = replyRequirement({ action, fromDesk, openRequest }).reply_required;
   const specs = [];
 
   const need = (text, what) => {
@@ -304,7 +341,7 @@ export function planMessages({ action, fromDesk, toDesk, payload = {}, openReque
       kind: 'REJECTION_REASON', author_desk: fromDesk, to_desk: null, body: need(message, 'REJECT'),
       visible_from_rank: 1, in_reply_to: null,
     });
-  } else if (replying && (action === ACTION.FORWARD || action === ACTION.SUBMIT_REPORT)) {
+  } else if (replying) {
     // Answering a change request: the reply is mandatory.
     specs.push({
       kind: 'REPLY', author_desk: fromDesk, to_desk: openRequest.author_desk,
@@ -374,64 +411,154 @@ export function canReadMessage(viewer, message) {
   return rank >= 1 && rank >= message.visible_from_rank;
 }
 
-// ---- post-approval ladder (tender milestones) ---------------------------------
+// ---- tender lifecycle, resolve, applicant answer ---------------------------------------------
+//
+//   APPROVED_FOR_TENDERING --publish--> TENDER_PUBLISHED --technical--> TECHNICAL_EVALUATION
+//     --financial--> FINANCIAL_EVALUATION --award--> WORK_IN_PROGRESS ("Awarded")
+//   any live tender stage --cancel--> TENDER_CANCELLED --publish again--> TENDER_PUBLISHED
+//   any open status --resolve--> WORK_COMPLETED ("Resolved") --applicant--> CLOSED, or back to the JE
+//
+// The assigned JE drives every stage (Clerical is read-only). Pure functions: the
+// controller does the locking, the compare-and-swap and the writes.
 
-// Tender milestones updated by JE post-approval. CLOSED is not one of them:
-// only the applicant closes, by confirming the work (resolveCompletionCheck).
-export const TENDER_MILESTONES = Object.freeze([
-  STATUS.TENDER_PUBLISHED,
-  STATUS.WORK_IN_PROGRESS,
-  STATUS.WORK_COMPLETED,
-]);
+export const TENDER_STAGES = Object.freeze({
+  PUBLISH: 'PUBLISH', TECHNICAL: 'TECHNICAL', FINANCIAL: 'FINANCIAL', AWARD: 'AWARD', CANCEL: 'CANCEL',
+});
+export const TENDER_PORTALS = Object.freeze(['GeM', 'CPP Portal', 'State Tender']);
 
-// W6: forward-only. CLOSED is terminal and deliberately absent from the
-// "may move" set, so a closed ticket can never accept another milestone.
-const TENDER_LADDER = [
-  STATUS.APPROVED_FOR_TENDERING,
-  STATUS.TENDER_PUBLISHED,
-  STATUS.WORK_IN_PROGRESS,
-  STATUS.WORK_COMPLETED,
-  STATUS.CLOSED,
-];
-const TENDER_LOG_ACTION = Object.freeze({
-  [STATUS.TENDER_PUBLISHED]: LOG_ACTION.TENDER_PUBLISHED,
-  [STATUS.WORK_IN_PROGRESS]: LOG_ACTION.WORK_AWARDED,
-  [STATUS.WORK_COMPLETED]:   LOG_ACTION.WORK_COMPLETED,
+/** DECIMAL(15,2): thirteen digits before the point. */
+export const MAX_AMOUNT = 9_999_999_999_999.99;
+
+const STAGE_FROM = Object.freeze({
+  [TENDER_STAGES.PUBLISH]:   [STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_CANCELLED],
+  [TENDER_STAGES.TECHNICAL]: [STATUS.TENDER_PUBLISHED],
+  [TENDER_STAGES.FINANCIAL]: [STATUS.TECHNICAL_EVALUATION],
+  [TENDER_STAGES.AWARD]:     [STATUS.FINANCIAL_EVALUATION],
+  [TENDER_STAGES.CANCEL]:    TENDER_OPEN,
 });
 
-/** Guard for the JE's tender endpoint — the S1 fix. */
-export function resolveTenderUpdate({ currentStatus, milestone }) {
-  const currentIdx = TENDER_LADDER.indexOf(currentStatus);
-  if (currentIdx === -1 || currentStatus === STATUS.CLOSED || currentStatus === STATUS.WORK_COMPLETED) {
-    throw new WorkflowError(
-      `Tender milestones can only be set after approval and before the work is marked complete (ticket is at ${currentStatus}).`,
-      { code: 'NOT_APPROVED_YET', status: 403 }
-    );
+/** Stages the JE may take from this status (what the UI lists). */
+export function tenderStagesFrom(status) {
+  return Object.keys(STAGE_FROM).filter((stage) => STAGE_FROM[stage].includes(status));
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const validDate = (v) => {
+  if (typeof v !== 'string' || !ISO_DATE.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`); // "2026-02-30" rolls over to March: compare back
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+};
+const text = (v) => (typeof v === 'string' ? v.trim() : '');
+const bad = (message, code) => new WorkflowError(message, { code, status: 400 });
+
+/**
+ * One tender step. Returns what to write; throws WorkflowError when the step is
+ * not allowed from this status or its data is missing.
+ *
+ * @returns {{ stage, toStatus, logAction, tender: object }}  `tender` = columns for the tenders row
+ */
+export function resolveTenderStage({ currentStatus, stage, payload = {} }) {
+  if (!Object.values(TENDER_STAGES).includes(stage)) {
+    throw bad(`Unknown tender stage '${stage}'. Allowed: ${Object.values(TENDER_STAGES).join(', ')}.`, 'INVALID_STAGE');
   }
-  if (!TENDER_MILESTONES.includes(milestone)) {
+  if (!STAGE_FROM[stage].includes(currentStatus)) {
+    const allowed = tenderStagesFrom(currentStatus);
     throw new WorkflowError(
-      `'${milestone}' is not a valid milestone. Allowed: ${TENDER_MILESTONES.join(', ')}.`,
-      { code: 'INVALID_MILESTONE', status: 400 }
-    );
+      `Cannot ${stage.toLowerCase()} a tender while the ticket is at ${currentStatus}.`
+      + ` Allowed now: ${allowed.length ? allowed.join(', ') : 'none'}.`,
+      { code: 'STAGE_NOT_ALLOWED', status: 409 });
   }
-  const milestoneIdx = TENDER_LADDER.indexOf(milestone);
-  if (milestoneIdx <= currentIdx) {
-    throw new WorkflowError(
-      `Cannot move ticket from ${currentStatus} to ${milestone}. The tender ladder is forward-only.`,
-      { code: 'BACKWARD_TRANSITION', status: 409 }
-    );
+  const remarks = text(payload.remarks) || null;
+
+  switch (stage) {
+    case TENDER_STAGES.PUBLISH: {
+      const nit = text(payload.nit_number);
+      if (!nit) throw bad('NIT / bid number is required.', 'NIT_REQUIRED');
+      const portal = text(payload.portal_type);
+      if (!TENDER_PORTALS.includes(portal)) {
+        throw bad(`Portal must be one of ${TENDER_PORTALS.join(', ')}.`, 'PORTAL_REQUIRED');
+      }
+      if (!validDate(payload.published_date)) throw bad('Created date is required (YYYY-MM-DD).', 'CREATED_DATE_REQUIRED');
+      if (!validDate(payload.bid_end_date)) throw bad('End date is required (YYYY-MM-DD).', 'END_DATE_REQUIRED');
+      if (payload.bid_end_date < payload.published_date) {
+        throw bad('End date cannot be before the created date.', 'END_BEFORE_CREATED');
+      }
+      return {
+        stage, toStatus: STATUS.TENDER_PUBLISHED, logAction: LOG_ACTION.TENDER_PUBLISHED,
+        tender: { op: 'insert', nit_number: nit, portal_type: portal, published_date: payload.published_date,
+          bid_end_date: payload.bid_end_date, status: 'PUBLISHED', remarks },
+      };
+    }
+    case TENDER_STAGES.TECHNICAL:
+      return { stage, toStatus: STATUS.TECHNICAL_EVALUATION, logAction: LOG_ACTION.TECH_EVALUATION,
+        tender: { op: 'update', status: 'TECHNICAL_EVALUATION', remarks } };
+    case TENDER_STAGES.FINANCIAL:
+      return { stage, toStatus: STATUS.FINANCIAL_EVALUATION, logAction: LOG_ACTION.FIN_EVALUATION,
+        tender: { op: 'update', status: 'FINANCIAL_EVALUATION', remarks } };
+    case TENDER_STAGES.AWARD: {
+      const agency = text(payload.awarded_agency);
+      if (!agency) throw bad('Awarded agency is required.', 'AGENCY_REQUIRED');
+      const raw = payload.award_amount;
+      const amount = raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '') ? NaN : Number(raw);
+      if (!Number.isFinite(amount)) throw bad('Award amount is required and must be a number.', 'AWARD_AMOUNT_REQUIRED');
+      if (amount <= 0) throw bad('Award amount must be greater than zero.', 'AWARD_AMOUNT_INVALID');
+      if (amount > MAX_AMOUNT) throw bad(`Award amount must be no greater than ${MAX_AMOUNT}.`, 'AWARD_AMOUNT_TOO_LARGE');
+      return { stage, toStatus: STATUS.WORK_IN_PROGRESS, logAction: LOG_ACTION.WORK_AWARDED,
+        tender: { op: 'update', status: 'AWARDED', awarded_agency: agency, work_order_value: amount, remarks } };
+    }
+    case TENDER_STAGES.CANCEL: {
+      const reason = text(payload.reason);
+      if (!reason) throw bad('A reason is required to cancel a tender.', 'REASON_REQUIRED');
+      return { stage, toStatus: STATUS.TENDER_CANCELLED, logAction: LOG_ACTION.TENDER_CANCELLED,
+        tender: { op: 'update', status: 'CANCELLED', cancel_reason: reason, remarks } };
+    }
+    /* c8 ignore next 2 */
+    default:
+      throw bad(`Unknown tender stage '${stage}'.`, 'INVALID_STAGE');
   }
-  return { status: milestone, logAction: TENDER_LOG_ACTION[milestone] };
+}
+
+const NOT_RESOLVABLE = Object.freeze([STATUS.CLOSED, STATUS.DENIED, STATUS.WORK_COMPLETED, STATUS.UNASSIGNED]);
+
+/** May a ticket at this status be marked resolved? Every open status, even before approval. */
+export const canResolveFrom = (status) => !NOT_RESOLVABLE.includes(status);
+
+/**
+ * The JE marks the ticket resolved. Allowed at every open stage, even before
+ * approval, so a note is mandatory and the audit row says where it came from.
+ * `early` = resolved outside the tender flow (before approval): flagged and shown in the AE digest.
+ */
+export function resolveResolution({ currentStatus, note }) {
+  if (!canResolveFrom(currentStatus)) {
+    throw new WorkflowError(`A ticket at ${currentStatus} cannot be marked resolved.`,
+      { code: 'RESOLVE_NOT_ALLOWED', status: 409 });
+  }
+  if (!text(note)) throw bad('A note is required to mark a ticket resolved.', 'NOTE_REQUIRED');
+  const early = !(TENDER_STAGE.includes(currentStatus) || IN_WORK.includes(currentStatus));
+  return { toStatus: STATUS.WORK_COMPLETED, logAction: LOG_ACTION.RESOLVED, resolvedFrom: currentStatus, early };
 }
 
 /**
- * The applicant's answer once the JE marked the work complete.
- * accepted -> CLOSED; not accepted -> back to WORK_IN_PROGRESS with a reason.
+ * Actions the assigned JE has besides filing a report: the tender steps and Resolve.
+ * Rendered by the UI from the details payload, like the approval desks' buttons.
  */
-export function resolveCompletionCheck({ currentStatus, accepted, remarks }) {
+export function jeTenderActions(status) {
+  return [
+    ...tenderStagesFrom(status).map((stage) => ({ action: `TENDER_${stage}`, enabled: true })),
+    ...(canResolveFrom(status) ? [{ action: 'RESOLVE', enabled: true }] : []),
+  ];
+}
+
+/**
+ * The applicant's answer once the ticket is resolved.
+ * accepted -> CLOSED. Not accepted -> back to where it was resolved from when that was a tender
+ * stage (or an old row with no record: WORK_IN_PROGRESS); otherwise back to the JE inspection
+ * desk (RETURNED_TO_JE when a report exists, else ASSIGNED_TO_JE).
+ */
+export function resolveCompletionCheck({ currentStatus, accepted, remarks, resolvedFrom = null, hasReport = false }) {
   if (currentStatus !== STATUS.WORK_COMPLETED) {
     throw new WorkflowError(
-      `Only work marked complete can be confirmed (ticket is at ${currentStatus}).`,
+      `Only a resolved ticket can be confirmed (ticket is at ${currentStatus}).`,
       { code: 'NOT_COMPLETED_YET', status: 409 });
   }
   if (accepted === true) return { status: STATUS.CLOSED, logAction: LOG_ACTION.CLOSED };
@@ -441,5 +568,9 @@ export function resolveCompletionCheck({ currentStatus, accepted, remarks }) {
   if (typeof remarks !== 'string' || remarks.trim() === '') {
     throw new WorkflowError('Say what is still not done.', { code: 'MESSAGE_REQUIRED', status: 400 });
   }
-  return { status: STATUS.WORK_IN_PROGRESS, logAction: LOG_ACTION.WORK_REOPENED };
+  let status;
+  if (resolvedFrom == null) status = STATUS.WORK_IN_PROGRESS;
+  else if (TENDER_STAGE.includes(resolvedFrom) || resolvedFrom === STATUS.WORK_IN_PROGRESS) status = resolvedFrom;
+  else status = hasReport ? STATUS.RETURNED_TO_JE : STATUS.ASSIGNED_TO_JE;
+  return { status, logAction: LOG_ACTION.SENT_BACK };
 }

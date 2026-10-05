@@ -19,6 +19,8 @@ export const actionSchema = z
     public_note: optionalText(2000),
     // ASSIGN_JE needs to say WHICH JE; not part of the generic payload.
     assignee_id: z.preprocess(blankToUndefined, z.coerce.number().int().positive().optional()),
+    // Multipart text field: true = the attached files are readable only by this desk and above.
+    restricted_files: z.preprocess((v) => v === 'true' || v === true || v === '1', z.boolean().optional()),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -30,6 +32,7 @@ export const actionSchema = z
       need('to_desk', 'to_desk is only valid for REQUEST_CHANGES.');
     }
     if (data.action === 'REJECT' && !data.message) need('message', 'message (the reason) is required for REJECT.');
+    if (data.action === 'ASSIGN_JE' && data.restricted_files) need('restricted_files', 'ASSIGN_JE takes no files.');
     if (data.action === 'ASSIGN_JE') {
       if (!data.assignee_id) need('assignee_id', 'assignee_id is required for ASSIGN_JE.');
     } else if (data.assignee_id) {

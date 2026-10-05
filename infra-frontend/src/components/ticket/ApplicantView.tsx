@@ -7,20 +7,21 @@ import { AttachmentList, UploadFiles } from './Attachments';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
 import { Card, Label } from './Card';
-import { applicantStage, errorMessage, mapsHref, ticketNo } from '../../lib/ticketUi';
+import { applicantStage, errorMessage, mapsHref, placeLabel, ticketNo } from '../../lib/ticketUi';
+import { APPLICANT_STEPS } from '../../lib/statuses';
 
 // The applicant sees the stage in plain words and their own photos. Nothing else.
 // This view reads an explicit allow-list of fields off the payload: even if the
 // API ever over-shared (staff names, phones, site photos, estimates), none of it
 // has a place to render here.
-const STEPS = ['Received', 'Under JE inspection', 'Under review', 'Approved — tendering', 'Work in progress', 'Work done — please verify', 'Completed'];
+const STEPS: readonly string[] = APPLICANT_STEPS;
 
 const stepIndex = (stage: string) => {
   const i = STEPS.indexOf(stage);
   return i === -1 ? 0 : i;
 };
 
-/** Shown only while the JE has marked the work complete: the applicant closes or sends it back. */
+/** Shown while the ticket is resolved: the applicant closes it, or sends it back with a comment. */
 function VerifyWork({ ticketId, onDone }: { ticketId: number; onDone: () => void }) {
   const [disputing, setDisputing] = useState(false);
   const [remarks, setRemarks] = useState('');
@@ -40,9 +41,9 @@ function VerifyWork({ ticketId, onDone }: { ticketId: number; onDone: () => void
   };
 
   return (
-    <Card title="Is the work done?" icon={<Wrench size={14} />}>
+    <Card title="Close ticket" icon={<Wrench size={14} />}>
       <p className="text-sm text-slate-700 dark:text-slate-200">
-        The engineer has marked this work complete. Please check the site. The ticket closes only after you confirm.
+        Your ticket has been marked resolved. Please check the site. Close it, or send it back with a comment.
       </p>
       {disputing && (
         <textarea
@@ -58,18 +59,18 @@ function VerifyWork({ ticketId, onDone }: { ticketId: number; onDone: () => void
           <>
             <button type="button" disabled={busy} onClick={() => answer(true)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Yes, work is done
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Close ticket
             </button>
             <button type="button" disabled={busy} onClick={() => setDisputing(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 px-4 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:hover:bg-rose-950/30">
-              <XCircle size={14} /> Not done
+              <XCircle size={14} /> Send back
             </button>
           </>
         ) : (
           <>
             <button type="button" disabled={busy || remarks.trim() === ''} onClick={() => answer(false)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50">
-              {busy && <Loader2 size={14} className="animate-spin" />} Send back to engineer
+              {busy && <Loader2 size={14} className="animate-spin" />} Send back
             </button>
             <button type="button" disabled={busy} onClick={() => setDisputing(false)}
               className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">
@@ -149,7 +150,7 @@ export default function ApplicantView({ ticket, onChanged }: { ticket: TicketDet
             <Label>Location</Label>
             <p className="flex items-start gap-2 text-sm font-medium text-slate-800 dark:text-slate-200">
               <MapPin size={15} className="mt-0.5 shrink-0 text-rose-500" />
-              <span>{ticket.campus ? `${ticket.campus} campus · ` : ''}{ticket.location}</span>
+              <span>{placeLabel(ticket)}</span>
             </p>
             <a href={mapsHref(ticket)} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400">
               <ExternalLink size={12} /> Open in Maps

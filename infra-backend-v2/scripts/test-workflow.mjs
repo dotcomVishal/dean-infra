@@ -5,7 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STATUS, ROLE, ACTION, WorkflowError, availableActions, resolveAction, planMessages,
-  nextOpenRequestId, canReadMessage, resolveTenderUpdate, resolveCompletionCheck, deskForStatus,
+  nextOpenRequestId, canReadMessage, resolveTenderStage, resolveResolution, resolveCompletionCheck, deskForStatus,
+  tenderStagesFrom, jeTenderActions, canResolveFrom, TENDER_STAGES, MAX_AMOUNT,
 } from '../src/config/workflow.js';
 
 const LIMITS = { SE_APPROVE: 50_000, DEAN_APPROVE: 500_000 };
@@ -285,26 +286,122 @@ for (const [viewer, msg, expected] of VIS) {
   });
 }
 
-// ---- post-approval ladder -----------------------------------------------------------------------------
-test('tender ladder is forward-only and maps to the new audit actions', () => {
-  assert.deepEqual(resolveTenderUpdate({ currentStatus: STATUS.APPROVED_FOR_TENDERING, milestone: STATUS.TENDER_PUBLISHED }),
-    { status: STATUS.TENDER_PUBLISHED, logAction: 'TENDER_PUBLISHED' });
-  assert.equal(resolveTenderUpdate({ currentStatus: STATUS.TENDER_PUBLISHED, milestone: STATUS.WORK_IN_PROGRESS }).logAction, 'WORK_AWARDED');
-  assert.equal(resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.WORK_COMPLETED }).logAction, 'WORK_COMPLETED');
-  // Only the applicant closes: the JE can no longer pick CLOSED, nor move a completed ticket.
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.CLOSED }), 'INVALID_MILESTONE');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_COMPLETED, milestone: STATUS.WORK_COMPLETED }), 'NOT_APPROVED_YET');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.WORK_IN_PROGRESS, milestone: STATUS.TENDER_PUBLISHED }), 'BACKWARD_TRANSITION');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.CLOSED, milestone: STATUS.CLOSED }), 'NOT_APPROVED_YET');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.ASSIGNED_TO_JE, milestone: STATUS.CLOSED }), 'NOT_APPROVED_YET');
-  throwsCode(() => resolveTenderUpdate({ currentStatus: STATUS.APPROVED_FOR_TENDERING, milestone: 'BANANA' }), 'INVALID_MILESTONE');
+// ---- tender lifecycle (Phase 5) -------------------------------------------------------------------------
+const publishData = { nit_number: 'NIT-1', portal_type: 'GeM', published_date: '2026-10-01', bid_end_date: '2026-10-20' };
+const stageOf = (currentStatus, stage, payload = {}) => resolveTenderStage({ currentStatus, stage, payload });
+
+test('tender transition table: every allowed move and what it writes', () => {
+  const pub = stageOf(STATUS.APPROVED_FOR_TENDERING, 'PUBLISH', publishData);
+  assert.deepEqual([pub.toStatus, pub.logAction], [STATUS.TENDER_PUBLISHED, 'TENDER_PUBLISHED']);
+  assert.deepEqual([pub.tender.op, pub.tender.status, pub.tender.bid_end_date], ['insert', 'PUBLISHED', '2026-10-20']);
+  // A cancelled tender may be published again: a new row, the cancelled one stays as history.
+  assert.equal(stageOf(STATUS.TENDER_CANCELLED, 'PUBLISH', publishData).tender.op, 'insert');
+
+  const tech = stageOf(STATUS.TENDER_PUBLISHED, 'TECHNICAL');
+  assert.deepEqual([tech.toStatus, tech.logAction, tech.tender.status], [STATUS.TECHNICAL_EVALUATION, 'TECH_EVALUATION', 'TECHNICAL_EVALUATION']);
+  const fin = stageOf(STATUS.TECHNICAL_EVALUATION, 'FINANCIAL');
+  assert.deepEqual([fin.toStatus, fin.logAction], [STATUS.FINANCIAL_EVALUATION, 'FIN_EVALUATION']);
+
+  const award = stageOf(STATUS.FINANCIAL_EVALUATION, 'AWARD', { awarded_agency: ' ABC Builders ', award_amount: '80000.50' });
+  assert.deepEqual([award.toStatus, award.logAction], [STATUS.WORK_IN_PROGRESS, 'WORK_AWARDED']);
+  assert.deepEqual([award.tender.status, award.tender.awarded_agency, award.tender.work_order_value], ['AWARDED', 'ABC Builders', 80000.5]);
+
+  for (const from of [STATUS.TENDER_PUBLISHED, STATUS.TECHNICAL_EVALUATION, STATUS.FINANCIAL_EVALUATION]) {
+    const c = stageOf(from, 'CANCEL', { reason: 'No bidders' });
+    assert.deepEqual([c.toStatus, c.logAction, c.tender.status, c.tender.cancel_reason], [STATUS.TENDER_CANCELLED, 'TENDER_CANCELLED', 'CANCELLED', 'No bidders']);
+  }
 });
 
-test('applicant completion check: confirm closes, dispute reopens with a reason', () => {
+test('tender transition table: every refused move', () => {
+  const allowed = {
+    PUBLISH: [STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_CANCELLED],
+    TECHNICAL: [STATUS.TENDER_PUBLISHED],
+    FINANCIAL: [STATUS.TECHNICAL_EVALUATION],
+    AWARD: [STATUS.FINANCIAL_EVALUATION],
+    CANCEL: [STATUS.TENDER_PUBLISHED, STATUS.TECHNICAL_EVALUATION, STATUS.FINANCIAL_EVALUATION],
+  };
+  const complete = { ...publishData, awarded_agency: 'ABC', award_amount: 100, reason: 'r' };
+  for (const stage of Object.values(TENDER_STAGES)) {
+    for (const status of Object.values(STATUS)) {
+      if (allowed[stage].includes(status)) continue;
+      throwsCode(() => stageOf(status, stage, complete), 'STAGE_NOT_ALLOWED');
+    }
+  }
+  // Awarding skips nothing: not from published, not from technical, no direct award from approval.
+  throwsCode(() => stageOf(STATUS.APPROVED_FOR_TENDERING, 'AWARD', complete), 'STAGE_NOT_ALLOWED');
+  throwsCode(() => stageOf(STATUS.TENDER_PUBLISHED, 'AWARD', complete), 'STAGE_NOT_ALLOWED');
+  throwsCode(() => stageOf(STATUS.TECHNICAL_EVALUATION, 'AWARD', complete), 'STAGE_NOT_ALLOWED');
+  throwsCode(() => stageOf(STATUS.TENDER_PUBLISHED, 'BANANA'), 'INVALID_STAGE');
+  throwsCode(() => stageOf(STATUS.TENDER_PUBLISHED, undefined), 'INVALID_STAGE');
+});
+
+test('tender data gates: publish needs NIT, portal, both dates in order; award needs agency and a positive amount; cancel a reason', () => {
+  const at = STATUS.APPROVED_FOR_TENDERING;
+  throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, nit_number: '  ' }), 'NIT_REQUIRED');
+  throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, portal_type: 'Newspaper' }), 'PORTAL_REQUIRED');
+  throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, published_date: undefined }), 'CREATED_DATE_REQUIRED');
+  throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, bid_end_date: '2026-13-40' }), 'END_DATE_REQUIRED');
+  throwsCode(() => stageOf(at, 'PUBLISH', { ...publishData, bid_end_date: '2026-09-30' }), 'END_BEFORE_CREATED');
+  assert.equal(stageOf(at, 'PUBLISH', { ...publishData, bid_end_date: '2026-10-01' }).toStatus, STATUS.TENDER_PUBLISHED); // same day is fine
+
+  const f = STATUS.FINANCIAL_EVALUATION;
+  throwsCode(() => stageOf(f, 'AWARD', { award_amount: 5 }), 'AGENCY_REQUIRED');
+  for (const bad of [undefined, null, '', '  ', 'lots', NaN, Infinity]) {
+    throwsCode(() => stageOf(f, 'AWARD', { awarded_agency: 'A', award_amount: bad }), 'AWARD_AMOUNT_REQUIRED');
+  }
+  for (const bad of [0, -5, '-1']) throwsCode(() => stageOf(f, 'AWARD', { awarded_agency: 'A', award_amount: bad }), 'AWARD_AMOUNT_INVALID');
+  throwsCode(() => stageOf(f, 'AWARD', { awarded_agency: 'A', award_amount: MAX_AMOUNT + 1000 }), 'AWARD_AMOUNT_TOO_LARGE');
+  assert.equal(stageOf(f, 'AWARD', { awarded_agency: 'A', award_amount: 150_000_000 }).tender.work_order_value, 150_000_000); // above the old 10 crore cap
+  throwsCode(() => stageOf(STATUS.TENDER_PUBLISHED, 'CANCEL', { reason: ' ' }), 'REASON_REQUIRED');
+});
+
+test('the UI lists exactly the stages the rule allows, plus Resolve while open', () => {
+  assert.deepEqual(tenderStagesFrom(STATUS.APPROVED_FOR_TENDERING), ['PUBLISH']);
+  assert.deepEqual(tenderStagesFrom(STATUS.TENDER_PUBLISHED), ['TECHNICAL', 'CANCEL']);
+  assert.deepEqual(tenderStagesFrom(STATUS.TECHNICAL_EVALUATION), ['FINANCIAL', 'CANCEL']);
+  assert.deepEqual(tenderStagesFrom(STATUS.FINANCIAL_EVALUATION), ['AWARD', 'CANCEL']);
+  assert.deepEqual(tenderStagesFrom(STATUS.TENDER_CANCELLED), ['PUBLISH']);
+  assert.deepEqual(tenderStagesFrom(STATUS.WORK_IN_PROGRESS), []);
+  assert.deepEqual(jeTenderActions(STATUS.TENDER_PUBLISHED).map((a) => a.action), ['TENDER_TECHNICAL', 'TENDER_CANCEL', 'RESOLVE']);
+  assert.deepEqual(jeTenderActions(STATUS.ASSIGNED_TO_JE).map((a) => a.action), ['RESOLVE']);
+  assert.deepEqual(jeTenderActions(STATUS.CLOSED), []);
+});
+
+test('resolve: any open status needs a note; closed, denied, unassigned and already-resolved are refused', () => {
+  for (const status of Object.values(STATUS)) {
+    if (canResolveFrom(status)) {
+      const r = resolveResolution({ currentStatus: status, note: 'Done on site' });
+      assert.deepEqual([r.toStatus, r.logAction, r.resolvedFrom], [STATUS.WORK_COMPLETED, 'RESOLVED', status]);
+      throwsCode(() => resolveResolution({ currentStatus: status, note: '  ' }), 'NOTE_REQUIRED');
+    } else {
+      throwsCode(() => resolveResolution({ currentStatus: status, note: 'x' }), 'RESOLVE_NOT_ALLOWED');
+    }
+  }
+  for (const s of [STATUS.CLOSED, STATUS.DENIED, STATUS.UNASSIGNED, STATUS.WORK_COMPLETED]) assert.equal(canResolveFrom(s), false, s);
+  // Before approval it is flagged (digest + audit); inside the tender flow it is not.
+  assert.equal(resolveResolution({ currentStatus: STATUS.PENDING_SE_APPROVAL, note: 'x' }).early, true);
+  assert.equal(resolveResolution({ currentStatus: STATUS.ASSIGNED_TO_JE, note: 'x' }).early, true);
+  assert.equal(resolveResolution({ currentStatus: STATUS.WORK_IN_PROGRESS, note: 'x' }).early, false);
+  assert.equal(resolveResolution({ currentStatus: STATUS.TECHNICAL_EVALUATION, note: 'x' }).early, false);
+});
+
+test('applicant answer: close, or send back to where it was resolved from', () => {
   const at = STATUS.WORK_COMPLETED;
   assert.deepEqual(resolveCompletionCheck({ currentStatus: at, accepted: true }), { status: STATUS.CLOSED, logAction: 'CLOSED' });
-  assert.deepEqual(resolveCompletionCheck({ currentStatus: at, accepted: false, remarks: 'Tap still leaks' }),
-    { status: STATUS.WORK_IN_PROGRESS, logAction: 'WORK_REOPENED' });
+  const back = (resolvedFrom, hasReport) =>
+    resolveCompletionCheck({ currentStatus: at, accepted: false, remarks: 'Still leaks', resolvedFrom, hasReport });
+  // Resolved inside the tender flow: back to that stage.
+  for (const s of [STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.TECHNICAL_EVALUATION,
+    STATUS.FINANCIAL_EVALUATION, STATUS.TENDER_CANCELLED, STATUS.WORK_IN_PROGRESS]) {
+    assert.deepEqual(back(s, true), { status: s, logAction: 'SENT_BACK' }, s);
+  }
+  // Resolved before approval: the JE inspection desk, "returned" when a report exists.
+  assert.equal(back(STATUS.ASSIGNED_TO_JE, false).status, STATUS.ASSIGNED_TO_JE);
+  assert.equal(back(STATUS.ASSIGNED_TO_JE, true).status, STATUS.RETURNED_TO_JE);
+  assert.equal(back(STATUS.PENDING_AE_APPROVAL, true).status, STATUS.RETURNED_TO_JE);
+  assert.equal(back(STATUS.RETURNED_TO_JE, true).status, STATUS.RETURNED_TO_JE);
+  // A row resolved before this release has no record: it returns to work in progress, as before.
+  assert.equal(back(null, false).status, STATUS.WORK_IN_PROGRESS);
   throwsCode(() => resolveCompletionCheck({ currentStatus: at, accepted: false, remarks: '  ' }), 'MESSAGE_REQUIRED');
   throwsCode(() => resolveCompletionCheck({ currentStatus: at, accepted: 'yes' }), 'VALIDATION_ERROR');
   throwsCode(() => resolveCompletionCheck({ currentStatus: STATUS.WORK_IN_PROGRESS, accepted: true }), 'NOT_COMPLETED_YET');

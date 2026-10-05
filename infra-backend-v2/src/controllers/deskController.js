@@ -5,24 +5,24 @@
 // tickets" goes through the applicant projection, so it can never carry a
 // staff name, phone or estimate.
 import pool from '../config/db.js';
-import { STATUS, DESK_RANK, approvalLimitFor, deskForStatus } from '../config/workflow.js';
+import {
+  STATUS, DESK_RANK, approvalLimitFor, deskForStatus,
+  JE_STAGE, AE_STAGE, TENDER_STAGE, IN_WORK, TERMINAL,
+} from '../config/workflow.js';
 import { loadLimits } from '../models/limitsModel.js';
 import { applicantTicket } from '../services/visibility.js';
 import { sendServerError } from '../utils/httpError.js';
 
-const TERMINAL = [STATUS.CLOSED, STATUS.DENIED];
-
 // Statuses each role works on. AE also owns the UNASSIGNED queue (Q8).
 const DESK_STATUSES = Object.freeze({
   // After approval the ticket comes back to its JE to execute and mark complete.
-  JE: [STATUS.ASSIGNED_TO_JE, STATUS.RETURNED_TO_JE,
-    STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.WORK_IN_PROGRESS],
-  AE: [STATUS.UNASSIGNED, STATUS.PENDING_AE_APPROVAL],
+  JE: [...JE_STAGE, ...TENDER_STAGE, STATUS.WORK_IN_PROGRESS],
+  AE: AE_STAGE,
   SE: [STATUS.PENDING_SE_APPROVAL],
   DEAN: [STATUS.PENDING_DEAN_APPROVAL],
   DIRECTOR: [STATUS.PENDING_DIRECTOR_APPROVAL],
-  CLERICAL: [STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED],
-  ACCOUNTANT: [STATUS.WORK_IN_PROGRESS, STATUS.WORK_COMPLETED],
+  CLERICAL: TENDER_STAGE,
+  ACCOUNTANT: IN_WORK,
 });
 
 const ROW_SELECT = `

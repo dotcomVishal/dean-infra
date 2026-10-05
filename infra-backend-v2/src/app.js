@@ -1,7 +1,6 @@
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -11,8 +10,10 @@ import ticketRoutes from './routes/ticketRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import availabilityRoutes from './routes/availabilityRoutes.js';
 import attachmentRoutes from './routes/attachmentRoutes.js';
+import metaRoutes from './routes/metaRoutes.js';
 import { requestId } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { authFailureLimiter } from './middleware/rateLimit.js';
 
 // 1. Initialize __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -50,15 +51,9 @@ app.use(express.urlencoded({ extended: true }));
 // through the authenticated GET /api/attachments/:id (visibility-checked).
 app.use(express.static(path.join(__dirname, '../public')));
 
-// 6. Prevent Brute Force
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  handler: (req, res) => res.status(429).json({
-    success: false, message: 'Too many requests, please try again later.', requestId: req.id,
-  }),
-});
-app.use('/api/', apiLimiter);
+// 6. Prevent brute force. X1: signed-in traffic is limited per user inside each
+// router (middleware/rateLimit.js); only rejected tokens are counted per address.
+app.use('/api/', authFailureLimiter);
 
 // 7. API Routes
 app.use('/api/auth', authRoutes);
@@ -66,6 +61,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/attachments', attachmentRoutes);
+app.use('/api/meta', metaRoutes);
 app.get('/api/health', (_req, res) => res.status(200).json({ success: true, status: 'ok' }));
 
 // Unknown route (this is also what a direct /uploads/... URL now gets)

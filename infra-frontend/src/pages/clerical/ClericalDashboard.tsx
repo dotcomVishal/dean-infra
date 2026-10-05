@@ -1,12 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import {
   FileSpreadsheet, Search, RefreshCw, Eye,
-  Clock, IndianRupee, Send, Award, X,
+  Clock, IndianRupee, X, Send, Award,
   FileText
 } from 'lucide-react';
 import { api } from '../../services/api';
-import { toast } from '../../store/toastStore';
+import { staffStatusLabel } from '../../lib/ticketUi';
 
 interface TenderTicket {
   id: number;
@@ -34,28 +34,11 @@ export default function ClericalDashboard() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Modals
-  const [publishModalOpen, setPublishModalOpen] = useState(false);
-  const [awardModalOpen, setAwardModalOpen] = useState(false);
+  // Details modal (read-only: the assigned JE drives every tender stage)
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<TenderTicket | null>(null);
   const [ticketDetails, setTicketDetails] = useState<any | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
-
-  // Form states
-  const [nitData, setNitData] = useState({
-    nit_number: '',
-    portal_type: 'GeM',
-    published_date: format(new Date(), 'yyyy-MM-dd'),
-    bid_opening_date: '',
-    remarks: ''
-  });
-  const [awardData, setAwardData] = useState({
-    awarded_agency: '',
-    work_order_value: '',
-    remarks: ''
-  });
-  const [submitting, setSubmitting] = useState(false);
 
   // Fetch Tickets
   const fetchTickets = async () => {
@@ -80,72 +63,6 @@ export default function ClericalDashboard() {
   useEffect(() => {
     fetchTickets();
   }, [activeTab]);
-
-  // Open Publish Tender Modal
-  const handleOpenPublish = (ticket: TenderTicket) => {
-    setSelectedTicket(ticket);
-    setNitData({
-      nit_number: `IITM/INFRA/${new Date().getFullYear()}/NIT-${ticket.id.toString().padStart(4, '0')}`,
-      portal_type: 'GeM',
-      published_date: format(new Date(), 'yyyy-MM-dd'),
-      bid_opening_date: '',
-      remarks: ''
-    });
-    setPublishModalOpen(true);
-  };
-
-  // Submit Tender Publication
-  const handlePublishSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTicket || !nitData.nit_number) return;
-
-    setSubmitting(true);
-    try {
-      const res = await api.post(`/tickets/${selectedTicket.id}/tenders`, nitData);
-      if (res.data.success) {
-        toast.success(`Tender published on ${nitData.portal_type}.`);
-        setPublishModalOpen(false);
-        fetchTickets();
-      }
-    } catch (err: any) {
-      console.error('Publish tender error:', err);
-      toast.error(err.response?.data?.message || 'Could not publish the tender.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // Open Award Modal
-  const handleOpenAward = (ticket: TenderTicket) => {
-    setSelectedTicket(ticket);
-    setAwardData({
-      awarded_agency: '',
-      work_order_value: ticket.estimated_amount ? String(ticket.estimated_amount) : '',
-      remarks: ''
-    });
-    setAwardModalOpen(true);
-  };
-
-  // Submit Award
-  const handleAwardSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTicket || !awardData.awarded_agency) return;
-
-    setSubmitting(true);
-    try {
-      const res = await api.post(`/tickets/${selectedTicket.id}/tenders/award`, awardData);
-      if (res.data.success) {
-        toast.success('Work awarded.');
-        setAwardModalOpen(false);
-        fetchTickets();
-      }
-    } catch (err: any) {
-      console.error('Award tender error:', err);
-      toast.error(err.response?.data?.message || 'Could not award the work.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   // Open Details Modal
   const handleOpenDetails = async (ticket: TenderTicket) => {
@@ -179,7 +96,7 @@ export default function ClericalDashboard() {
             </h1>
           </div>
           <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Publish tenders and award work.
+            Tenders and awards. Read only: the assigned JE updates each stage.
           </p>
         </div>
 
@@ -335,13 +252,17 @@ export default function ClericalDashboard() {
                             </span>
                           )}
                         </div>
-                      ) : t.status === 'TENDER_PUBLISHED' ? (
+                      ) : t.status === 'TENDER_PUBLISHED' || t.status === 'TECHNICAL_EVALUATION' || t.status === 'FINANCIAL_EVALUATION' ? (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-500/20">
-                          Live on {t.portal_type || 'GeM'}
+                          {staffStatusLabel(t.status)} · {t.portal_type || 'GeM'}
+                        </span>
+                      ) : t.status === 'TENDER_CANCELLED' ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20">
+                          Tender cancelled
                         </span>
                       ) : (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
-                          Awaiting NIT Release
+                          Awaiting tender notice
                         </span>
                       )}
                     </td>
@@ -355,23 +276,6 @@ export default function ClericalDashboard() {
                         <Eye size={14} />
                       </button>
 
-                      {t.status === 'APPROVED_FOR_TENDERING' && (
-                        <button
-                          onClick={() => handleOpenPublish(t)}
-                          className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition shadow-sm inline-flex items-center gap-1"
-                        >
-                          <Send size={12} /> Publish NIT
-                        </button>
-                      )}
-
-                      {t.status === 'TENDER_PUBLISHED' && (
-                        <button
-                          onClick={() => handleOpenAward(t)}
-                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shadow-sm inline-flex items-center gap-1"
-                        >
-                          <Award size={12} /> Award Contract
-                        </button>
-                      )}
                     </td>
                   </tr>
                 ))}
@@ -381,183 +285,6 @@ export default function ClericalDashboard() {
         </div>
       )}
 
-      {/* MODAL 1: PUBLISH TENDER NOTIFICATION */}
-      {publishModalOpen && selectedTicket && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 dark:border-slate-700 space-y-4 animate-in fade-in duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Send className="text-blue-600" size={18} /> Publish Tender Notice (NIT)
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  #TKT-{selectedTicket.id.toString().padStart(4, '0')} · {selectedTicket.title || selectedTicket.description}
-                </p>
-              </div>
-              <button onClick={() => setPublishModalOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handlePublishSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">NIT / Bid Reference Number</label>
-                <input
-                  type="text"
-                  value={nitData.nit_number}
-                  onChange={(e) => setNitData({ ...nitData, nit_number: e.target.value })}
-                  required
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Portal Platform</label>
-                  <select
-                    value={nitData.portal_type}
-                    onChange={(e) => setNitData({ ...nitData, portal_type: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none"
-                  >
-                    <option value="GeM">GeM Portal</option>
-                    <option value="CPP Portal">CPP Portal</option>
-                    <option value="State Tender">State e-Procurement</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Publish Date</label>
-                  <input
-                    type="date"
-                    value={nitData.published_date}
-                    onChange={(e) => setNitData({ ...nitData, published_date: e.target.value })}
-                    required
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Bid Opening Date (Optional)</label>
-                <input
-                  type="date"
-                  value={nitData.bid_opening_date}
-                  onChange={(e) => setNitData({ ...nitData, bid_opening_date: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Tender Remarks</label>
-                <textarea
-                  rows={2}
-                  value={nitData.remarks}
-                  onChange={(e) => setNitData({ ...nitData, remarks: e.target.value })}
-                  placeholder="e.g. GeM custom bid generated; technical qualification criteria attached..."
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
-                <button
-                  type="button"
-                  onClick={() => setPublishModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition disabled:opacity-50"
-                >
-                  {submitting ? 'Publishing...' : 'Confirm NIT Publication'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: AWARD CONTRACT MODAL */}
-      {awardModalOpen && selectedTicket && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 dark:border-slate-700 space-y-4 animate-in fade-in duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Award className="text-emerald-600" size={18} /> Record Work Order Award
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  #TKT-{selectedTicket.id.toString().padStart(4, '0')} · {selectedTicket.title || selectedTicket.description}
-                </p>
-              </div>
-              <button onClick={() => setAwardModalOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAwardSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Awarded Agency / Contractor Name</label>
-                <input
-                  type="text"
-                  value={awardData.awarded_agency}
-                  onChange={(e) => setAwardData({ ...awardData, awarded_agency: e.target.value })}
-                  placeholder="e.g. M/s Himalayan Engineering Works"
-                  required
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Contract / Work Order Value (₹)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={awardData.work_order_value}
-                  onChange={(e) => setAwardData({ ...awardData, work_order_value: e.target.value })}
-                  placeholder="e.g. 48500"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  Estimate: ₹{parseFloat(String(selectedTicket.estimated_amount || 0)).toLocaleString('en-IN')}
-                </span>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Award Remarks / LOI Details</label>
-                <textarea
-                  rows={2}
-                  value={awardData.remarks}
-                  onChange={(e) => setAwardData({ ...awardData, remarks: e.target.value })}
-                  placeholder="e.g. Lowest tenderer L1 approved by competent authority; work order issued..."
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
-                <button
-                  type="button"
-                  onClick={() => setAwardModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition disabled:opacity-50"
-                >
-                  {submitting ? 'Awarding...' : 'Confirm Contract Award'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: VIEW WORK SCOPE DETAILS */}
       {detailsModalOpen && selectedTicket && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in duration-150 text-xs">

@@ -1,12 +1,11 @@
-// Post-approval loop: JE marks work complete -> applicant is reminded until they
-// confirm (CLOSED) or dispute (back to WORK_IN_PROGRESS). Plus uploads by any desk.
+// Post-approval loop: JE resolves -> applicant is mailed once and either closes it or
+// sends it back to where it was resolved from. Plus uploads by any desk.
 import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
-import {
-  updateTenderStatus, confirmCompletion, uploadAttachments,
-} from '../../src/controllers/ticketController.js';
+import { confirmCompletion, uploadAttachments } from '../../src/controllers/ticketController.js';
+import { applyTenderStage, resolveTicket } from '../../src/controllers/tenderController.js';
 import { processDueNotifications } from '../../src/cron/emailReminders.js';
 import { makeUser, makeOpenTicket, cleanup, pool } from './helpers.mjs';
 
@@ -27,25 +26,26 @@ const statusOf = async (id) => (await pool.query('SELECT status FROM tickets WHE
 const liveReminders = async (id) => (await pool.query(
   "SELECT desk, to_user_id, audience FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id]))[0];
 
-test('JE completes -> applicant reminded; dispute reopens; confirm closes', async () => {
+test('JE completes -> applicant mailed once; dispute reopens; confirm closes', async () => {
   const applicantId = await makeUser({ role: 'APPLICANT' });
   const jeId = await makeUser({ role: 'JE' });
   const id = await makeOpenTicket(applicantId, jeId, 'WORK_IN_PROGRESS');
   const je = { id: jeId, role: 'JE', name: 'CI JE' };
   const applicant = { id: applicantId, role: 'APPLICANT', name: 'CI Applicant' };
 
-  // JE may not close it any more.
-  assert.equal((await call(updateTenderStatus, { user: je, ticketId: id, body: { milestone: 'CLOSED' } })).status, 400);
+  // The JE cannot close it: there is no such stage. Only the applicant closes.
+  assert.equal((await call(applyTenderStage, { user: je, ticketId: id, body: { stage: 'CLOSE' } })).status, 400);
 
-  assert.equal((await call(updateTenderStatus, { user: je, ticketId: id, body: { milestone: 'WORK_COMPLETED' } })).status, 200);
+  const resolve = () => call(resolveTicket, { user: je, ticketId: id, body: { note: 'Work completed on site' } });
+  assert.equal((await resolve()).status, 200);
   assert.equal(await statusOf(id), 'WORK_COMPLETED');
-  assert.deepEqual(await liveReminders(id), [{ desk: 'APPLICANT', to_user_id: applicantId, audience: 'APPLICANT' }]);
-
-  // The worker sends the first reminder now, and keeps the series alive.
+  // Policy: the applicant gets ONE "resolved" mail and is never reminded; nobody else is mailed.
+  assert.deepEqual(await liveReminders(id), []);
   const sent = [];
   await processDueNotifications({ now: new Date(Date.now() + 60_000), send: async (m) => { sent.push(m); } });
-  assert.ok(sent.some((m) => /verify the completed work/.test(m.subject)), 'verify mail sent');
-  assert.equal((await liveReminders(id)).length, 1, 'series still live after a send');
+  assert.deepEqual(sent.map((m) => m.subject), [`[Infra] TKT-${String(id).padStart(4, '0')}: Resolved, please verify`]);
+  await processDueNotifications({ now: new Date(Date.now() + 100 * 3600e3), send: async (m) => { sent.push(m); } });
+  assert.equal(sent.length, 1, 'no reminder follows');
 
   // Someone else cannot answer; a dispute needs a reason.
   const stranger = { id: jeId, role: 'APPLICANT' };
@@ -54,15 +54,21 @@ test('JE completes -> applicant reminded; dispute reopens; confirm closes', asyn
 
   assert.equal((await call(confirmCompletion, { user: applicant, ticketId: id, body: { accepted: false, remarks: 'Still leaks' } })).status, 200);
   assert.equal(await statusOf(id), 'WORK_IN_PROGRESS');
-  assert.equal((await liveReminders(id)).length, 0, 'dispute stops the reminders');
+  // The JE hears the comment; the applicant is not mailed for the send-back.
+  const [toJe] = await pool.query("SELECT subject, body FROM notifications WHERE ticket_id = ? AND to_user_id = ? AND status = 'PENDING'", [id, jeId]);
+  assert.equal(toJe.length, 1);
+  assert.match(toJe[0].subject, /Sent back by the applicant/);
+  assert.match(toJe[0].body, /Still leaks/);
 
-  await call(updateTenderStatus, { user: je, ticketId: id, body: { milestone: 'WORK_COMPLETED' } });
+  assert.equal((await resolve()).status, 200);
   assert.equal((await call(confirmCompletion, { user: applicant, ticketId: id, body: { accepted: true } })).status, 200);
   assert.equal(await statusOf(id), 'CLOSED');
   assert.equal((await liveReminders(id)).length, 0);
+  const [closed] = await pool.query("SELECT subject FROM notifications WHERE ticket_id = ? AND to_user_id = ? ORDER BY id DESC LIMIT 1", [id, applicantId]);
+  assert.match(closed[0].subject, /: Closed$/);
 
   const [log] = await pool.query('SELECT action FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]);
-  assert.deepEqual(log.map((r) => r.action), ['WORK_COMPLETED', 'REMINDER_SENT', 'WORK_REOPENED', 'WORK_COMPLETED', 'CLOSED']);
+  assert.deepEqual(log.map((r) => r.action), ['RESOLVED', 'SENT_BACK', 'RESOLVED', 'CLOSED']);
 });
 
 test('uploads: category from the uploader; outsiders and closed tickets refused', async () => {

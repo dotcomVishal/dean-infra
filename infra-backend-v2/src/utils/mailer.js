@@ -31,6 +31,7 @@ export const deliverEmail = async ({ to, cc, subject, text }) => {
     ...(cc ? { cc } : {}),
     subject,
     text,
+    headers: { 'Auto-Submitted': 'auto-generated' },
   });
 };
 

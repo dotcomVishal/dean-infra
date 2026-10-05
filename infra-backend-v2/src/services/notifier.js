@@ -6,28 +6,27 @@
 //  caused them: no mail for a move that never happened, no move whose mail is
 //  lost. Nothing here talks to SMTP -- cron/emailReminders.js sends.
 //
+//  WHO gets WHAT is decided in services/emailPolicy.js, not here: this file
+//  says which event happened, the policy says whether that recipient is mailed.
+//
 //  JE reminder cadence (hours after the assignment): 0 (instant), 12, 24, 72,
-//  then every 24 h. The AE is copied from the 4th reminder onwards (Q10).
-//  Applicant mail = stage + portal link only (emailTemplates.applicantStageEmail).
+//  then every 24 h. Only the JE is reminded.
 // ============================================================
-import { STATUS, ACTION, deskForStatus } from '../config/workflow.js';
+import { STATUS, ACTION, JE_STAGE } from '../config/workflow.js';
 import { findDeskOwner } from '../models/deskModel.js';
-import * as notificationModel from '../models/notificationModel.js';
-import { stageLabel } from './visibility.js';
+import { cancelReminders } from '../models/notificationModel.js';
+import { EVENT, queueFor, startReminders } from './emailPolicy.js';
+
 import {
-  applicantStageEmail, jeAssignmentEmail, unassignedEmail,
-  changeRequestEmail, movementEmail, applicantVerifyEmail,
+  jeAssignedEmail, jeReassignedAwayEmail, changesRequestedEmail, jeOutcomeEmail, jeSentBackEmail,
+  arrivalEmail, applicantEventEmail,
 } from './emailTemplates.js';
 
 const HOUR = 60 * 60 * 1000;
 export const REMINDER_OFFSETS_HOURS = Object.freeze([0, 12, 24, 72]);
 export const REMINDER_REPEAT_HOURS = 24;
-export const AE_COPY_FROM = 4;
 
-export const JE_STAGE_STATUSES = Object.freeze([STATUS.ASSIGNED_TO_JE, STATUS.RETURNED_TO_JE]);
-export const AE_STAGE_STATUSES = Object.freeze([STATUS.UNASSIGNED]);
-export const APPLICANT_STAGE_STATUSES = Object.freeze([STATUS.WORK_COMPLETED]);
-const STOP_STATUSES = Object.freeze({ JE: JE_STAGE_STATUSES, AE: AE_STAGE_STATUSES, APPLICANT: APPLICANT_STAGE_STATUSES });
+export const JE_STAGE_STATUSES = JE_STAGE;
 
 /** When is reminder number `number` (1-based) due, for a reminder series anchored at `anchor`? */
 export function reminderDueAt(anchor, number) {
@@ -39,16 +38,12 @@ export function reminderDueAt(anchor, number) {
   return new Date(anchor.getTime() + hours * HOUR);
 }
 
-export const copiesAe = (number) => number >= AE_COPY_FROM;
-
 // ---- row loaders -------------------------------------------------------------------
 async function loadTicketBrief(connection, ticketId) {
   const [rows] = await connection.query(
-    `SELECT t.id, t.title, t.department, t.campus, t.category, t.priority, t.type, t.description,
-            t.building, t.landmark, t.contact_phone, t.status, t.applicant_id, t.assigned_je_id,
-            t.current_desk_user_id, t.is_mock,
-            u.name AS applicant_name, u.email AS applicant_email, u.phone AS applicant_phone
-       FROM tickets t JOIN users u ON u.id = t.applicant_id WHERE t.id = ?`,
+    `SELECT t.id, t.title, t.department, t.campus, t.landmark, t.status, t.applicant_id, t.assigned_je_id,
+            t.assigned_ae_id, t.current_desk_user_id, t.is_mock
+       FROM tickets t WHERE t.id = ?`,
     [ticketId]
   );
   return rows[0] ?? null;
@@ -57,43 +52,36 @@ async function loadTicketBrief(connection, ticketId) {
 async function loadUser(connection, id) {
   if (id == null) return null;
   const [rows] = await connection.query(
-    'SELECT id, name, email FROM users WHERE id = ? AND is_active = TRUE', [id]);
+    'SELECT id, name, email, role FROM users WHERE id = ? AND is_active = TRUE', [id]);
   return rows[0] ?? null;
 }
 
-const assignmentFields = (t, recipient) => ({
-  id: t.id, title: t.title, department: t.department, campus: t.campus, category: t.category,
-  priority: t.priority, type: t.type, description: t.description, contactPhone: t.contact_phone,
-  recipientName: recipient.name,
-  reporterLine: `${t.applicant_name} (${t.applicant_email}${t.applicant_phone ? `, Phone: ${t.applicant_phone}` : ''})`,
-  locationBlock: `${t.campus} campus${t.building ? `, ${t.building}` : ''} — ${t.landmark}`,
+// ---- primitives ------------------------------------------------------------------------
+/** (Re)starts the JE reminder series; the first row is the instant notice. */
+const remindJe = (connection, { ticketId, je, email, now }) => startReminders(connection, {
+  ticketId, user: je, email, stopStatuses: JE_STAGE_STATUSES, anchor: now, firstDueAt: reminderDueAt(now, 1),
 });
 
-// ---- primitives ------------------------------------------------------------------------
-export function queueEmail(connection, { ticketId, toUserId, audience = 'STAFF', email, now = new Date() }) {
-  return notificationModel.insertEmail(connection, {
-    ticketId, toUserId, audience, subject: email.subject, body: email.body, dueAt: now,
+
+// Applicant mail is for four events only; internal stage movement is never mailed (R9).
+const APPLICANT_EVENT_FOR_STATUS = Object.freeze({
+  [STATUS.DENIED]: EVENT.REJECTED,
+  [STATUS.CLOSED]: EVENT.CLOSED,
+  [STATUS.WORK_COMPLETED]: EVENT.RESOLVED,
+});
+
+async function notifyApplicant(connection, { ticketId, applicantId, event, now }) {
+  const applicant = await loadUser(connection, applicantId);
+  return queueFor(connection, {
+    ticketId, user: applicant, kind: 'APPLICANT', event, email: applicantEventEmail(ticketId, event), now,
   });
 }
 
-/** Replaces any live reminder series of the ticket with a new one; `email` is the instant first notice. */
-export async function startDeskReminders(connection, { ticketId, desk, user, email, now = new Date() }) {
-  await notificationModel.cancelReminders(connection, ticketId);
-  return notificationModel.insertReminder(connection, {
-    ticketId, toUserId: user.id, desk, subject: email.subject, body: email.body,
-    anchor: now, dueAt: reminderDueAt(now, 1),
-    stopStatuses: STOP_STATUSES[desk], audience: desk === 'APPLICANT' ? 'APPLICANT' : 'STAFF',
-  });
-}
-
-export const stopReminders = (connection, ticketId) => notificationModel.cancelReminders(connection, ticketId);
-
-/** Tell the applicant only when the STAGE (plain-words label) actually changed. */
-export async function notifyApplicantStage(connection, { ticketId, applicantId, fromStatus = null, toStatus, now = new Date() }) {
-  if (fromStatus !== null && stageLabel(fromStatus) === stageLabel(toStatus)) return null;
-  return queueEmail(connection, {
-    ticketId, toUserId: applicantId, audience: 'APPLICANT', email: applicantStageEmail(ticketId, toStatus), now,
-  });
+/** The applicant is told when a ticket they raised ends up rejected, resolved or closed. */
+export async function notifyApplicantStatus(connection, { ticketId, applicantId, fromStatus = null, toStatus, now = new Date() }) {
+  const event = APPLICANT_EVENT_FOR_STATUS[toStatus];
+  if (!event || fromStatus === toStatus) return null;
+  return notifyApplicant(connection, { ticketId, applicantId, event, now });
 }
 
 // ---- flows -------------------------------------------------------------------------------
@@ -104,17 +92,13 @@ export async function notifyTicketCreated(connection, { ticketId, assignment, no
   if (t.is_mock) return; // Sysadmin test ticket: no mail, no reminders
   const owner = assignment.deskUser;
   if (assignment.status === STATUS.ASSIGNED_TO_JE) {
-    await startDeskReminders(connection, {
-      ticketId, desk: 'JE', user: owner, email: jeAssignmentEmail(assignmentFields(t, owner)), now,
-    });
+    await remindJe(connection, { ticketId, je: owner, email: jeAssignedEmail(t), now });
   } else {
-    await startDeskReminders(connection, {
-      ticketId, desk: 'AE', user: owner, email: unassignedEmail(assignmentFields(t, owner)), now,
+    await queueFor(connection, {
+      ticketId, user: owner, event: EVENT.ARRIVAL, email: arrivalEmail({ ticketId, title: t.title, unassigned: true }), now,
     });
   }
-  await notifyApplicantStage(connection, {
-    ticketId, applicantId: t.applicant_id, toStatus: assignment.status, now,
-  });
+  await notifyApplicant(connection, { ticketId, applicantId: t.applicant_id, event: EVENT.RECEIVED, now });
 }
 
 /** A desk action or JE report moved the ticket (called after the row was updated). */
@@ -124,114 +108,113 @@ export async function notifyTransition(connection, {
 }) {
   const t = await loadTicketBrief(connection, ticketId);
   if (t.is_mock) return;
-  await stopReminders(connection, ticketId);
+  await cancelReminders(connection, ticketId);
 
   if (action === ACTION.ASSIGN_JE) {
-    await startDeskReminders(connection, {
-      ticketId, desk: 'JE', user: nextDeskUser,
-      email: jeAssignmentEmail(assignmentFields(t, nextDeskUser)), now,
-    });
+    await remindJe(connection, { ticketId, je: nextDeskUser, email: jeAssignedEmail(t), now });
   } else if (action === ACTION.REQUEST_CHANGES) {
-    const email = changeRequestEmail({
-      ticketId, title: t.title, recipientName: nextDeskUser.name, desk: toDesk,
-      fromDesk: actor.desk, fromName: actor.name, message,
-    });
+    const email = changesRequestedEmail({ ticketId, fromDesk: actor.desk, message });
     if (toDesk === 'JE') {
-      await startDeskReminders(connection, { ticketId, desk: 'JE', user: nextDeskUser, email, now });
+      await remindJe(connection, { ticketId, je: nextDeskUser, email, now });
     } else {
-      await queueEmail(connection, { ticketId, toUserId: nextDeskUser.id, email, now });
+      await queueFor(connection, { ticketId, user: nextDeskUser, event: EVENT.ARRIVAL, email, now });
     }
   } else if (action === ACTION.FORWARD || action === ACTION.SUBMIT_REPORT) {
-    await queueEmail(connection, {
-      ticketId, toUserId: nextDeskUser.id, now,
-      email: movementEmail({
-        ticketId, title: t.title, recipientName: nextDeskUser.name, desk: toDesk,
-        headline: action === ACTION.SUBMIT_REPORT
-          ? 'Site report submitted — awaiting your review'
-          : 'Awaiting your review',
-      }),
+    await queueFor(connection, {
+      ticketId, user: nextDeskUser, event: EVENT.ARRIVAL, email: arrivalEmail({ ticketId, title: t.title }), now,
     });
   } else if (action === ACTION.APPROVE || action === ACTION.REJECT) {
-    // Outcome goes to the JE who did the site work; the remark stays in the portal.
-    const je = await loadUser(connection, t.assigned_je_id);
-    if (je) {
-      await queueEmail(connection, {
-        ticketId, toUserId: je.id, now,
-        email: movementEmail({
-          ticketId, title: t.title, recipientName: je.name, desk: 'JE',
-          headline: action === ACTION.APPROVE ? 'Approved' : 'Rejected',
-        }),
-      });
-    }
+    // The outcome goes to the JE who did the site work; the remark stays in the portal.
+    const approved = action === ACTION.APPROVE;
+    await queueFor(connection, {
+      ticketId, user: await loadUser(connection, t.assigned_je_id),
+      event: approved ? EVENT.APPROVED : EVENT.REJECTED_JE, email: jeOutcomeEmail({ ticketId, approved }), now,
+    });
   }
 
-  await notifyApplicantStage(connection, { ticketId, applicantId: t.applicant_id, fromStatus, toStatus, now });
+  await notifyApplicantStatus(connection, { ticketId, applicantId: t.applicant_id, fromStatus, toStatus, now });
 }
 
 /**
- * Tender / award / completion / closure: tell the JE and the AE, and the
- * applicant if the stage moved. WORK_COMPLETED instead starts the applicant's
- * verification reminders (instant, +12h, +24h, +72h, then daily until they answer).
+ * Tender / award / completion / closure. The applicant hears about resolved and
+ * closed; a ticket the applicant sends back goes to the JE with their comment.
+ * Nobody else is mailed for these moves.
  */
-export async function notifyPostApproval(connection, { ticketId, fromStatus, toStatus, headline, now = new Date() }) {
+export async function notifyPostApproval(connection, { ticketId, fromStatus, toStatus, message = null, now = new Date() }) {
   const t = await loadTicketBrief(connection, ticketId);
   if (t.is_mock) return;
-  await stopReminders(connection, ticketId);
-  const je = await loadUser(connection, t.assigned_je_id);
-  const ae = await findDeskOwner(connection, t, 'AE');
-  for (const [user, desk] of [[je, 'JE'], [ae, 'AE']]) {
-    if (!user) continue;
-    await queueEmail(connection, {
-      ticketId, toUserId: user.id, now,
-      email: movementEmail({ ticketId, title: t.title, recipientName: user.name, desk, headline }),
-    });
-  }
-  if (toStatus === STATUS.WORK_COMPLETED) {
-    const applicant = await loadUser(connection, t.applicant_id);
-    if (applicant) {
-      await startDeskReminders(connection, {
-        ticketId, desk: 'APPLICANT', user: applicant, email: applicantVerifyEmail(ticketId), now,
-      });
+  await cancelReminders(connection, ticketId);
+
+  const sentBack = fromStatus === STATUS.WORK_COMPLETED && toStatus !== STATUS.CLOSED;
+  if (sentBack) {
+    const je = await loadUser(connection, t.assigned_je_id);
+    const email = jeSentBackEmail({ ticketId, comment: message });
+    if (JE_STAGE_STATUSES.includes(toStatus)) {
+      // Back on the inspection desk: the JE is reminded again, like any ticket waiting for their report.
+      await remindJe(connection, { ticketId, je, email, now });
+    } else {
+      await queueFor(connection, { ticketId, user: je, event: EVENT.APPLICANT_SENT_BACK, email, now });
     }
     return;
   }
-  await notifyApplicantStage(connection, { ticketId, applicantId: t.applicant_id, fromStatus, toStatus, now });
+  await notifyApplicantStatus(connection, { ticketId, applicantId: t.applicant_id, fromStatus, toStatus, now });
+}
+
+/**
+ * The Sysadmin changed `assigned_je_id` (at any stage). The new JE hears it is theirs, the old JE that it
+ * is gone. The reminder series restarts for the new JE only while the ticket is at a JE stage.
+ * No mail when nothing changed. A first assignment (no old JE) mails once.
+ */
+export async function notifyJeChange(connection, { ticketId, oldJeId, newJeId, now = new Date() }) {
+  if (oldJeId === newJeId) return;
+  const t = await loadTicketBrief(connection, ticketId);
+  if (!t || t.is_mock) return;
+  await cancelReminders(connection, ticketId); // the old series belonged to the old JE
+
+  const newJe = await loadUser(connection, newJeId);
+  if (newJe) {
+    if (JE_STAGE_STATUSES.includes(t.status)) {
+      await remindJe(connection, { ticketId, je: newJe, email: jeAssignedEmail(t), now });
+    } else {
+      await queueFor(connection, { ticketId, user: newJe, event: EVENT.JE_REASSIGNED_TO, email: jeAssignedEmail(t), now });
+    }
+  }
+  const oldJe = await loadUser(connection, oldJeId);
+  if (oldJe && oldJe.id !== newJeId) {
+    await queueFor(connection, { ticketId, user: oldJe, event: EVENT.JE_REASSIGNED_AWAY, email: jeReassignedAwayEmail(ticketId), now });
+  }
 }
 
 /** SYSADMIN override: restart the right reminder series for wherever the ticket ended up. */
-export async function notifyAdminOverride(connection, { ticketId, fromStatus, newHolder = null, now = new Date() }) {
+export async function notifyAdminOverride(connection, {
+  ticketId, fromStatus, oldJeId = null, newHolder = null, now = new Date(),
+}) {
   const t = await loadTicketBrief(connection, ticketId);
   if (t.is_mock) return;
-  await stopReminders(connection, ticketId);
+  const jeChanged = t.assigned_je_id !== oldJeId;
+  const statusChanged = t.status !== fromStatus;
+  // Nothing about the JE or the stage moved (e.g. the same person picked again): leave the series running.
+  if (jeChanged || statusChanged) await cancelReminders(connection, ticketId);
 
-  if (JE_STAGE_STATUSES.includes(t.status)) {
-    const je = await loadUser(connection, t.assigned_je_id);
-    if (je) {
-      await startDeskReminders(connection, {
-        ticketId, desk: 'JE', user: je,
-        email: jeAssignmentEmail(assignmentFields(t, je)), now,
-      });
-    }
-  } else if (t.status === STATUS.UNASSIGNED) {
-    const ae = await findDeskOwner(connection, t, 'AE');
-    if (ae) {
-      await startDeskReminders(connection, {
-        ticketId, desk: 'AE', user: ae, email: unassignedEmail(assignmentFields(t, ae)), now,
-      });
-    }
-  } else if (newHolder && t.current_desk_user_id === newHolder.id) {
-    // Approval desks (AE/SE/Dean/Director): tell the new holder the ticket is theirs.
-    await queueEmail(connection, {
-      ticketId, toUserId: newHolder.id, now,
-      email: movementEmail({
-        ticketId, title: t.title, recipientName: newHolder.name, desk: deskForStatus(t.status),
-        headline: 'Awaiting your review',
-      }),
+  if (jeChanged) {
+    await notifyJeChange(connection, { ticketId, oldJeId, newJeId: t.assigned_je_id, now });
+  } else if (statusChanged && JE_STAGE_STATUSES.includes(t.status)) {
+    // The ticket was moved onto the JE desk without changing the JE.
+    await remindJe(connection, { ticketId, je: await loadUser(connection, t.assigned_je_id), email: jeAssignedEmail(t), now });
+  }
+
+  if (t.status === STATUS.UNASSIGNED) {
+    await queueFor(connection, {
+      ticketId, user: await findDeskOwner(connection, t, 'AE'), event: EVENT.ARRIVAL,
+      email: arrivalEmail({ ticketId, title: t.title, unassigned: true }), now,
+    });
+  } else if (newHolder && t.current_desk_user_id === newHolder.id && !JE_STAGE_STATUSES.includes(t.status)) {
+    // Approval desks: tell the new holder the ticket is theirs (the policy decides whether that desk is mailed).
+    await queueFor(connection, {
+      ticketId, user: newHolder, event: EVENT.ARRIVAL, email: arrivalEmail({ ticketId, title: t.title }), now,
     });
   }
-  if (t.status !== fromStatus) {
-    await notifyApplicantStage(connection, {
-      ticketId, applicantId: t.applicant_id, fromStatus, toStatus: t.status, now,
-    });
+  if (statusChanged) {
+    await notifyApplicantStatus(connection, { ticketId, applicantId: t.applicant_id, fromStatus, toStatus: t.status, now });
   }
 }

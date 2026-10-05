@@ -57,6 +57,7 @@ export async function inRolledBackTx(fn) {
 export async function cleanup() {
   if (created.tickets.length) await pool.query('DELETE FROM tickets WHERE id IN (?)', [created.tickets]);
   if (created.users.length) {
+    await pool.query('DELETE FROM notifications WHERE to_user_id IN (?)', [created.users]); // weekly digests have no ticket to cascade from
     await pool.query('DELETE FROM user_availability WHERE user_id IN (?) OR created_by IN (?)', [created.users, created.users]);
     await pool.query('DELETE FROM users WHERE id IN (?)', [created.users]); // user_scopes cascade
   }

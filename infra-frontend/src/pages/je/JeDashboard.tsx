@@ -8,6 +8,8 @@ import {
 import { useAuthStore } from '../../store/authStore';
 import { api } from '../../services/api';
 import DeskBoard from '../../components/DeskBoard';
+import { placeLabel, staffStatusLabel } from '../../lib/ticketUi';
+import { inGroup, JE_STAGE, APPROVAL_STAGE, POST_APPROVAL, TENDER_STAGE, IN_WORK } from '../../lib/statuses';
 
 export interface JeTicket {
   id: number;
@@ -20,6 +22,9 @@ export interface JeTicket {
   type: 'recurring' | 'non-recurring';
   description: string;
   location: string;
+  campus?: string | null;
+  landmark?: string | null;
+  building?: string | null;
   status: string;
   created_at: string;
   estimated_amount?: number | string | null;
@@ -57,24 +62,13 @@ export default function JeDashboard() {
   }, [user]);
 
   // Tab 1: Pending Inspections (ASSIGNED_TO_JE, RETURNED_TO_JE)
-  const pendingInspections = tickets.filter(
-    (t) => t.status === 'ASSIGNED_TO_JE' || t.status === 'RETURNED_TO_JE'
-  );
+  const pendingInspections = tickets.filter((t) => inGroup(JE_STAGE, t.status));
 
   // Tab 2: Awaiting Approval (PENDING_AE_APPROVAL, PENDING_SE_APPROVAL, PENDING_DEAN_APPROVAL, PENDING_DIRECTOR_APPROVAL)
-  const awaitingApproval = tickets.filter((t) =>
-    t.status.startsWith('PENDING_')
-  );
+  const awaitingApproval = tickets.filter((t) => inGroup(APPROVAL_STAGE, t.status));
 
   // Tab 3: Active Tenders (APPROVED_FOR_TENDERING, TENDER_PUBLISHED, WORK_IN_PROGRESS, CLOSED)
-  const activeTenders = tickets.filter(
-    (t) =>
-      t.status === 'APPROVED_FOR_TENDERING' ||
-      t.status === 'TENDER_PUBLISHED' ||
-      t.status === 'WORK_IN_PROGRESS' ||
-      t.status === 'WORK_COMPLETED' ||
-      t.status === 'CLOSED'
-  );
+  const activeTenders = tickets.filter((t) => inGroup(POST_APPROVAL, t.status));
 
   const getFilteredList = (list: JeTicket[]) => {
     const term = search.toLowerCase();
@@ -84,7 +78,7 @@ export default function JeDashboard() {
         ticket.description.toLowerCase().includes(term) ||
         ticket.id.toString().includes(term) ||
         ticket.applicant_name.toLowerCase().includes(term) ||
-        (ticket.location && ticket.location.toLowerCase().includes(term));
+        placeLabel(ticket).toLowerCase().includes(term);
 
       const matchesType = typeFilter === 'all' || ticket.type === typeFilter;
       return matchesSearch && matchesType;
@@ -144,13 +138,21 @@ export default function JeDashboard() {
       case 'WORK_IN_PROGRESS':
         return (
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-sky-100 dark:bg-sky-900/30 text-sky-800 dark:text-sky-400 border-sky-200 dark:border-sky-800/50">
-            Work In Progress
+            Awarded
+          </span>
+        );
+      case 'TECHNICAL_EVALUATION':
+      case 'FINANCIAL_EVALUATION':
+      case 'TENDER_CANCELLED':
+        return (
+          <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-cyan-100 dark:bg-cyan-900/30 text-cyan-800 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800/50">
+            {staffStatusLabel(status)}
           </span>
         );
       case 'WORK_COMPLETED':
         return (
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 border-amber-200 dark:border-amber-800/50">
-            Awaiting Applicant
+            Resolved — awaiting applicant
           </span>
         );
       case 'CLOSED':
@@ -367,11 +369,7 @@ export default function JeDashboard() {
         ) : (
           currentDisplayList.map((ticket) => {
             const isReturned = ticket.status === 'RETURNED_TO_JE';
-            const isTenderStage =
-              ticket.status === 'APPROVED_FOR_TENDERING' ||
-              ticket.status === 'TENDER_PUBLISHED' ||
-              ticket.status === 'WORK_IN_PROGRESS' ||
-              ticket.status === 'WORK_COMPLETED';
+            const isTenderStage = (inGroup(TENDER_STAGE, ticket.status) || inGroup(IN_WORK, ticket.status));
 
             return (
               <div
@@ -412,7 +410,7 @@ export default function JeDashboard() {
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400 pt-1">
                       <span>Applicant: <strong className="text-slate-700 dark:text-slate-300">{ticket.applicant_name}</strong></span>
-                      {ticket.location && <span>Location: <span className="italic">{ticket.location}</span></span>}
+                      {(ticket.landmark || ticket.location) && <span>Location: <span className="italic">{placeLabel(ticket)}</span></span>}
                       <span>Reported: {format(new Date(ticket.created_at), 'MMM dd, yyyy')}</span>
                       {ticket.estimated_amount && (
                         <span className="font-mono font-bold text-slate-800 dark:text-slate-200">

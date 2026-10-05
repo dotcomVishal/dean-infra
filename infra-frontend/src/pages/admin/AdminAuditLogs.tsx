@@ -23,7 +23,61 @@ interface AuditLogItem {
   is_self_action?: number | boolean;
 }
 
+interface DeletedItem {
+  id: number;
+  ticket_id: number;
+  deleted_by_name: string | null;
+  deleted_at: string;
+  reason: string;
+  file_count: number;
+  title: string | null;
+  status: string | null;
+  estimate: number | string | null;
+  award_amount: number | string | null;
+}
+
+/** Tombstones of deleted tickets: who removed what, when and why. */
+function DeletedTickets() {
+  const [rows, setRows] = useState<DeletedItem[] | null>(null);
+  useEffect(() => {
+    api.get('/admin/deleted-tickets').then((r) => setRows(r.data.deleted ?? [])).catch(() => setRows([]));
+  }, []);
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200/80 dark:border-slate-700 shadow-sm overflow-hidden">
+      {rows === null ? (
+        <div className="p-12 text-center text-slate-400">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="p-12 text-center text-slate-400">No ticket has been deleted.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-100 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-900/30 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-4">Ticket</th><th className="py-3 px-4">Title</th><th className="py-3 px-4">Deleted</th>
+                <th className="py-3 px-4">By</th><th className="py-3 px-4">Reason</th><th className="py-3 px-4">Files</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+              {rows.map((d) => (
+                <tr key={d.id}>
+                  <td className="py-3 px-4 font-mono font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap">#TKT-{String(d.ticket_id).padStart(4, '0')}</td>
+                  <td className="py-3 px-4 max-w-xs truncate">{d.title ?? '—'}{d.status ? <span className="block text-[10px] text-slate-400">{d.status.replace(/_/g, ' ')}</span> : null}</td>
+                  <td className="py-3 px-4 whitespace-nowrap">{format(new Date(d.deleted_at), 'dd MMM yyyy, HH:mm')}</td>
+                  <td className="py-3 px-4 whitespace-nowrap">{d.deleted_by_name ?? '—'}</td>
+                  <td className="py-3 px-4 max-w-sm break-words">{d.reason}</td>
+                  <td className="py-3 px-4">{d.file_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminAuditLogs() {
+  const [tab, setTab] = useState<'log' | 'deleted'>('log');
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [ticketIdQuery, setTicketIdQuery] = useState('');
@@ -145,6 +199,16 @@ export default function AdminAuditLogs() {
         </button>
       </div>
 
+      <div className="flex gap-1 p-1 bg-slate-200/60 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 w-fit">
+        {([['log', 'Audit log'], ['deleted', 'Deleted tickets']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={`px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition ${tab === k ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-700/50'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'deleted' ? <DeletedTickets /> : (<>
       {/* Filter and Search Bar */}
       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-gray-200/80 dark:border-slate-700 shadow-sm space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
@@ -180,7 +244,7 @@ export default function AdminAuditLogs() {
             >
               <option value="ALL">All Actions</option>
               {['SUBMITTED', 'FORWARDED', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED', 'REASSIGNED', 'OVERRIDE',
-                'TENDER_PUBLISHED', 'WORK_AWARDED', 'BILL_RECORDED'].map((a) => (
+                'TENDER_PUBLISHED', 'TECH_EVALUATION', 'FIN_EVALUATION', 'TENDER_CANCELLED', 'WORK_AWARDED', 'RESOLVED', 'SENT_BACK', 'BILL_RECORDED'].map((a) => (
                 <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>
               ))}
             </select>
@@ -321,6 +385,7 @@ export default function AdminAuditLogs() {
           </div>
         </div>
       </div>
+      </>)}
     </div>
   );
 }

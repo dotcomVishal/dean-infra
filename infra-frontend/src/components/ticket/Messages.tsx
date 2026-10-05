@@ -5,6 +5,7 @@ import type { AuditEntry, TicketDetail, TicketMessage } from './types';
 import { deskLabel } from '../../lib/ticketUi';
 import { openThread, visibleToText } from '../../lib/threads';
 import { Card } from './Card';
+import { AttachmentList } from './Attachments';
 
 const KIND_LABEL: Record<TicketMessage['kind'], string> = {
   CHANGE_REQUEST: 'Change request',
@@ -95,7 +96,9 @@ const MOVEMENT_LABEL: Record<string, string> = {
   CREATED: 'Ticket raised', ASSIGNED: 'Assigned to JE', REASSIGNED: 'Reassigned',
   SUBMITTED: 'JE report submitted', FORWARDED: 'Forwarded', APPROVED: 'Approved',
   CHANGES_REQUESTED: 'Changes requested', REJECTED: 'Rejected',
-  TENDER_PUBLISHED: 'Tender published', WORK_AWARDED: 'Work awarded', WORK_COMPLETED: 'Work completed', WORK_REOPENED: 'Applicant: work not done',
+  TENDER_PUBLISHED: 'Tender published', TECH_EVALUATION: 'Technical evaluation', FIN_EVALUATION: 'Financial evaluation',
+  TENDER_CANCELLED: 'Tender cancelled', WORK_AWARDED: 'Work awarded', RESOLVED: 'Marked resolved', SENT_BACK: 'Applicant sent it back',
+  WORK_COMPLETED: 'Work completed', WORK_REOPENED: 'Applicant: work not done',
   BILL_RECORDED: 'Bill recorded', BILL_UPDATED: 'Bill updated', CLOSED: 'Closed', OVERRIDE: 'Administrative update',
   PASSED: 'Forwarded', RETURNED: 'Returned to JE', DENIED: 'Rejected',
 };
@@ -131,6 +134,9 @@ export function MessagesTimeline({ ticket }: { ticket: TicketDetail }) {
                 <p className="text-[11px] text-slate-500">{a.actor_name ? `${a.actor_name} · ` : ''}{deskLabel(a.actor_role)}</p>
               )}
               {a.remarks && <p className="mt-1 break-words text-xs text-slate-600 dark:text-slate-300">{a.remarks}</p>}
+              {a.id != null && ticket.attachments.some((f) => f.audit_log_id === a.id) && (
+                <div className="mt-2"><AttachmentList files={ticket.attachments.filter((f) => f.audit_log_id === a.id)} cols="grid-cols-4" /></div>
+              )}
             </li>
           ))}
         </ol>

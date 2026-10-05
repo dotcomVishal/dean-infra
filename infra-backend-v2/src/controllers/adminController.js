@@ -1,14 +1,27 @@
 import fs from 'fs';
 import path from 'path';
 import pool from '../config/db.js';
-import { STATUS, WorkflowError, deskForStatus } from '../config/workflow.js';
+import { TICKETS_DIR } from '../config/paths.js';
+import {
+  STATUS, WorkflowError, deskForStatus, MAX_AMOUNT, JE_STAGE, APPROVAL_STAGE, TENDER_STAGE, IN_WORK, POST_APPROVAL, TERMINAL,
+} from '../config/workflow.js';
 import { resolveDeskOwner, loadAssignees, reconcileDeskOwners } from '../models/deskModel.js';
 import { insertAudit } from '../models/auditModel.js';
 import { checkSingleHolders } from '../services/deskHealth.js';
 import { pinsFor, isSelfAction } from './actionController.js';
 import { notifyAdminOverride } from '../services/notifier.js';
+import { previewDigestFor } from '../cron/weeklyDigest.js';
+import { LATEST_REPORT, AWARDED_TENDER, EFFECTIVE_AMOUNT } from '../models/amountsModel.js';
+import { buildAdminTicketFilter } from '../services/adminTicketFilter.js';
+import {
+  CHILD_TABLES, deletionPreview, buildSnapshot, deleteTicketCascade, trashTicketFiles,
+} from '../services/ticketDeletion.js';
+import { ticketRef } from '../services/emailTemplates.js';
+import { z } from 'zod';
+import { CSV_BOM, csvRow } from '../utils/csv.js';
+import logger, { errorFields } from '../utils/logger.js';
 import { kickOutbox } from '../cron/emailReminders.js';
-import { sendServerError } from '../utils/httpError.js';
+import { sendServerError, sendWorkflowError } from '../utils/httpError.js';
 
 // 1. System Overview Metrics
 export const getAdminMetrics = async (req, res) => {
@@ -43,24 +56,26 @@ export const getAdminMetrics = async (req, res) => {
       WHERE t.is_mock = FALSE
     `);
 
+    // Approved work: the award amount where there is one, else the JE's estimate (per ticket).
     const [financeSum] = await pool.query(`
-      SELECT COALESCE(SUM(r.estimated_amount), 0) as total_sanctioned_amount
-      FROM reports r
-      JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
-      JOIN tickets t ON t.id = r.ticket_id
-      WHERE t.status IN ('APPROVED_FOR_TENDERING', 'TENDER_PUBLISHED', 'WORK_IN_PROGRESS', 'WORK_COMPLETED', 'CLOSED')
+      SELECT COALESCE(SUM(${EFFECTIVE_AMOUNT}), 0) as total_sanctioned_amount,
+             COALESCE(SUM(aw.work_order_value), 0) as total_awarded_amount
+      FROM tickets t
+      LEFT JOIN ${LATEST_REPORT} r ON r.ticket_id = t.id
+      LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
+      WHERE t.status IN (?)
         AND t.is_mock = FALSE
-    `);
+    `, [POST_APPROVAL]);
 
     // JE Workloads
     const [jeWorkloads] = await pool.query(`
       SELECT u.id, u.name as full_name, u.email, u.department, COUNT(t.id) as active_tickets_count
       FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED') AND t.is_mock = FALSE
+      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN (?) AND t.is_mock = FALSE
       WHERE u.role = 'JE' AND u.is_active = TRUE
       GROUP BY u.id, u.name, u.email, u.department
       ORDER BY active_tickets_count DESC
-    `);
+    `, [TERMINAL]);
 
     // Total ticket count
     const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM tickets WHERE is_mock = FALSE`);
@@ -75,13 +90,13 @@ export const getAdminMetrics = async (req, res) => {
     for (const row of statusCounts) {
       const s = row.status || '';
       const c = Number(row.count) || 0;
-      if (s === 'ASSIGNED_TO_JE' || s === 'RETURNED_TO_JE') {
+      if (JE_STAGE.includes(s)) {
         pendingInspection += c;
-      } else if (s.startsWith('PENDING_')) {
+      } else if (APPROVAL_STAGE.includes(s)) {
         awaitingApproval += c;
-      } else if (s === 'APPROVED_FOR_TENDERING' || s === 'TENDER_PUBLISHED' || s === 'WORK_IN_PROGRESS' || s === 'WORK_COMPLETED') {
+      } else if (TENDER_STAGE.includes(s) || IN_WORK.includes(s)) {
         inTendering += c;
-      } else if (s === 'CLOSED') {
+      } else if (s === STATUS.CLOSED) {
         closed += c;
       }
     }
@@ -104,6 +119,7 @@ export const getAdminMetrics = async (req, res) => {
         totalSanctionedAmount: parseFloat(financeSum[0]?.total_sanctioned_amount || 0),
         totalApprovedAmount: parseFloat(financeSum[0]?.total_sanctioned_amount || 0),
         totalEstimatedAmount: parseFloat(allEstimates[0]?.total_estimated_amount || 0),
+        totalAwardedAmount: parseFloat(financeSum[0]?.total_awarded_amount || 0),
         pendingInspection,
         awaitingApproval,
         inTendering,
@@ -125,73 +141,103 @@ export const getAdminMetrics = async (req, res) => {
   }
 };
 
-// 2. Master Tickets Query (with advanced filters & search)
-export const getAllTickets = async (req, res) => {
-  const { search, status, department, type, page = 1, limit = 25, include_mock } = req.query;
-  const pageNum = parseInt(page, 10) || 1;
-  const limitNum = parseInt(limit, 10) || 25;
-  const offset = (pageNum - 1) * limitNum;
-
-  let query = `
-    SELECT 
-      t.id, t.title, t.department, t.campus, t.type, t.description, t.location, t.status, t.created_at, t.is_mock,
-      u_hold.name as current_holder_name,
-      u_app.name as applicant_name, u_app.email as applicant_email, u_app.phone as applicant_phone,
-      u_je.name as je_name, u_je.email as je_email,
-      r.estimated_amount, r.nature_of_work,
-      (SELECT COUNT(*) FROM attachments a WHERE a.ticket_id = t.id) as attachment_count
+// 2. Master Tickets Query. The same filter builder feeds the CSV export below.
+const ADMIN_TICKET_FROM = `
     FROM tickets t
     JOIN users u_app ON t.applicant_id = u_app.id
     LEFT JOIN users u_je ON t.assigned_je_id = u_je.id
     LEFT JOIN users u_hold ON t.current_desk_user_id = u_hold.id
-    LEFT JOIN (
-      SELECT r1.* FROM reports r1
-      JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r2
-      ON r1.id = r2.max_id
-    ) r ON t.id = r.ticket_id
-    WHERE 1=1
-  `;
-  const params = [];
+    LEFT JOIN ${LATEST_REPORT} r ON t.id = r.ticket_id
+    LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id`;
 
-  if (include_mock !== '1') query += ' AND t.is_mock = FALSE';
+const filterError = (res, errors) => res.status(400).json({
+  success: false, code: 'INVALID_FILTER', message: 'A filter value is not valid.', errors });
 
-  if (search) {
-    query += ` AND (t.title LIKE ? OR t.description LIKE ? OR t.id = ? OR u_app.name LIKE ? OR t.location LIKE ?)`;
-    const term = `%${search}%`;
-    params.push(term, term, isNaN(search) ? 0 : parseInt(search, 10), term, term);
-  }
-  if (status && status !== 'ALL') {
-    query += ` AND t.status = ?`;
-    params.push(status);
-  }
-  if (department && department !== 'ALL') {
-    query += ` AND t.department = ?`;
-    params.push(department);
-  }
-  if (type && type !== 'ALL') {
-    query += ` AND t.type = ?`;
-    params.push(type);
-  }
-
-  // Count total matching
-  const countQuery = `SELECT COUNT(*) as count FROM (${query}) as filtered_tickets`;
-
-  query += ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
-  params.push(limitNum, offset);
+export const getAllTickets = async (req, res) => {
+  const filter = buildAdminTicketFilter(req.query);
+  if (!filter.ok) return filterError(res, filter.errors);
+  const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limitNum = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 25));
+  const offset = (pageNum - 1) * limitNum;
 
   try {
-    const [countRows] = await pool.query(countQuery, params.slice(0, params.length - 2));
-    const [tickets] = await pool.query(query, params);
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS count ${ADMIN_TICKET_FROM} ${filter.whereSql}`, filter.params);
+    const [tickets] = await pool.query(
+      `SELECT
+         t.id, t.title, t.department, t.campus, t.landmark, t.building, t.type, t.priority, t.description, t.location,
+         t.status, t.created_at, t.is_mock,
+         u_hold.name as current_holder_name,
+         u_app.name as applicant_name, u_app.email as applicant_email, u_app.phone as applicant_phone,
+         u_je.name as je_name, u_je.email as je_email,
+         r.estimated_amount, r.nature_of_work, aw.work_order_value AS awarded_amount,
+         ${EFFECTIVE_AMOUNT} AS effective_amount,
+         (SELECT COUNT(*) FROM attachments a WHERE a.ticket_id = t.id) as attachment_count
+       ${ADMIN_TICKET_FROM} ${filter.whereSql}
+       ORDER BY t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`,
+      [...filter.params, limitNum, offset]);
 
-    res.json({
-      success: true,
-      total: countRows[0].count,
-      page: pageNum,
-      limit: limitNum,
-      tickets,
-    });
+    res.json({ success: true, total: countRows[0].count, page: pageNum, limit: limitNum, tickets });
   } catch (error) {
     return sendServerError(req, res, error, 'getAllTickets error');
+  }
+};
+
+// CSV of every ticket matching the same filters as the list (not just the visible page).
+const EXPORT_PAGE = 1000;
+const EXPORT_CAP = 50_000;
+const EXPORT_HEADER = [
+  'Ticket no', 'Created (IST)', 'Title', 'Department', 'Campus', 'Landmark', 'Type', 'Priority', 'Status',
+  'Applicant name', 'Applicant e-mail', 'JE', 'Current holder', 'Estimate', 'Award amount', 'Last status change (IST)',
+];
+
+export const exportTickets = async (req, res) => {
+  const filter = buildAdminTicketFilter(req.query);
+  if (!filter.ok) return filterError(res, filter.errors);
+
+  try {
+    const [[{ count }]] = await pool.query(`SELECT COUNT(*) AS count ${ADMIN_TICKET_FROM} ${filter.whereSql}`, filter.params);
+    const total = Number(count);
+    if (total > EXPORT_CAP) {
+      return res.status(400).json({
+        success: false, code: 'TOO_MANY_ROWS',
+        message: `${total} tickets match; the export is limited to ${EXPORT_CAP}. Narrow the filters.`,
+      });
+    }
+
+    logger.info('ticket export', {
+      requestId: req.id, userId: req.user.id, rows: total,
+      filters: { ...filter.filters, search: filter.filters.search ? '(set)' : undefined },
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="tickets_${istStamp(new Date())}.csv"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.write(CSV_BOM + csvRow(EXPORT_HEADER));
+
+    // Pages of 1,000, written as they are read.
+    for (let offset = 0; offset < total; offset += EXPORT_PAGE) {
+      const [rows] = await pool.query(
+        `SELECT t.id, ${IST_STAMP('t.created_at')} AS created_ist, t.title, t.department, t.campus, t.landmark, t.location, t.type, t.priority, t.status,
+                ${IST_STAMP('COALESCE(t.status_changed_at, t.created_at)')} AS last_change_ist,
+                u_app.name AS applicant_name, u_app.email AS applicant_email,
+                u_je.name AS je_name, u_hold.name AS holder_name,
+                r.estimated_amount, aw.work_order_value AS awarded_amount
+         ${ADMIN_TICKET_FROM} ${filter.whereSql}
+         ORDER BY t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`,
+        [...filter.params, EXPORT_PAGE, offset]);
+      for (const t of rows) {
+        res.write(csvRow([
+          `TKT-${String(t.id).padStart(4, '0')}`, t.created_ist, t.title, t.department, t.campus,
+          t.landmark ?? t.location, t.type, t.priority, t.status, t.applicant_name, t.applicant_email,
+          t.je_name, t.holder_name, t.estimated_amount, t.awarded_amount, t.last_change_ist,
+        ]));
+      }
+    }
+    res.end();
+  } catch (error) {
+    // Headers may already be on the wire: end the file rather than send a JSON error into it.
+    if (res.headersSent) { logger.error('ticket export failed mid-stream', { requestId: req.id, ...errorFields(error) }); return res.end(); }
+    return sendServerError(req, res, error, 'exportTickets error');
   }
 };
 
@@ -255,6 +301,16 @@ export const getTicketMasterDetails = async (req, res) => {
 const REASSIGN_DESKS = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'];
 const OPEN_JE_STATUSES = ['ASSIGNED_TO_JE', 'RETURNED_TO_JE'];
 
+/** "20261005_1430" (IST) for a file name. */
+const istStamp = (date) => {
+  const d = new Date(new Date(date).getTime() + 5.5 * 60 * 60 * 1000).toISOString();
+  return `${d.slice(0, 10).replace(/-/g, '')}_${d.slice(11, 16).replace(':', '')}`;
+};
+
+/** SQL: a TIMESTAMP shown as "2026-10-05 14:30" IST, whatever the server and session time zones are. */
+const IST_STAMP = (column) =>
+  `DATE_FORMAT(CONVERT_TZ(${column}, @@session.time_zone, '+05:30'), '%Y-%m-%d %H:%i')`;
+
 const badRequest = (message, code = 'BAD_REQUEST') => new WorkflowError(message, { code, status: 400 });
 
 // JE/AE work inside a (department, campus) scope. An override may go outside it; the audit line says so.
@@ -296,9 +352,25 @@ export const overrideTicketStatus = async (req, res) => {
     if (new_status !== undefined && new_status !== null && new_status !== '' && !Object.values(STATUS).includes(new_status)) {
       throw badRequest(`Unknown status '${new_status}'.`, 'INVALID_STATUS');
     }
+    const priority = req.body.priority;
+    if (priority !== undefined && priority !== null && priority !== '' && !['LOW', 'NORMAL', 'URGENT'].includes(priority)) {
+      throw badRequest(`priority must be one of LOW, NORMAL, URGENT.`, 'INVALID_PRIORITY');
+    }
+    const priorityChanged = !!priority && priority !== current.priority;
     const statusChanged = !!new_status && new_status !== current.status;
     const finalStatus = statusChanged ? new_status : current.status;
 
+    // X7: a forced status must not skip a data gate. "Awarded" needs an award amount on file, or the
+    // dashboards would count an award with no value; "Resolved" remembers where it came from.
+    if (statusChanged && finalStatus === STATUS.WORK_IN_PROGRESS) {
+      const [[award]] = await connection.query(
+        "SELECT COUNT(*) AS n FROM tenders WHERE ticket_id = ? AND status = 'AWARDED' AND work_order_value > 0", [ticket_id]);
+      if (Number(award.n) === 0) {
+        throw new WorkflowError(
+          'Cannot force Awarded: no award amount is on file. Record the award through the JE first.',
+          { code: 'AWARD_REQUIRED', status: 409 });
+      }
+    }
     let target = null;
     if (reassign) {
       const userId = Number.parseInt(reassign.user_id, 10);
@@ -320,7 +392,18 @@ export const overrideTicketStatus = async (req, res) => {
     if (statusChanged) {
       set.status = finalStatus;
       set.status_changed_at = new Date();
+      if (finalStatus === STATUS.WORK_COMPLETED) {
+        set.resolved_from_status = current.status;
+        set.resolved_at = new Date();
+      } else if (current.status === STATUS.WORK_COMPLETED) {
+        set.resolved_from_status = null;
+        set.resolved_at = null;
+      }
       auditRemarks += ` | Status changed from ${current.status} to ${finalStatus}`;
+    }
+    if (priorityChanged) {
+      set.priority = priority;
+      auditRemarks += ` | Priority changed from ${current.priority} to ${priority}`;
     }
     const next = { ...current, ...set };
     if (target) {
@@ -377,7 +460,8 @@ export const overrideTicketStatus = async (req, res) => {
     // tell the new holder / the applicant (stage only) -- same transaction.
     if (columns.length > 0) {
       await notifyAdminOverride(connection, {
-        ticketId: ticket_id, fromStatus: current.status, newHolder: holderChanged ? nextHolder : null,
+        ticketId: ticket_id, fromStatus: current.status, oldJeId: current.assigned_je_id,
+        newHolder: holderChanged ? nextHolder : null,
       });
     }
 
@@ -392,9 +476,7 @@ export const overrideTicketStatus = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
-    if (error instanceof WorkflowError) {
-      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
-    }
+    if (error instanceof WorkflowError) return sendWorkflowError(req, res, error);
     return sendServerError(req, res, error, 'overrideTicketStatus error');
   } finally {
     connection.release();
@@ -682,11 +764,11 @@ export const getActiveJes = async (req, res) => {
 // carry is_mock = TRUE, and sit at the Sysadmin's own desk at every stage. They
 // are excluded from every report, list and mail path.
 // ---------------------------------------------------------------------------
-const MAX_TEST_ESTIMATE = 99_999_999.99;
+const MAX_TEST_ESTIMATE = MAX_AMOUNT;
 
 const removeTicketFiles = (ticketId) => {
   if (!Number.isInteger(ticketId) || ticketId <= 0) return;
-  fs.rmSync(path.join(process.cwd(), 'uploads', 'tickets', String(ticketId)), { recursive: true, force: true });
+  fs.rmSync(path.join(TICKETS_DIR, String(ticketId)), { recursive: true, force: true });
 };
 
 // Locks a ticket and refuses anything that is not a test ticket.
@@ -742,8 +824,8 @@ export const createTestTicket = async (req, res) => {
     await connection.beginTransaction();
     const [result] = await connection.query(
       `INSERT INTO tickets (applicant_id, assigned_je_id, current_desk_user_id, department, title, type, description,
-         location, campus, landmark, category, priority, contact_phone, status, is_mock)
-       VALUES (?, ?, ?, ?, 'Test ticket', 'recurring', 'Test ticket for workflow checks.', 'Test', ?, 'Test', 'Other', 'NORMAL',
+         campus, landmark, priority, contact_phone, status, is_mock)
+       VALUES (?, ?, ?, ?, 'Test ticket', 'recurring', 'Test ticket for workflow checks.', ?, 'Test', 'NORMAL',
          '0000000', 'ASSIGNED_TO_JE', TRUE)`,
       [adminId, adminId, adminId, department, campus]);
     const ticketId = result.insertId;
@@ -770,7 +852,7 @@ export const resetTestTicket = async (req, res) => {
     const [[stub]] = await connection.query(
       'SELECT estimated_amount FROM reports WHERE ticket_id = ? AND version = 1 AND nature_of_work = ?', [ticketId, 'Test report']);
     // Order matters: reports point at messages, messages point at audit rows.
-    for (const table of ['bills', 'tenders', 'attachments', 'notifications', 'reports', 'ticket_messages', 'audit_logs']) {
+    for (const table of CHILD_TABLES) {
       await connection.query(`DELETE FROM ${table} WHERE ticket_id = ?`, [ticketId]);
     }
     await connection.query(
@@ -784,9 +866,7 @@ export const resetTestTicket = async (req, res) => {
     res.json({ success: true, status: STATUS.ASSIGNED_TO_JE });
   } catch (error) {
     await connection.rollback();
-    if (error instanceof WorkflowError) {
-      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
-    }
+    if (error instanceof WorkflowError) return sendWorkflowError(req, res, error);
     return sendServerError(req, res, error, 'resetTestTicket error');
   } finally {
     connection.release();
@@ -799,17 +879,123 @@ export const deleteTestTicket = async (req, res) => {
   try {
     await connection.beginTransaction();
     await lockMockTicket(connection, ticketId);
-    await connection.query('DELETE FROM tickets WHERE id = ? AND is_mock = TRUE', [ticketId]); // children cascade
+    await deleteTicketCascade(connection, ticketId); // children first, then the ticket (shared with the real delete)
     await connection.commit();
     removeTicketFiles(ticketId);
     res.json({ success: true });
   } catch (error) {
     await connection.rollback();
-    if (error instanceof WorkflowError) {
-      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
-    }
+    if (error instanceof WorkflowError) return sendWorkflowError(req, res, error);
     return sendServerError(req, res, error, 'deleteTestTicket error');
   } finally {
     connection.release();
+  }
+};
+
+// Sysadmin-only: the weekly digest text for one user, without sending or queueing anything.
+export const previewDigest = async (req, res) => {
+  const userId = Number.parseInt(req.query.user_id, 10);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ success: false, code: 'BAD_USER_ID', message: 'user_id must be a positive integer.' });
+  }
+  try {
+    const [rows] = await pool.query('SELECT id, name, email, role FROM users WHERE id = ?', [userId]);
+    if (rows.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+    const mail = await previewDigestFor(pool, rows[0]);
+    res.json({ success: true, empty: mail === null, ...(mail ?? {}) });
+  } catch (error) {
+    return sendServerError(req, res, error, 'previewDigest error');
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Real ticket deletion (Master-plan Phase 7). Permanent, with a tombstone.
+// ---------------------------------------------------------------------------
+const deleteSchema = z.object({
+  reason: z.string().trim().min(10, 'Give a reason of at least 10 characters.').max(2000),
+  confirm: z.string().trim(),
+  force: z.preprocess((v) => v === true || v === 'true', z.boolean()).optional(),
+});
+
+/** What deleting a ticket would remove, for the confirmation dialog. */
+export const getDeletionPreview = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({ success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
+  }
+  try {
+    const [rows] = await pool.query('SELECT id FROM tickets WHERE id = ?', [ticketId]);
+    if (rows.length === 0) return res.status(404).json({ success: false, message: 'Ticket not found.' });
+    res.json({ success: true, ticket_ref: ticketRef(ticketId), ...(await deletionPreview(pool, ticketId)) });
+  } catch (error) {
+    return sendServerError(req, res, error, 'getDeletionPreview error');
+  }
+};
+
+export const deleteTicket = async (req, res) => {
+  const ticketId = Number.parseInt(req.params.ticket_id, 10);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({ success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
+  }
+  // Validated before a connection is opened. The typed confirmation must be the ticket number.
+  const parsed = deleteSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false, code: 'VALIDATION_ERROR', message: 'Invalid delete request.',
+      errors: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    });
+  }
+  const { reason, confirm, force } = parsed.data;
+  if (confirm.toUpperCase() !== ticketRef(ticketId)) {
+    return res.status(400).json({
+      success: false, code: 'CONFIRMATION_MISMATCH', message: `Type ${ticketRef(ticketId)} to confirm.` });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT * FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+    if (rows.length === 0) throw new WorkflowError(`Ticket #${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
+
+    const preview = await deletionPreview(connection, ticketId);
+    if (preview.financial && force !== true) {
+      throw new WorkflowError(
+        `${ticketRef(ticketId)} has ${preview.has_bills ? 'bills' : 'an awarded tender'}. Send force: true to delete it anyway.`,
+        { code: 'FINANCIAL_RECORDS', status: 409 });
+    }
+
+    const snapshot = await buildSnapshot(connection, rows[0]);
+    await connection.query(
+      `INSERT INTO deleted_tickets (ticket_id, deleted_by, deleted_by_name, reason, snapshot, file_count)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [ticketId, req.user.id, req.user.name, reason, JSON.stringify(snapshot), snapshot.file_names.length]);
+
+    await deleteTicketCascade(connection, ticketId);
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    if (error instanceof WorkflowError) return sendWorkflowError(req, res, error);
+    return sendServerError(req, res, error, 'deleteTicket error');
+  } finally {
+    connection.release();
+  }
+
+  logger.warn('ticket deleted', { requestId: req.id, adminId: req.user.id, ticketId, forced: force === true });
+  const trashed = trashTicketFiles(ticketId);
+  res.json({ success: true, ticket_id: ticketId, files_moved_to_trash: trashed !== null });
+};
+
+export const listDeletedTickets = async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, ticket_id, deleted_by, deleted_by_name, deleted_at, reason, file_count,
+              JSON_UNQUOTE(JSON_EXTRACT(snapshot, '$.ticket.title')) AS title,
+              JSON_UNQUOTE(JSON_EXTRACT(snapshot, '$.ticket.status')) AS status,
+              JSON_EXTRACT(snapshot, '$.estimate') AS estimate,
+              JSON_EXTRACT(snapshot, '$.award_amount') AS award_amount
+         FROM deleted_tickets ORDER BY id DESC LIMIT 200`);
+    res.json({ success: true, deleted: rows });
+  } catch (error) {
+    return sendServerError(req, res, error, 'listDeletedTickets error');
   }
 };

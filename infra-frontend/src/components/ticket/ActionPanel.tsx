@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, CornerUpLeft, Eye, Loader2, Send, UserCheck, XCircle, ClipboardCheck, Gavel } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, CheckCircle2, CornerUpLeft, Eye, Loader2, Paperclip, Send, UserCheck, X, XCircle, ClipboardCheck, Gavel } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
 import { DESK_RANK, deskLabel, errorMessage, inr, visibleDesks } from '../../lib/ticketUi';
 import type { AvailableAction, TicketDetail } from './types';
-import { openThread } from '../../lib/threads';
 import ReportForm from './ReportForm';
+import { checkFiles, loadUploadLimits, type UploadLimits } from '../../lib/uploadLimits';
+
+// Must match the API allow-list (middleware/upload.js).
+const FILE_ACCEPT = '.jpg,.jpeg,.png,.webp,.heic,.pdf,.xlsx,.docx';
 
 interface JeChoice { id: number; name: string; open_tickets: number; on_leave: boolean; same_campus: boolean }
 
@@ -35,6 +39,8 @@ function meta(a: AvailableAction) {
       return { label: 'Request changes', hint: 'Send it back with a message', tone: 'amber' as const, Icon: CornerUpLeft };
     case 'REJECT':
       return { label: 'Reject', hint: 'Close the ticket as rejected', tone: 'rose' as const, Icon: XCircle };
+    case 'RESOLVE':
+      return { label: 'Mark resolved', hint: 'The work is finished, or no longer needed. The applicant verifies.', tone: 'amber' as const, Icon: CheckCircle2 };
     case 'ASSIGN_JE':
       return { label: 'Assign JE', hint: 'No JE was free. Choose one.', tone: 'blue' as const, Icon: UserCheck };
     default:
@@ -54,12 +60,10 @@ function VisibleTo({ desks, extra }: { desks: string[]; extra?: string }) {
 /** Renders ONLY what the API says this person may do (available_actions). No client-side permission logic. */
 export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; onDone: () => void }) {
   const aa = ticket.available_actions;
-  const actions = aa?.actions ?? [];
+  // The tender steps have their own forms on the tender page; this panel offers the rest.
+  const hasTenderSteps = (aa?.actions ?? []).some((a) => a.action.startsWith('TENDER_'));
+  const actions = (aa?.actions ?? []).filter((a) => !a.action.startsWith('TENDER_'));
   const desk = aa?.desk ?? null;
-
-  const { head: openRequest } = useMemo(
-    () => openThread(ticket.messages ?? [], ticket.open_change_request_id), [ticket.messages, ticket.open_change_request_id]);
-  const replying = !!openRequest && !!desk && openRequest.to_desk === desk;
 
   const [selected, setSelected] = useState<string | null>(null);
   const [toDesk, setToDesk] = useState('');
@@ -69,12 +73,17 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
   const [assignee, setAssignee] = useState('');
   const [jes, setJes] = useState<JeChoice[]>([]);
   const [busy, setBusy] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [restricted, setRestricted] = useState(false);
+  const [limits, setLimits] = useState<UploadLimits | null>(null);
+
+  useEffect(() => { loadUploadLimits().then(setLimits); }, []);
 
   // One choice = no extra tap. Reset the form whenever the ticket moves.
   const enabledCount = actions.filter((a) => a.enabled).length;
   useEffect(() => {
     setSelected(enabledCount === 1 ? actions.find((a) => a.enabled)!.action : null);
-    setToDesk(''); setMessage(''); setInternal(''); setPublicNote(''); setAssignee('');
+    setToDesk(''); setMessage(''); setInternal(''); setPublicNote(''); setAssignee(''); setFiles([]); setRestricted(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket.id, ticket.status, enabledCount]);
 
@@ -85,7 +94,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
       .catch((e) => toast.error(errorMessage(e, 'Could not load the JE list.')));
   }, [selected, ticket.id]);
 
-  if (actions.length === 0 || !desk) return null;
+  if ((actions.length === 0 && !hasTenderSteps) || !desk) return null;
 
   const current = actions.find((a) => a.action === selected) ?? null;
   const rc = actions.find((a) => a.action === 'REQUEST_CHANGES');
@@ -96,6 +105,25 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
 
   const submit = async () => {
     if (!current) return;
+    if (current.action === 'RESOLVE') {
+      if (!message.trim()) return toast.error('Enter a note.');
+      const early = ticket.status !== 'WORK_IN_PROGRESS';
+      const ok = window.confirm(early
+        ? 'This marks the ticket resolved and skips the remaining steps. The applicant will be asked to verify it. Continue?'
+        : 'Mark this ticket resolved? The applicant will be asked to verify it.');
+      if (!ok) return;
+      setBusy(true);
+      try {
+        const res = await api.post(`/tickets/${ticket.id}/resolve`, { note: message.trim() });
+        toast.success(res.data?.message || 'Marked resolved.');
+        onDone();
+      } catch (err) {
+        toast.error(errorMessage(err, 'Could not mark the ticket resolved.'));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const payload: Record<string, unknown> = { action: current.action };
     if (current.action === 'REQUEST_CHANGES') {
       if (!sendTo) return toast.error('Choose a desk.');
@@ -107,7 +135,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
       payload.message = message.trim();
       if (publicNote.trim()) payload.public_note = publicNote.trim();
     }
-    if ((current.action === 'FORWARD' || (current.action === 'APPROVE' && current.escalates_to)) && replying) {
+    if (current.reply_required) {
       if (!message.trim()) return toast.error('Reply to the request first.');
       payload.message = message.trim();
     }
@@ -117,9 +145,24 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
     }
     if (internal.trim() && current.action !== 'ASSIGN_JE') payload.internal_remark = internal.trim();
 
+    // Files travel with the move: multipart when there are any, JSON otherwise.
+    let body: Record<string, unknown> | FormData = payload;
+    if (files.length > 0 && current.action !== 'ASSIGN_JE') {
+      if (limits) {
+        if (files.length > limits.attachment_files) return toast.error(`At most ${limits.attachment_files} files.`);
+        const tooBig = checkFiles(files, limits);
+        if (tooBig) return toast.error(tooBig);
+      }
+      const fd = new FormData();
+      Object.entries(payload).forEach(([k, v]) => fd.append(k, String(v)));
+      if (restricted) fd.append('restricted_files', 'true');
+      files.forEach((f) => fd.append('files', f));
+      body = fd;
+    }
+
     setBusy(true);
     try {
-      const res = await api.post(`/tickets/${ticket.id}/actions`, payload);
+      const res = await api.post(`/tickets/${ticket.id}/actions`, body);
       toast.success(res.data?.message || 'Ticket updated.');
       onDone();
     } catch (err) {
@@ -180,18 +223,45 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
         })}
       </div>
 
+      {hasTenderSteps && (
+        <Link to={`/je/tender/${ticket.id}`} className="mt-3 flex items-center justify-between rounded-xl border-2 border-emerald-500/40 bg-emerald-50 p-3 text-sm font-bold text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300">
+          Open tender control <ArrowRight size={16} />
+        </Link>
+      )}
+
+      {current?.action === 'RESOLVE' && (
+        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-slate-700">
+          {ticket.status !== 'WORK_IN_PROGRESS' && (
+            <p className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+              The ticket is not at the awarded stage. Marking it resolved skips the remaining steps.
+            </p>
+          )}
+          <div>
+            <label htmlFor="resolve-note" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Note <span className="text-rose-500">*</span>
+            </label>
+            <textarea id="resolve-note" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} resize-none`}
+              placeholder="What was done, or why no work is needed" />
+          </div>
+          <button type="button" onClick={submit} disabled={busy}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-600 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-amber-700 disabled:opacity-60">
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} Mark resolved
+          </button>
+        </div>
+      )}
+
       {current?.action === 'SUBMIT_REPORT' && (
         <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700">
           <ReportForm
             ticketId={ticket.id}
             previous={ticket.report}
-            request={replying ? openRequest : null}
+            replyTo={current.reply_required ? current.reply_to_desk ?? 'the desk' : null}
             onDone={onDone}
           />
         </div>
       )}
 
-      {current && current.action !== 'SUBMIT_REPORT' && (
+      {current && current.action !== 'SUBMIT_REPORT' && current.action !== 'RESOLVE' && (
         <div className="mt-4 space-y-4 border-t border-slate-100 pt-4 dark:border-slate-700">
           {current.action === 'ASSIGN_JE' && (
             <div>
@@ -232,10 +302,10 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
             </>
           )}
 
-          {(current.action === 'FORWARD' || (current.action === 'APPROVE' && current.escalates_to)) && replying && openRequest && (
+          {current.reply_required && current.action !== 'SUBMIT_REPORT' && (
             <div>
               <label htmlFor="reply" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Reply to {deskLabel(openRequest.author_desk)} <span className="text-rose-500">*</span>
+                Reply to {deskLabel(current.reply_to_desk)} <span className="text-rose-500">*</span>
               </label>
               <textarea id="reply" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} resize-none`} />
               <VisibleTo desks={visibleDesks(myRank)} />
@@ -257,6 +327,33 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
                 <VisibleTo desks={visibleDesks(1)} extra="Applicant" />
               </div>
             </>
+          )}
+
+          {current.action !== 'ASSIGN_JE' && (
+            <div>
+              <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Attach documents (optional)</span>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-900 dark:bg-slate-600">
+                <Paperclip size={13} /> Add files
+                <input type="file" multiple accept={FILE_ACCEPT} className="hidden"
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files ?? []);
+                    e.target.value = ''; // the same file can be chosen again
+                    setFiles((p) => [...p, ...picked].slice(0, limits?.attachment_files ?? 10));
+                  }} />
+              </label>
+              {files.map((f, i) => (
+                <div key={`${f.name}-${i}`} className="mt-1.5 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-800">
+                  <span className="min-w-0 truncate text-slate-700 dark:text-slate-300">{f.name}</span>
+                  <button type="button" aria-label="Remove file" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="ml-2 text-slate-400 hover:text-rose-600"><X size={13} /></button>
+                </div>
+              ))}
+              {files.length > 0 && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <input type="checkbox" checked={restricted} onChange={(e) => setRestricted(e.target.checked)} />
+                  Only my desk and above can open these files
+                </label>
+              )}
+            </div>
           )}
 
           {current.action !== 'ASSIGN_JE' && (

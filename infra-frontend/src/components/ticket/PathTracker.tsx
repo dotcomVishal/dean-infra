@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 import { Check, X, CornerUpLeft, Circle } from 'lucide-react';
 import type { AuditEntry, TicketDetail } from './types';
-import { deskLabel, formatAge, hoursSince, STATUS_DESK } from '../../lib/ticketUi';
+import { deskLabel, formatAge, hoursSince, staffStatusLabel, STATUS_DESK } from '../../lib/ticketUi';
+import { TENDER_STAGE, inGroup } from '../../lib/statuses';
 import { Card } from './Card';
 
 type StepState = 'done' | 'current' | 'future' | 'returned' | 'rejected';
@@ -29,19 +30,25 @@ const NODE_LABEL: Record<string, (a: AuditEntry) => string> = {
   REJECTED: (a) => (a.from_desk ? `Rejected by ${deskLabel(a.from_desk)}` : 'Rejected'),
   DENIED: () => 'Rejected',
   TENDER_PUBLISHED: () => 'Tender published',
+  TECH_EVALUATION: () => 'Technical evaluation',
+  FIN_EVALUATION: () => 'Financial evaluation',
+  TENDER_CANCELLED: () => 'Tender cancelled',
   WORK_AWARDED: () => 'Work awarded',
-  WORK_COMPLETED: () => 'Work marked complete',
+  RESOLVED: () => 'Marked resolved',
+  WORK_COMPLETED: () => 'Marked resolved',
+  SENT_BACK: () => 'Applicant sent it back',
   WORK_REOPENED: () => 'Applicant: work not done',
   CLOSED: () => 'Closed — applicant confirmed',
 };
 const STATE_OF: Record<string, StepState> = {
   CHANGES_REQUESTED: 'returned', RETURNED: 'returned', REJECTED: 'rejected', DENIED: 'rejected',
+  TENDER_CANCELLED: 'returned', SENT_BACK: 'returned',
 };
 
 const CHAIN = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'];
 const POST = [
   { key: 'tender', label: 'Tendering' },
-  { key: 'work', label: 'Work in progress' },
+  { key: 'work', label: 'Awarded — work in progress' },
   { key: 'verify', label: 'Applicant verifies' },
   { key: 'closed', label: 'Closed' },
 ];
@@ -52,9 +59,9 @@ function futureSteps(status: string, assignees?: TicketDetail['assignees']): Ste
   const push = (key: string, label: string, sub?: string) => out.push({ key: `f-${key}`, label, sub, state: 'future' });
   if (status === 'CLOSED' || status === 'DENIED') return out;
 
-  const postIdx: Record<string, number> = { APPROVED_FOR_TENDERING: 0, TENDER_PUBLISHED: 1, WORK_IN_PROGRESS: 2, WORK_COMPLETED: 3 };
-  if (status in postIdx) {
-    POST.slice(postIdx[status] + 1).forEach((p) => push(p.key, p.label));
+  const postIdx = inGroup(TENDER_STAGE, status) ? 0 : status === 'WORK_IN_PROGRESS' ? 1 : status === 'WORK_COMPLETED' ? 2 : -1;
+  if (postIdx >= 0) {
+    POST.slice(postIdx + 1).forEach((p) => push(p.key, p.label));
     return out;
   }
   const deskNow = STATUS_DESK[status];
@@ -99,8 +106,7 @@ function buildSteps(ticket: TicketDetail, now = Date.now()): Step[] {
     const desk = STATUS_DESK[ticket.status];
     steps.push({
       key: 'now',
-      label: desk ? `${deskLabel(desk)} desk` : ticket.status === 'APPROVED_FOR_TENDERING' ? 'Tendering'
-        : ticket.status === 'TENDER_PUBLISHED' ? 'Tender open' : 'Work in progress',
+      label: desk ? `${deskLabel(desk)} desk` : staffStatusLabel(ticket.status),
       sub: [ticket.assignees?.current?.name, `Here ${formatAge(hoursSince(since, now))}`].filter(Boolean).join(' · '),
       state: 'current',
     });

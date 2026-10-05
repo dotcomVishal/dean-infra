@@ -2,6 +2,7 @@ import express from 'express';
 import pool from '../config/db.js';
 import { upload } from '../middleware/upload.js';
 import { requireAuth } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimit.js';
 import { requireRole } from '../middleware/rbac.js';
 import { testRoleForTicketParam, rejectStrayTestRole } from '../middleware/testRole.js';
 
@@ -10,9 +11,6 @@ import {
   createTicket,
   getQueue,
   submitReport,
-  updateTenderStatus,
-  publishTender,
-  awardTender,
   recordBill,
   updateBillPayment,
   getAccountantOverview,
@@ -20,20 +18,23 @@ import {
   confirmCompletion,
 } from '../controllers/ticketController.js';
 import { performTicketAction } from '../controllers/actionController.js';
+import { applyTenderStage, resolveTicket } from '../controllers/tenderController.js';
 import { getDeskBoard, getAssignableJes } from '../controllers/deskController.js';
-import { availableActions, approvalLimitFor } from '../config/workflow.js';
+import { availableActions, approvalLimitFor, replyRequirement, jeTenderActions } from '../config/workflow.js';
 import { findDeskOwner, loadAssignees } from '../models/deskModel.js';
 import { loadActionContext } from '../services/actionContext.js';
-import { listForTicket } from '../models/messageModel.js';
+import { listForTicket, getMessage } from '../models/messageModel.js';
 import {
   loadViewer, canViewTicket, staffRole, capabilities, applicantTicket, buildTicketDetails,
 } from '../services/visibility.js';
 import { sendServerError } from '../utils/httpError.js';
+import { LATEST_REPORT, AWARDED_TENDER, EFFECTIVE_AMOUNT } from '../models/amountsModel.js';
 
 const router = express.Router();
 
 // EVERY route below this line requires a valid token
 router.use(requireAuth);
+router.use(userLimiter);
 
 // Sysadmin "act as" on mock tickets only (plan2.md F5). Runs before any route-level requireRole.
 router.use(rejectStrayTestRole);
@@ -83,8 +84,16 @@ router.post(
   submitReport
 );
 
-// 4. JE Manual Tendering Milestone Update
-router.post('/:ticket_id/tender', requireRole(['JE']), updateTenderStatus);
+// 4. JE tender lifecycle and resolve (Phase 5). Files are optional on a tender stage.
+router.post('/:ticket_id/tender-stage', requireRole(['JE']), upload.array('files', 10), applyTenderStage);
+router.post('/:ticket_id/resolve', requireRole(['JE']), resolveTicket);
+
+// Retired in Phase 5. A stale PWA bundle still posts here for one release (X8): tell it to reload.
+const retired = (_req, res) => res.status(410).json({
+  success: false, code: 'ENDPOINT_RETIRED', message: 'This screen is out of date. Reload the page.' });
+router.post('/:ticket_id/tender', retired);
+router.post('/:ticket_id/tenders', retired);
+router.post('/:ticket_id/tenders/award', retired);
 
 // 4.1 Files from any desk (applicant, JE, AE..Director, Clerical, Accountant).
 // The controller checks ticket access and picks the category from the uploader.
@@ -96,7 +105,12 @@ router.post('/:ticket_id/confirm-completion', confirmCompletion);
 // 4.5 Desk actions (replaces /review): FORWARD, APPROVE, REQUEST_CHANGES,
 // REJECT, ASSIGN_JE. The route only gates the role; the state machine decides
 // whether THIS person may do THIS action on THIS ticket right now.
-router.post('/:ticket_id/actions', requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']), performTicketAction);
+router.post(
+  '/:ticket_id/actions',
+  requireRole(['AE', 'SE', 'DEAN', 'DIRECTOR']),
+  upload.array('files', 10), // optional: files travel with the movement (Issue 2)
+  performTicketAction
+);
 
 // 4.6 JE picker for the AE's ASSIGN_JE action on an UNASSIGNED ticket.
 router.get('/:ticket_id/assignable-jes', requireRole(['AE']), getAssignableJes);
@@ -107,14 +121,12 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
   try {
     const [tickets] = await pool.query(
       `SELECT t.*, u.name as applicant_name, u.phone as applicant_phone, u.email as applicant_email,
-              r.estimated_amount, r.nature_of_work
+              r.estimated_amount, r.nature_of_work, aw.work_order_value AS awarded_amount,
+              ${EFFECTIVE_AMOUNT} AS effective_amount
        FROM tickets t 
        JOIN users u ON t.applicant_id = u.id 
-       LEFT JOIN (
-         SELECT r1.* FROM reports r1
-         JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r2
-         ON r1.id = r2.max_id
-       ) r ON t.id = r.ticket_id
+       LEFT JOIN ${LATEST_REPORT} r ON t.id = r.ticket_id
+       LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
        WHERE t.assigned_je_id = ? 
        ORDER BY t.created_at DESC`,
       [je_id]
@@ -126,24 +138,9 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 6. CLERICAL TENDER ROUTES
+// 6. TENDER READ ROUTE
 // -------------------------------------------------------------
-// S1: tendering/award belong to Clerical only. A JE (any JE, not just the
-// assigned one) used to be able to call these directly and skip the whole
-// approval chain -- the status guard in the controller closes that, but the
-// route no longer even offers JE the button.
-router.post(
-  '/:ticket_id/tenders',
-  requireRole(['CLERICAL', 'SYSADMIN']),
-  publishTender
-);
-
-router.post(
-  '/:ticket_id/tenders/award',
-  requireRole(['CLERICAL', 'SYSADMIN']),
-  awardTender
-);
-
+// Tendering is driven by the assigned JE (POST /:id/tender-stage); Clerical only reads.
 // S6: previously unauthenticated-in-effect -- no role or scope check meant an
 // APPLICANT could read tender data for any ticket id.
 router.get(
@@ -263,13 +260,18 @@ router.get('/:ticket_id/details', async (req, res) => {
 
     const [attachments] = await pool.query(
       `SELECT a.id, a.file_url, a.uploaded_by, a.created_at, a.document_category, a.report_id,
-              u.role AS uploader_role
-         FROM attachments a LEFT JOIN users u ON u.id = a.uploaded_by
+              a.uploader_desk, a.audit_log_id, a.original_name,
+              u.role AS uploader_role, u.name AS uploader_name,
+              al.action AS audit_action, al.from_desk AS audit_from_desk, al.to_desk AS audit_to_desk
+         FROM attachments a
+         LEFT JOIN users u ON u.id = a.uploaded_by
+         LEFT JOIN audit_logs al ON al.id = a.audit_log_id
         WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
       [ticket_id]
     );
+    // Newest first. Every version is sent (small rows); the newest is the "current" report.
     const [reports] = await pool.query(
-      'SELECT * FROM reports WHERE ticket_id = ? ORDER BY version DESC LIMIT 1', [ticket_id]);
+      'SELECT * FROM reports WHERE ticket_id = ? ORDER BY version DESC', [ticket_id]);
 
     let tenders = [];
     try {
@@ -285,7 +287,7 @@ router.get('/:ticket_id/details', async (req, res) => {
     }
 
     const [auditLogs] = await pool.query(
-      `SELECT a.action, a.remarks, a.created_at, a.user_id, a.visibility, a.from_desk, a.to_desk, a.is_self_action,
+      `SELECT a.id, a.action, a.remarks, a.created_at, a.user_id, a.visibility, a.from_desk, a.to_desk, a.is_self_action,
               u.name as actor_name, u.role as actor_role
          FROM audit_logs a JOIN users u ON a.user_id = u.id
         WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
@@ -304,6 +306,16 @@ router.get('/:ticket_id/details', async (req, res) => {
       ticketData.open_change_request_id = ticketRow.open_change_request_id ?? null;
       const ctx = await loadActionContext(pool, ticketRow, { id: userId, role: userRole });
       ticketData.available_actions = availableActions({ id: userId, role: userRole }, ctx.ticket, ctx.limits);
+      // R8: the form is told whether a reply is mandatory; it never derives that itself.
+      const openRequest = ticketRow.open_change_request_id
+        ? await getMessage(pool, ticketRow.open_change_request_id) : null;
+      const fromDesk = ticketData.available_actions.desk;
+      ticketData.available_actions.actions = ticketData.available_actions.actions.map((a) => ({
+        ...a,
+        ...replyRequirement({
+          action: a.action === 'APPROVE' && a.escalates_to ? 'FORWARD' : a.action, fromDesk, openRequest,
+        }),
+      }));
       // Limits and lower-desk names for the UI: it must never hardcode either (F3).
       if (ticketData.available_actions.actions.length > 0) {
         ticketData.approval_limit = approvalLimitFor(ticketData.available_actions.desk, ctx.limits);
@@ -315,6 +327,14 @@ router.get('/:ticket_id/details', async (req, res) => {
         ticketData.desk_people = people;
       }
       ticketData.assignees = await loadAssignees(pool, ticketRow, staffRole(viewer, ticketRow));
+      // The assigned JE also has the tender steps and Resolve. Listed here so the UI renders them from the
+      // server's rule, like the approval desks' buttons.
+      if (ticketRow.assigned_je_id === userId && userRole === 'JE') {
+        ticketData.available_actions = {
+          desk: 'JE',
+          actions: [...ticketData.available_actions.actions, ...jeTenderActions(ticketRow.status)],
+        };
+      }
     } else {
       ticketData.available_actions = { desk: null, actions: [] };
     }

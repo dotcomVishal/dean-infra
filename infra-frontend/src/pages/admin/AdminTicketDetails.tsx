@@ -8,26 +8,12 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
-import { DocLink } from '../../components/ticket/Attachments';
+import { GroupedAttachments } from '../../components/ticket/Attachments';
+import DeleteTicket from '../../components/admin/DeleteTicket';
 import ReassignFields from '../../components/admin/ReassignFields';
 import { NO_REASSIGN, reassignBody, type ReassignValue } from '../../lib/reassign';
-import { deskLabel, staffStatusLabel } from '../../lib/ticketUi';
-
-const ALL_STATUSES = [
-  'UNASSIGNED',
-  'ASSIGNED_TO_JE',
-  'PENDING_AE_APPROVAL',
-  'PENDING_SE_APPROVAL',
-  'PENDING_DEAN_APPROVAL',
-  'PENDING_DIRECTOR_APPROVAL',
-  'APPROVED_FOR_TENDERING',
-  'TENDER_PUBLISHED',
-  'WORK_IN_PROGRESS',
-  'WORK_COMPLETED',
-  'RETURNED_TO_JE',
-  'DENIED',
-  'CLOSED'
-];
+import { deskLabel, placeLabel, staffStatusLabel } from '../../lib/ticketUi';
+import { ALL_STATUSES } from '../../lib/statuses';
 
 export default function AdminTicketDetails() {
   const { id } = useParams();
@@ -39,6 +25,7 @@ export default function AdminTicketDetails() {
   
   // Override state
   const [overrideStatus, setOverrideStatus] = useState('');
+  const [overridePriority, setOverridePriority] = useState('NORMAL');
   const [reassign, setReassign] = useState<ReassignValue>(NO_REASSIGN);
   const [overrideRemarks, setOverrideRemarks] = useState('');
   const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
@@ -52,6 +39,7 @@ export default function AdminTicketDetails() {
       if (response.data.success) {
         setTicket(response.data.ticket);
         setOverrideStatus(response.data.ticket.status);
+        setOverridePriority(response.data.ticket.priority ?? 'NORMAL');
       }
     } catch (err: any) {
       console.error('Failed to load master details:', err);
@@ -76,6 +64,7 @@ export default function AdminTicketDetails() {
     try {
       const res = await api.post(`/admin/tickets/${id}/override`, {
         new_status: overrideStatus !== ticket.status ? overrideStatus : undefined,
+        priority: overridePriority !== (ticket.priority ?? 'NORMAL') ? overridePriority : undefined,
         reassign: reassignBody(reassign),
         remarks: overrideRemarks.trim(),
       });
@@ -179,7 +168,7 @@ export default function AdminTicketDetails() {
           </div>
           <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 px-3 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
             <MapPin size={15} className="text-slate-400" />
-            <span>Location: <strong className="text-slate-800 dark:text-slate-100">{ticket.location || 'Campus'}</strong></span>
+            <span>Location: <strong className="text-slate-800 dark:text-slate-100">{placeLabel(ticket)}</strong></span>
           </div>
         </div>
       </div>
@@ -259,6 +248,16 @@ export default function AdminTicketDetails() {
                   </select>
                 </div>
 
+                <div>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Priority</label>
+                  <select
+                    value={overridePriority}
+                    onChange={(e) => setOverridePriority(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    {['LOW', 'NORMAL', 'URGENT'].map((p) => <option key={p} value={p}>{p.charAt(0) + p.slice(1).toLowerCase()}</option>)}
+                  </select>
+                </div>
               </div>
 
               <ReassignFields department={ticket.department} campus={ticket.campus} value={reassign} onChange={setReassign} />
@@ -373,24 +372,18 @@ export default function AdminTicketDetails() {
             </h3>
 
             {attachments.length > 0 ? (
-              <div className="space-y-2">
-                {attachments.map((file: any) => (
-                  <div key={file.id} className="space-y-1">
-                    <DocLink
-                      file={{
-                        id: file.id,
-                        created_at: file.created_at,
-                        document_category: file.document_category,
-                        file_name: String(file.file_url).split('/').pop()?.replace(/^\d+-\d+-/, '') || 'file',
-                        download_url: `/api/attachments/${file.id}`,
-                      }}
-                    />
-                    <span className="block px-1 text-[10px] text-slate-400">
-                      {file.document_category?.replace(/_/g, ' ') || 'Attachment'} · by {file.uploader_name || 'User'}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <GroupedAttachments
+                files={attachments.map((file: any) => ({
+                  id: file.id,
+                  created_at: file.created_at,
+                  document_category: file.document_category,
+                  file_name: file.original_name || String(file.file_url).split('/').pop()?.replace(/^\d+-\d+-/, '') || 'file',
+                  download_url: `/api/attachments/${file.id}`,
+                  uploader_desk: file.uploader_desk ?? file.uploader_role,
+                  uploader_name: file.uploader_name,
+                  audit_log_id: file.audit_log_id ?? undefined,
+                }))}
+              />
             ) : (
               <div className="text-xs text-slate-400 text-center py-4 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
                 No files.
@@ -401,6 +394,8 @@ export default function AdminTicketDetails() {
         </div>
 
       </div>
+
+      <DeleteTicket ticketId={ticket.id} onDeleted={() => navigate('/admin/tickets')} />
 
     </div>
   );

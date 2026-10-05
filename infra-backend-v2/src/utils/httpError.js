@@ -22,3 +22,22 @@ export const sendServerError = (req, res, err, context) => {
   if (res.headersSent) return undefined;
   return res.status(500).json({ success: false, message: GENERIC_MESSAGE, requestId });
 };
+
+/**
+ * X4: the one place a WorkflowError becomes a response. Logs the error code at
+ * `warn` (the access log only records the status), and puts the request id in
+ * the body so a failed submit can be traced after the fact.
+ */
+export const sendWorkflowError = (req, res, err) => {
+  const requestId = req?.id;
+  logger.warn('workflow error', {
+    requestId,
+    code: err.code,
+    status: err.status,
+    method: req?.method,
+    path: req?.originalUrl?.split('?')[0],
+    userId: req?.user?.id,
+  });
+  if (res.headersSent) return undefined;
+  return res.status(err.status).json({ success: false, code: err.code, message: err.message, requestId });
+};

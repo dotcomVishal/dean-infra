@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { onIdTokenChanged } from 'firebase/auth';
 import { auth } from '../config/firebase';
+import { clearBlobCache } from '../lib/blobCache';
 
 interface User {
   id: number;
@@ -27,7 +28,10 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       token: null,
       login: (user, token) => set({ isAuthenticated: true, user, token }),
-      logout: () => set({ isAuthenticated: false, user: null, token: null }),
+      logout: () => {
+        clearBlobCache();
+        set({ isAuthenticated: false, user: null, token: null });
+      },
     }),
     {
       name: 'deanery-auth-storage', // Securely locks state in localStorage

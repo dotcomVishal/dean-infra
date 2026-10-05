@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Building2, Image as ImageIcon, Loader2, Mail, MapPin, Phone, User, FileText, ExternalLink, Paperclip } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
-import { errorMessage, mapsHref } from '../lib/ticketUi';
+import { errorMessage, mapsHref, placeLabel } from '../lib/ticketUi';
 import type { TicketDetail } from '../components/ticket/types';
 import { Card, Label } from '../components/ticket/Card';
 import TicketHeader from '../components/ticket/TicketHeader';
@@ -97,7 +97,7 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
                 <Label>Location</Label>
                 <p className="flex items-start gap-2 text-sm font-medium text-slate-800 dark:text-slate-200">
                   <MapPin size={15} className="mt-0.5 shrink-0 text-rose-500" />
-                  <span>{[ticket.campus, ticket.building, ticket.landmark, ticket.location].filter(Boolean).join(' · ')}</span>
+                  <span>{placeLabel(ticket)}</span>
                 </p>
                 <a href={mapsHref(ticket)} target="_blank" rel="noopener noreferrer"
                   className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400">
@@ -143,7 +143,7 @@ export default function TicketDetails({ ticketId, roleOverride }: { ticketId?: n
 
           <Card title="Documents" icon={<Paperclip size={14} />}>
             <GroupedAttachments files={deskFiles} empty="No documents yet." />
-            {open && <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-700/60"><UploadFiles ticketId={ticket.id} onDone={load} /></div>}
+            {open && ticket.can_upload !== false && <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-700/60"><UploadFiles ticketId={ticket.id} onDone={load} /></div>}
           </Card>
         </div>
       </div>

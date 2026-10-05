@@ -12,15 +12,12 @@
 //  (applicant view) and hold a staff role that covers it (staff view). The
 //  viewer sees the UNION of the two.
 // ============================================================
-import { DESK_RANK, STATUS, canReadMessage } from '../config/workflow.js';
+import { DESK_RANK, STATUS, POST_APPROVAL, TERMINAL, JE_STAGE, canReadMessage } from '../config/workflow.js';
 
 // AUDIT visibility = executive level: SE and above. (Nothing writes it yet.)
 const AUTHORITY_MIN_RANK = DESK_RANK.SE;
 
-export const POST_APPROVAL_STATUSES = Object.freeze([
-  STATUS.APPROVED_FOR_TENDERING, STATUS.TENDER_PUBLISHED, STATUS.WORK_IN_PROGRESS,
-  STATUS.WORK_COMPLETED, STATUS.CLOSED,
-]);
+export const POST_APPROVAL_STATUSES = POST_APPROVAL;
 
 // ---- stage in plain words (what an applicant may know) -------------------------
 const STAGE_LABEL = Object.freeze({
@@ -33,8 +30,11 @@ const STAGE_LABEL = Object.freeze({
   [STATUS.PENDING_DIRECTOR_APPROVAL]: 'Under review',
   [STATUS.APPROVED_FOR_TENDERING]:    'Approved — tendering',
   [STATUS.TENDER_PUBLISHED]:          'Approved — tendering',
+  [STATUS.TECHNICAL_EVALUATION]:      'Approved — tendering',
+  [STATUS.FINANCIAL_EVALUATION]:      'Approved — tendering',
+  [STATUS.TENDER_CANCELLED]:          'Approved — tendering',
   [STATUS.WORK_IN_PROGRESS]:          'Work in progress',
-  [STATUS.WORK_COMPLETED]:            'Work done — please verify',
+  [STATUS.WORK_COMPLETED]:            'Resolved — please verify',
   [STATUS.CLOSED]:                    'Completed',
   [STATUS.DENIED]:                    'Rejected',
 });
@@ -127,7 +127,8 @@ export function capabilities(viewer, ticket) {
 /**
  * May this viewer download this attachment? Ticket access is checked first, then
  * the category rule. The applicant never gets JE photos or estimate documents.
- * @param {{document_category:string, uploaded_by:number, uploader_role?:string}} att
+ * @param {{document_category:string, uploaded_by:number, uploader_desk?:string, uploader_role?:string}} att
+ *        uploader_desk is recorded at upload time (X6); uploader_role (live) is only the fallback for old rows.
  */
 export function canViewAttachment(viewer, ticket, att) {
   if (!canViewTicket(viewer, ticket)) return false;
@@ -149,7 +150,7 @@ export function canViewAttachment(viewer, ticket, att) {
     case 'AUTHORITY_REMARKS':
       // Readable by the uploader's rank and above (plus SYSADMIN); never by JE/applicant.
       return caps.staff === 'SYSADMIN'
-        || (caps.rank >= DESK_RANK.AE && caps.rank >= (DESK_RANK[att.uploader_role] ?? Infinity));
+        || (caps.rank >= DESK_RANK.AE && caps.rank >= (DESK_RANK[att.uploader_desk ?? att.uploader_role] ?? Infinity));
     default:
       return false;
   }
@@ -161,10 +162,14 @@ export function canViewAttachment(viewer, ticket, att) {
  */
 export function uploadCategory(viewer, ticket) {
   if (!canViewTicket(viewer, ticket)) return null;
-  if ([STATUS.CLOSED, STATUS.DENIED].includes(ticket.status)) return null;
+  if (TERMINAL.includes(ticket.status)) return null;
   switch (staffRole(viewer, ticket)) {
     case null:         return 'APPLICANT_EVIDENCE';
-    case 'JE':         return POST_APPROVAL_STATUSES.includes(ticket.status) ? 'WORK_DOC' : 'JE_ESTIMATE_DOC';
+    case 'JE':
+      // R1: while the ticket is on the JE desk the report form is the only way to add files,
+      // so every file belongs to one report version.
+      if (JE_STAGE.includes(ticket.status)) return null;
+      return POST_APPROVAL_STATUSES.includes(ticket.status) ? 'WORK_DOC' : 'JE_ESTIMATE_DOC';
     case 'CLERICAL':   return 'CLERK_TENDER_DOC';
     case 'ACCOUNTANT': return 'FINANCE_SANCTION';
     default:           return 'DESK_DOC'; // AE / SE / Dean / Director / Sysadmin
@@ -190,15 +195,18 @@ const NEUTRAL_AUDIT = Object.freeze({
   REMINDER_SENT: 'Reminder sent', SUBMITTED: 'Report submitted', FORWARDED: 'Forwarded for review',
   APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REJECTED: 'Rejected',
   TENDER_PUBLISHED: 'Tender published', WORK_AWARDED: 'Work awarded', WORK_COMPLETED: 'Work completed',
-  WORK_REOPENED: 'Applicant reports work not done',
+  WORK_REOPENED: 'Applicant reports work not done', SENT_BACK: 'Applicant sent the ticket back',
+  TECH_EVALUATION: 'Technical evaluation', FIN_EVALUATION: 'Financial evaluation',
+  TENDER_CANCELLED: 'Tender cancelled', RESOLVED: 'Marked resolved',
   BILL_RECORDED: 'Bill recorded', BILL_UPDATED: 'Bill updated', CLOSED: 'Closed', OVERRIDE: 'Administrative update',
   PASSED: 'Forwarded for review', RETURNED: 'Returned to JE', DENIED: 'Rejected',
 });
 // Free text a JE may read: their own, and system lines that carry no authority remark.
-const JE_READABLE_REMARK_ACTIONS = new Set(['CREATED', 'ASSIGNED', 'SUBMITTED', 'REMINDER_SENT', 'WORK_REOPENED', 'CLOSED']);
+const JE_READABLE_REMARK_ACTIONS = new Set(['CREATED', 'ASSIGNED', 'SUBMITTED', 'REMINDER_SENT', 'WORK_REOPENED', 'SENT_BACK', 'CLOSED']);
 // Post-approval trail, the only part of the audit log Clerical/Accountant see.
 const FINANCE_AUDIT_ACTIONS = new Set([
-  'APPROVED', 'TENDER_PUBLISHED', 'WORK_AWARDED', 'WORK_COMPLETED', 'WORK_REOPENED', 'BILL_RECORDED', 'BILL_UPDATED', 'CLOSED',
+  'APPROVED', 'TENDER_PUBLISHED', 'TECH_EVALUATION', 'FIN_EVALUATION', 'TENDER_CANCELLED', 'WORK_AWARDED',
+  'WORK_COMPLETED', 'RESOLVED', 'WORK_REOPENED', 'SENT_BACK', 'BILL_RECORDED', 'BILL_UPDATED', 'CLOSED',
 ]);
 
 /**
@@ -210,7 +218,7 @@ export function filterAudit(viewer, ticket, rows) {
   if (staff === null) return []; // the applicant never sees the audit trail
 
   const shape = (r, { remarks, withName }) => ({
-    action: r.action, remarks, created_at: r.created_at, actor_role: r.actor_role,
+    id: r.id, action: r.action, remarks, created_at: r.created_at, actor_role: r.actor_role,
     ...(withName ? { actor_name: r.actor_name } : {}),
     from_desk: r.from_desk ?? null, to_desk: r.to_desk ?? null,
     is_self_action: !!r.is_self_action,
@@ -251,8 +259,8 @@ export function filterAudit(viewer, ticket, rows) {
 // ---- ticket row + whole details view ---------------------------------------------------
 
 const APPLICANT_FIELDS = [
-  'id', 'title', 'type', 'category', 'priority', 'department', 'description', 'location',
-  'campus', 'building', 'landmark', 'lat', 'lng', 'contact_phone', 'status', 'created_at', 'updated_at',
+  'id', 'title', 'type', 'priority', 'department', 'description', 'location',
+  'campus', 'landmark', 'lat', 'lng', 'contact_phone', 'status', 'created_at', 'updated_at',
 ];
 
 /** Allow-list projection for a viewer with no staff view: nothing that names a person. */
@@ -266,6 +274,24 @@ export function applicantTicket(ticket) {
 const basename = (url) => String(url ?? '').split('/').pop();
 // Uploads are stored as "<timestamp>-<random>-<original name>".
 const displayName = (url) => basename(url).replace(/^\d+-\d+-/, '');
+
+/**
+ * Who attached a file and with which movement. The applicant gets none of it.
+ * A JE sees the desk (and their own name), never the names of higher desks.
+ * Clerical / Accountant see the desk and name but not the movement: their audit
+ * view is limited to post-approval actions.
+ */
+function attribution(viewer, caps, a) {
+  if (caps.staff === null) return {};
+  const desk = a.uploader_desk ?? a.uploader_role ?? null;
+  const showName = caps.staff !== 'JE' || a.uploaded_by === viewer.id;
+  const out = { uploader_desk: desk, uploader_name: showName ? (a.uploader_name ?? null) : null };
+  if (a.audit_log_id != null && !['CLERICAL', 'ACCOUNTANT'].includes(caps.staff)) {
+    out.audit_log_id = a.audit_log_id;
+    out.attached_with = { action: a.audit_action ?? null, from_desk: a.audit_from_desk ?? null, to_desk: a.audit_to_desk ?? null };
+  }
+  return out;
+}
 
 /**
  * Builds the whole details payload for one viewer.
@@ -293,10 +319,16 @@ export function buildTicketDetails(viewer, ticket, data) {
     .filter((a) => canViewAttachment(viewer, ticket, a))
     .map((a) => ({
       id: a.id, document_category: a.document_category, created_at: a.created_at,
-      file_name: displayName(a.file_url), download_url: `/api/attachments/${a.id}`,
+      file_name: a.original_name || displayName(a.file_url), download_url: `/api/attachments/${a.id}`,
       ...(a.report_id != null ? { report_id: a.report_id } : {}),
+      ...attribution(viewer, caps, a),
     }));
   out.report = caps.report && data.reports.length > 0 ? data.reports[0] : null;
+  // Every filed version, newest first, so a reviewer can tell a revision from the original.
+  out.reports = caps.report
+    ? data.reports.map((r) => ({ id: r.id, version: r.version, created_at: r.created_at, estimated_amount: r.estimated_amount }))
+    : [];
+  out.can_upload = uploadCategory(viewer, ticket) !== null;
   out.tenders = caps.tenders ? data.tenders : [];
   out.bills = caps.bills ? data.bills : [];
   out.audit_logs = filterAudit(viewer, ticket, data.auditLogs);

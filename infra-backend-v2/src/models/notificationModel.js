@@ -99,3 +99,17 @@ export async function advanceReminder(connection, id, { reminderNo, nextDueAt, n
     [reminderNo, nextDueAt, now, id]
   );
 }
+
+/**
+ * Queues a weekly digest. `dedupeKey` is unique, so a second insert for the same
+ * user and week (a restart, or a second backend instance) is silently ignored.
+ * @returns {Promise<boolean>} true when a row was queued
+ */
+export async function insertDigest(connection, { toUserId, subject, body, dueAt, dedupeKey }) {
+  const [r] = await connection.query(
+    `INSERT IGNORE INTO notifications (ticket_id, to_user_id, kind, audience, subject, body, next_due_at, dedupe_key)
+     VALUES (NULL, ?, 'DIGEST', 'STAFF', ?, ?, ?, ?)`,
+    [toUserId, subject.slice(0, 255), body, dueAt, dedupeKey]
+  );
+  return r.affectedRows === 1;
+}

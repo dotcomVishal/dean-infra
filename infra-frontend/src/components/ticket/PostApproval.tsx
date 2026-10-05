@@ -1,7 +1,10 @@
+import { format } from 'date-fns';
 import { FileText, IndianRupee } from 'lucide-react';
 import type { TicketDetail } from './types';
 import { Card } from './Card';
 import { inr } from '../../lib/ticketUi';
+
+const fmtDate = (d?: string | null) => (d ? format(new Date(d), 'd MMM yyyy') : '—');
 
 /** Tender, award and bills. The API sends empty arrays to anyone who may not see them. */
 export default function PostApproval({ ticket }: { ticket: TicketDetail }) {
@@ -19,12 +22,18 @@ export default function PostApproval({ ticket }: { ticket: TicketDetail }) {
               <div key={tn.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
                 <div className="flex flex-wrap justify-between gap-2">
                   <span className="font-mono font-bold text-slate-900 dark:text-white">NIT {tn.nit_number}</span>
-                  <span className="text-slate-500">{tn.portal_type}</span>
+                  <span className="text-slate-500">{tn.portal_type}{tn.status ? ` · ${tn.status.replace(/_/g, ' ').toLowerCase()}` : ''}</span>
                 </div>
+                {(tn.published_date || tn.bid_end_date) && (
+                  <p className="mt-1 text-slate-600 dark:text-slate-300">
+                    Created {fmtDate(tn.published_date)} · End {fmtDate(tn.bid_end_date)}
+                  </p>
+                )}
+                {tn.cancel_reason && <p className="mt-1 text-rose-600 dark:text-rose-400">Cancelled: {tn.cancel_reason}</p>}
                 {tn.awarded_agency && (
                   <div className="mt-1 flex flex-wrap justify-between gap-2 text-slate-700 dark:text-slate-300">
                     <span>Agency: <strong>{tn.awarded_agency}</strong></span>
-                    {tn.work_order_value != null && <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">Work order {inr(tn.work_order_value)}</span>}
+                    {tn.work_order_value != null && <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">Awarded {inr(tn.work_order_value)}</span>}
                   </div>
                 )}
                 {tn.remarks && <p className="mt-1 italic text-slate-500">{tn.remarks}</p>}

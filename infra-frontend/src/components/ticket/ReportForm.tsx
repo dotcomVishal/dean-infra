@@ -3,7 +3,8 @@ import { ClipboardCheck, Image as ImageIcon, Loader2, UploadCloud, X } from 'luc
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
 import { errorMessage } from '../../lib/ticketUi';
-import type { Report, TicketMessage } from './types';
+import type { Report } from './types';
+import { checkFiles, loadUploadLimits, type UploadLimits } from '../../lib/uploadLimits';
 
 // Must match the API allow-list (middleware/upload.js).
 const PHOTO_ACCEPT = '.jpg,.jpeg,.png,.webp,.heic';
@@ -12,10 +13,14 @@ const inputCls =
   'w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
 
 /** JE's SUBMIT_REPORT action: findings + estimate. Also answers an open change request. */
-export default function ReportForm({ ticketId, previous, request, onDone }: {
+// A submit that failed because the ticket already moved on is stale: reload it
+// so a first attempt that actually succeeded is shown as such (1.6).
+const STALE_CODES = ['NOT_YOUR_DESK', 'REPORT_NOT_ALLOWED', 'CONFLICT'];
+
+export default function ReportForm({ ticketId, previous, replyTo, onDone }: {
   ticketId: number;
   previous?: Report | null;
-  request: TicketMessage | null; // open change request addressed to this JE, if any
+  replyTo: string | null; // desk that wrote the open change request addressed to this JE (server rule), if any
   onDone: () => void;
 }) {
   const [nature, setNature] = useState(previous?.nature_of_work ?? '');
@@ -25,6 +30,9 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
   const [docs, setDocs] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [limits, setLimits] = useState<UploadLimits | null>(null);
+
+  useEffect(() => { loadUploadLimits().then(setLimits); }, []);
 
   useEffect(() => {
     const urls = photos.map((f) => URL.createObjectURL(f));
@@ -37,7 +45,14 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
     const n = parseFloat(amount);
     if (!nature.trim()) return toast.error('Enter your findings.');
     if (!n || n <= 0) return toast.error('Enter an estimate above 0.');
-    if (request && !remarks.trim()) return toast.error('Reply to the request first.');
+    if (replyTo && !remarks.trim()) return toast.error('Reply to the request first.');
+
+    if (limits) {
+      if (photos.length > limits.report_photos) return toast.error(`At most ${limits.report_photos} photos.`);
+      if (docs.length > limits.report_documents) return toast.error(`At most ${limits.report_documents} documents.`);
+      const tooBig = checkFiles([...photos, ...docs], limits);
+      if (tooBig) return toast.error(tooBig);
+    }
 
     const fd = new FormData();
     fd.append('nature_of_work', nature.trim());
@@ -48,11 +63,14 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
 
     setBusy(true);
     try {
-      const res = await api.post(`/tickets/${ticketId}/report`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // No Content-Type header: the browser adds the multipart boundary.
+      const res = await api.post(`/tickets/${ticketId}/report`, fd);
       toast.success(res.data?.message || 'Report submitted.');
       onDone();
     } catch (err) {
       toast.error(errorMessage(err, 'Could not submit the report.'));
+      const code = (err as { response?: { data?: { code?: string } } })?.response?.data?.code;
+      if (code && STALE_CODES.includes(code)) onDone();
     } finally {
       setBusy(false);
     }
@@ -81,10 +99,10 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
 
       <div>
         <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-          {request ? <>Reply to {request.author_desk} <span className="text-rose-500">*</span></> : 'Remarks (optional)'}
+          {replyTo ? <>Reply to {replyTo} <span className="text-rose-500">*</span></> : 'Remarks (optional)'}
         </label>
         <textarea rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} className={`${inputCls} resize-none`}
-          placeholder={request ? 'What did you change?' : 'Anything the AE should know'} />
+          placeholder={replyTo ? 'What did you change?' : 'Anything the AE should know'} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -94,7 +112,11 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
             <label className="cursor-pointer rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700">
               Add
               <input type="file" multiple accept={PHOTO_ACCEPT} className="hidden"
-                onChange={(e) => setPhotos((p) => [...p, ...Array.from(e.target.files ?? [])].slice(0, 10))} />
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  e.target.value = ''; // R4: choosing the same file again must fire a change
+                  setPhotos((p) => [...p, ...picked].slice(0, limits?.report_photos ?? 10));
+                }} />
             </label>
           </div>
           {previews.length > 0 && (
@@ -116,7 +138,11 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
             <label className="cursor-pointer rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-slate-900 dark:bg-slate-600">
               Add
               <input type="file" multiple accept={DOC_ACCEPT} className="hidden"
-                onChange={(e) => setDocs((p) => [...p, ...Array.from(e.target.files ?? [])].slice(0, 10))} />
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  e.target.value = '';
+                  setDocs((p) => [...p, ...picked].slice(0, limits?.report_documents ?? 10));
+                }} />
             </label>
           </div>
           {docs.map((f, i) => (
@@ -131,7 +157,7 @@ export default function ReportForm({ ticketId, previous, request, onDone }: {
       <button type="submit" disabled={busy}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-blue-700 disabled:opacity-60">
         {busy ? <Loader2 size={18} className="animate-spin" /> : <ClipboardCheck size={18} />}
-        {request ? 'Resubmit to AE' : 'Submit to AE'}
+        {replyTo ? 'Resubmit to AE' : 'Submit to AE'}
       </button>
     </form>
   );

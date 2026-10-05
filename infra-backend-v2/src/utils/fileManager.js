@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+import { TICKETS_DIR, TEMP_DIR } from '../config/paths.js';
+import logger from './logger.js';
 
 export const moveFile = async (file, ticketId, subFolder) => {
   const folder = subFolder || 'applicant_evidence';
-  const ticketDir = path.join(process.cwd(), 'uploads', 'tickets', String(ticketId), folder);
+  const ticketDir = path.join(TICKETS_DIR, String(ticketId), folder);
 
   if (!fs.existsSync(ticketDir)) {
     fs.mkdirSync(ticketDir, { recursive: true });
@@ -25,4 +27,29 @@ export const cleanupTempFiles = (files) => {
       fs.unlinkSync(file.path);
     }
   });
+};
+
+/** Deletes temp uploads older than `maxAgeMs` (a crashed request never reaches cleanupTempFiles). */
+export const sweepTempUploads = async (maxAgeMs = 24 * 60 * 60 * 1000, now = Date.now()) => {
+  let removed = 0;
+  let names = [];
+  try {
+    names = await fs.promises.readdir(TEMP_DIR);
+  } catch (err) {
+    if (err.code === 'ENOENT') return 0;
+    throw err;
+  }
+  for (const name of names) {
+    const file = path.join(TEMP_DIR, name);
+    try {
+      const stat = await fs.promises.stat(file);
+      if (stat.isFile() && now - stat.mtimeMs > maxAgeMs) {
+        await fs.promises.unlink(file);
+        removed += 1;
+      }
+    } catch (err) {
+      logger.warn('temp sweep: could not remove file', { file: name, code: err.code });
+    }
+  }
+  return removed;
 };

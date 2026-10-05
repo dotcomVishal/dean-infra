@@ -7,6 +7,9 @@ export interface AvailableAction {
   reason?: string;
   targets?: string[];
   escalates_to?: string;
+  /** Server rule (R8): this move answers an open change request, so a reply is mandatory. */
+  reply_required?: boolean;
+  reply_to_desk?: string | null;
 }
 
 export interface AvailableActions {
@@ -34,6 +37,7 @@ export interface TicketMessage {
 }
 
 export interface AuditEntry {
+  id?: number;
   action: string;
   remarks: string | null;
   created_at: string;
@@ -53,11 +57,21 @@ export interface Report {
   created_at: string;
 }
 
+export interface ReportVersion {
+  id: number;
+  version: number;
+  created_at: string;
+  estimated_amount: number | string;
+}
+
 export interface Tender {
   id: number;
   nit_number: string;
   portal_type: string;
   status?: string;
+  published_date?: string | null;
+  bid_end_date?: string | null;
+  cancel_reason?: string | null;
   awarded_agency?: string | null;
   work_order_value?: number | string | null;
   remarks?: string | null;
@@ -102,6 +116,10 @@ export interface TicketDetail {
   contact_phone?: string;
   open_change_request_id?: number | null;
   report?: Report | null;
+  /** Every filed version, newest first. */
+  reports?: ReportVersion[];
+  /** Server decides whether the standalone "Add files" card is offered. */
+  can_upload?: boolean;
   tenders?: Tender[];
   bills?: Bill[];
   attachments: Attachment[];

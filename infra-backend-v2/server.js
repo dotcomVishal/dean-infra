@@ -6,6 +6,8 @@ import { runMigrations } from './src/config/migrate.js';
 import { logDeskHealth } from './src/services/deskHealth.js';
 import { reconcileDeskOwners } from './src/models/deskModel.js';
 import { startEmailWorker } from './src/cron/emailReminders.js';
+import { sweepTempUploads } from './src/utils/fileManager.js';
+import { purgeTrash } from './src/services/ticketDeletion.js';
 import logger, { errorFields } from './src/utils/logger.js';
 
 const PORT = process.env.PORT || 5000;
@@ -32,6 +34,25 @@ const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     logger.info('server listening', { port: PORT });
     startEmailWorker(); // outbox + reminder worker (every minute)
+
+    // Files left in uploads/temp by a crashed request: sweep at boot, then daily.
+    const sweep = () => sweepTempUploads()
+      .then((n) => n && logger.info('swept temp uploads', { removed: n }))
+      .catch((err) => logger.error('temp sweep failed', errorFields(err)));
+    sweep();
+    setInterval(sweep, 24 * 60 * 60 * 1000).unref();
+
+    // Deleted tickets' files wait 30 days in uploads/trash, then go.
+    const purge = () => {
+      try {
+        const n = purgeTrash();
+        if (n) logger.info('purged ticket trash', { folders: n });
+      } catch (err) {
+        logger.error('trash purge failed', errorFields(err));
+      }
+    };
+    purge();
+    setInterval(purge, 24 * 60 * 60 * 1000).unref();
   });
 })();
 

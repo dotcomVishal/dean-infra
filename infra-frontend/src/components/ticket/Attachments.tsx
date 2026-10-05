@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { FileText, Loader2, ImageOff, X, Download, Upload } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
-import { isImageFile, errorMessage } from '../../lib/ticketUi';
+import { format } from 'date-fns';
+import { isImageFile, errorMessage, deskLabel } from '../../lib/ticketUi';
+import { cachedObjectUrl } from '../../lib/blobCache';
+import { checkFiles, loadUploadLimits, type UploadLimits } from '../../lib/uploadLimits';
 
 // Files are never addressed by path (S2): the API hands out an authenticated
 // /api/attachments/:id URL, and <img src> cannot send a bearer token, so every
@@ -15,6 +18,13 @@ export interface Attachment {
   file_name: string;
   download_url: string;
   report_id?: number;
+  /** Desk the uploader acted as, recorded at upload time. Staff payload only. */
+  uploader_desk?: string | null;
+  /** Null for a JE looking at a higher desk's file (desk only, never the name). */
+  uploader_name?: string | null;
+  audit_log_id?: number;
+  /** The movement the file travelled with. */
+  attached_with?: { action: string | null; from_desk: string | null; to_desk: string | null };
 }
 
 // axios already prefixes its baseURL (which ends in /api).
@@ -25,25 +35,21 @@ async function fetchBlob(downloadUrl: string): Promise<Blob> {
   return res.data as Blob;
 }
 
+const cachedBlobUrl = (downloadUrl: string) => cachedObjectUrl(downloadUrl, () => fetchBlob(downloadUrl));
+
 function useBlobUrl(downloadUrl: string) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    let objectUrl: string | null = null;
     setUrl(null);
     setFailed(false);
-    fetchBlob(downloadUrl)
-      .then((blob) => {
-        if (!alive) return;
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      })
+    cachedBlobUrl(downloadUrl)
+      .then((u) => alive && setUrl(u))
       .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [downloadUrl]);
 
@@ -163,29 +169,65 @@ export function AttachmentList({
   );
 }
 
-// Who uploaded what, in words. The server picks the category from the uploader.
-const CATEGORY_LABEL: Record<string, string> = {
-  APPLICANT_EVIDENCE: 'Applicant', JE_SITE_PHOTO: 'JE site photo', JE_ESTIMATE_DOC: 'JE estimate',
-  WORK_DOC: 'JE work / completion', DESK_DOC: 'Approving officer', CLERK_TENDER_DOC: 'Tender (Clerical)',
-  FINANCE_SANCTION: 'Finance', AUTHORITY_REMARKS: 'Authority',
+// Desk order for the Documents card, and what an older row (no uploader_desk) falls back to.
+const DESK_GROUPS = ['APPLICANT', 'JE', 'AE', 'SE', 'DEAN', 'DIRECTOR', 'CLERICAL', 'ACCOUNTANT', 'SYSADMIN'];
+const CATEGORY_DESK: Record<string, string> = {
+  APPLICANT_EVIDENCE: 'APPLICANT', JE_SITE_PHOTO: 'JE', JE_ESTIMATE_DOC: 'JE', WORK_DOC: 'JE',
+  CLERK_TENDER_DOC: 'CLERICAL', FINANCE_SANCTION: 'ACCOUNTANT',
+};
+const deskOf = (f: Attachment) => f.uploader_desk ?? CATEGORY_DESK[f.document_category ?? ''] ?? 'OTHER';
+
+const MOVEMENT_TEXT: Record<string, (to: string | null) => string> = {
+  FORWARDED: (to) => `forwarded${to ? ` to ${deskLabel(to)}` : ''}`,
+  CHANGES_REQUESTED: (to) => `sent back${to ? ` to ${deskLabel(to)}` : ''}`,
+  APPROVED: () => 'approved',
+  REJECTED: () => 'rejected',
+  SUBMITTED: () => 'report filed',
+  ASSIGNED: () => 'assigned',
+};
+const movementCaption = (f: Attachment) => {
+  const w = f.attached_with;
+  const when = format(new Date(f.created_at), 'd MMM HH:mm');
+  const text = w?.action ? (MOVEMENT_TEXT[w.action]?.(w.to_desk) ?? w.action.toLowerCase().replace(/_/g, ' ')) : null;
+  return text ? `${text}, ${when}` : when;
 };
 
-/** Files grouped by who uploaded them. */
+/** Files grouped by the desk that attached them, in desk order, each batch captioned with its movement. */
 export function GroupedAttachments({ files, empty }: { files: Attachment[]; empty?: string }) {
   if (files.length === 0) return empty ? <p className="text-xs text-slate-400">{empty}</p> : null;
   const groups = new Map<string, Attachment[]>();
-  for (const f of files) {
-    const k = f.document_category ?? 'APPLICANT_EVIDENCE';
-    groups.set(k, [...(groups.get(k) ?? []), f]);
-  }
+  for (const f of files) groups.set(deskOf(f), [...(groups.get(deskOf(f)) ?? []), f]);
+  const order = [...groups.keys()].sort((a, b) => {
+    const ia = DESK_GROUPS.indexOf(a); const ib = DESK_GROUPS.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
   return (
     <div className="space-y-3">
-      {[...groups].map(([k, list]) => (
-        <div key={k}>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{CATEGORY_LABEL[k] ?? k}</p>
-          <AttachmentList files={list} cols="grid-cols-3" />
-        </div>
-      ))}
+      {order.map((desk) => {
+        const list = groups.get(desk)!;
+        const names = [...new Set(list.map((f) => f.uploader_name).filter(Boolean))];
+        // One batch per movement (or per upload day when a file travelled with none).
+        const batches = new Map<string, Attachment[]>();
+        for (const f of list) {
+          const k = f.audit_log_id != null ? `m${f.audit_log_id}` : `d${f.created_at.slice(0, 16)}`;
+          batches.set(k, [...(batches.get(k) ?? []), f]);
+        }
+        return (
+          <div key={desk}>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              {desk === 'OTHER' ? 'Other' : deskLabel(desk)}{names.length > 0 ? ` · ${names.join(', ')}` : ''}
+            </p>
+            <div className="space-y-2">
+              {[...batches.values()].map((batch) => (
+                <div key={batch[0].id}>
+                  <p className="mb-1 text-[10px] text-slate-400">{movementCaption(batch[0])}</p>
+                  <AttachmentList files={batch} cols="grid-cols-3" />
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -195,14 +237,18 @@ export function UploadFiles({ ticketId, onDone, label = 'Add files' }: { ticketI
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [inputKey, setInputKey] = useState(0);
+  const [limits, setLimits] = useState<UploadLimits | null>(null);
+  useEffect(() => { loadUploadLimits().then(setLimits); }, []);
 
   const send = async () => {
     if (files.length === 0) return;
+    const tooBig = limits && checkFiles(files, limits);
+    if (tooBig) { toast.error(tooBig); return; }
     const fd = new FormData();
     files.forEach((f) => fd.append('files', f));
     setBusy(true);
     try {
-      await api.post(`/tickets/${ticketId}/attachments`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await api.post(`/tickets/${ticketId}/attachments`, fd);
       toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded.`);
       setFiles([]);
       setInputKey((k) => k + 1);
@@ -221,7 +267,7 @@ export function UploadFiles({ ticketId, onDone, label = 'Add files' }: { ticketI
         type="file"
         multiple
         accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.xlsx,.docx"
-        onChange={(e) => setFiles(Array.from(e.target.files ?? []).slice(0, 10))}
+        onChange={(e) => setFiles(Array.from(e.target.files ?? []).slice(0, limits?.attachment_files ?? 10))}
         aria-label={label}
         className="min-w-0 flex-1 text-xs text-slate-600 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-xs file:font-semibold dark:text-slate-300 dark:file:bg-slate-700 dark:file:text-slate-200"
       />
