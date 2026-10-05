@@ -24,6 +24,8 @@ import {
   getDeletionPreview,
   deleteTicket,
   listDeletedTickets,
+  getLimits,
+  updateLimits,
 } from '../controllers/adminController.js';
 
 const router = express.Router();
@@ -32,9 +34,13 @@ const router = express.Router();
 router.use(requireAuth);
 router.use(userLimiter);
 router.use(requireRole(['SYSADMIN']));
-// A demo Sysadmin gets six read routes, limited to the demo world; everything else is 403.
+// A demo Sysadmin gets seven read routes, limited to the demo world; everything else is 403.
 router.use(demoAdminGuard);
 router.param('ticket_id', demoTicketParam);
+
+// Approval limits (SE and Dean)
+router.get('/limits', getLimits);
+router.put('/limits', updateLimits);
 
 // Overview & Metrics
 router.get('/metrics', getAdminMetrics);

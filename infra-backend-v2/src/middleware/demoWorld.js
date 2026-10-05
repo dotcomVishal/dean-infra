@@ -30,7 +30,7 @@ export const demoBillParam = (req, res, next, billId) =>
 // Layer F: the admin console for a demo account. Only the demo Sysadmin gets this far (requireRole),
 // and only for these GET routes. Every other route and method answers 403.
 const DEMO_ADMIN_READS = [
-  /^\/metrics$/, /^\/tickets$/, /^\/tickets\/export$/, /^\/tickets\/[^/]+\/details$/, /^\/users$/, /^\/audit-logs$/,
+  /^\/metrics$/, /^\/tickets$/, /^\/tickets\/export$/, /^\/tickets\/[^/]+\/details$/, /^\/users$/, /^\/audit-logs$/, /^\/limits$/,
 ];
 
 export const demoAdminGuard = (req, res, next) => {

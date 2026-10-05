@@ -23,6 +23,7 @@ import logger, { errorFields } from '../utils/logger.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { sendServerError, sendWorkflowError } from '../utils/httpError.js';
 import { worldClause, userWorldClause } from '../config/demo.js';
+import { EDITABLE_LIMITS, readEditableLimits, saveLimits } from '../models/limitsModel.js';
 
 // 1. System Overview Metrics
 export const getAdminMetrics = async (req, res) => {
@@ -1007,5 +1008,57 @@ export const listDeletedTickets = async (req, res) => {
     res.json({ success: true, deleted: rows });
   } catch (error) {
     return sendServerError(req, res, error, 'listDeletedTickets error');
+  }
+};
+
+// Approval limits: the SE and Dean amounts that decide where an estimate is approved.
+export const getLimits = async (req, res) => {
+  try {
+    res.json({ success: true, limits: await readEditableLimits(pool) });
+  } catch (error) {
+    return sendServerError(req, res, error, 'getLimits error');
+  }
+};
+
+/** A positive amount, at most MAX_AMOUNT, at most two decimals. Numbers and numeric strings only. */
+function limitAmount(key, raw) {
+  const ok = (typeof raw === 'number') || (typeof raw === 'string' && raw.trim() !== '');
+  const n = ok ? Number(raw) : NaN;
+  if (!Number.isFinite(n) || n <= 0 || n > MAX_AMOUNT) {
+    throw badRequest(`${key} must be a number greater than zero.`, 'LIMIT_INVALID');
+  }
+  if (Math.abs(n * 100 - Math.round(n * 100)) > 1e-6) {
+    throw badRequest(`${key} can have at most two decimals.`, 'LIMIT_INVALID');
+  }
+  return Math.round(n * 100) / 100;
+}
+
+export const updateLimits = async (req, res) => {
+  const body = req.body ?? {};
+  const connection = await pool.getConnection();
+  try {
+    const unknown = Object.keys(body).filter((k) => !EDITABLE_LIMITS.includes(k));
+    if (unknown.length > 0) throw badRequest(`Only ${EDITABLE_LIMITS.join(' and ')} can be changed.`, 'LIMIT_UNKNOWN');
+    const next = Object.fromEntries(EDITABLE_LIMITS.map((k) => [k, limitAmount(k, body[k])]));
+    if (next.SE_APPROVE >= next.DEAN_APPROVE) {
+      throw badRequest('The SE limit must be lower than the Dean limit.', 'LIMIT_ORDER');
+    }
+
+    await connection.beginTransaction();
+    const before = await readEditableLimits(connection);
+    await saveLimits(connection, next, req.user.id);
+    await connection.commit();
+
+    logger.warn('approval limits changed', {
+      requestId: req.id, adminId: req.user.id,
+      old: { SE_APPROVE: before.SE_APPROVE.amount, DEAN_APPROVE: before.DEAN_APPROVE.amount }, new: next,
+    });
+    res.json({ success: true, limits: await readEditableLimits(pool), message: 'Limits saved.' });
+  } catch (error) {
+    await connection.rollback();
+    if (error instanceof WorkflowError) return sendWorkflowError(req, res, error);
+    return sendServerError(req, res, error, 'updateLimits error');
+  } finally {
+    connection.release();
   }
 };

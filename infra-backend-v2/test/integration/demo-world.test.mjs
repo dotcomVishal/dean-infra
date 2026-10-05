@@ -289,12 +289,15 @@ test('12. demo Sysadmin: read-only, demo rows only, no act-as', async () => {
   for (const [method, url] of [
     ['POST', `/api/admin/tickets/${id}/override`], ['DELETE', `/api/admin/tickets/${id}`], ['POST', '/api/admin/users'],
     ['PATCH', '/api/admin/users/1'], ['GET', '/api/admin/jes'], ['GET', '/api/admin/staff?role=JE'], ['GET', '/api/admin/test-tickets'],
-    ['POST', '/api/admin/test-tickets'], ['GET', '/api/admin/deleted-tickets'], ['POST', '/api/admin/digest/preview'],
+    ['POST', '/api/admin/test-tickets'], ['PUT', '/api/admin/limits'], ['GET', '/api/admin/deleted-tickets'], ['POST', '/api/admin/digest/preview'],
   ]) {
     const r = await call(sys, method, url, method === 'GET' ? undefined : {});
     assert.equal(r.status, 403, `${method} ${url}`);
     assert.equal(r.body.code, 'DEMO_READ_ONLY');
   }
+
+  const limits = await call(sys, 'GET', '/api/admin/limits');
+  assert.equal(limits.status, 200, limits.text);
 
   const metrics = await call(sys, 'GET', '/api/admin/metrics');
   assert.equal(metrics.status, 200, metrics.text);
