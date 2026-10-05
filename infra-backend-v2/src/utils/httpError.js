@@ -1,6 +1,6 @@
 import logger, { errorFields } from './logger.js';
 
-export const GENERIC_MESSAGE = 'Internal Server Error';
+export const GENERIC_MESSAGE = 'Something went wrong. Try again.';
 
 /**
  * S12: the one place a 5xx is produced. Logs full detail internally (raw SQL /

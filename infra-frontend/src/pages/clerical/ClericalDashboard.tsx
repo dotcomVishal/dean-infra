@@ -6,7 +6,8 @@ import {
   FileText
 } from 'lucide-react';
 import { api } from '../../services/api';
-import { staffStatusLabel } from '../../lib/ticketUi';
+import { staffStatusLabel, errorMessage } from '../../lib/ticketUi';
+import { toast } from '../../store/toastStore';
 
 interface TenderTicket {
   id: number;
@@ -55,6 +56,7 @@ export default function ClericalDashboard() {
       }
     } catch (err) {
       console.error('Failed to load clerical queue:', err);
+      toast.error(errorMessage(err, 'Could not load tickets.'));
     } finally {
       setLoading(false);
     }

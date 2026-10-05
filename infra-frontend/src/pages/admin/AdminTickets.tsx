@@ -174,7 +174,7 @@ export default function AdminTickets() {
       }
     } catch (err: any) {
       console.error('Override error:', err);
-      toast.error(err.response?.data?.message || 'Could not update the ticket.');
+      toast.error(errorMessage(err, 'Could not update the ticket.'));
     } finally {
       setIsSubmittingOverride(false);
     }

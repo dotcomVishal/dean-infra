@@ -20,6 +20,7 @@ const LIFETIME_MS: Record<ToastKind, number> = { success: 4000, info: 4000, erro
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
   push: (kind, message) => {
+    if (!message) return;
     const id = nextId++;
     // Keep the stack short: a burst of errors must not cover the screen.
     set((s) => ({ toasts: [...s.toasts, { id, kind, message }].slice(-4) }));

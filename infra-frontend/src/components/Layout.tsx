@@ -8,6 +8,7 @@ import {
   FileSpreadsheet, IndianRupee, Users, History
 } from 'lucide-react';
 import PwaInstallPrompt from './PwaInstallPrompt';
+import { deskLabel } from '../lib/ticketUi';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -113,13 +114,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <>
                 <h3 className="font-bold text-slate-900 dark:text-white truncate w-full">{user?.name}</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 truncate w-full mb-2">{user?.email}</p>
-                <span className="text-[10px] bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-600 px-2 py-1 rounded text-slate-600 dark:text-slate-300 font-mono font-semibold shadow-sm">
-                  {user?.role}
+                <span className="text-[10px] bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-600 px-2 py-1 rounded text-slate-600 dark:text-slate-300 font-semibold shadow-sm">
+                  {deskLabel(user?.role)}
                 </span>
               </>
             ) : (
-               <span className="text-[10px] bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-600 px-2 py-1 rounded text-slate-600 dark:text-slate-300 font-mono font-bold shadow-sm" title={user?.role}>
-                  {user?.role?.substring(0,2)}
+               <span className="text-[10px] bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-600 px-2 py-1 rounded text-slate-600 dark:text-slate-300 font-bold shadow-sm" title={deskLabel(user?.role)}>
+                  {deskLabel(user?.role).substring(0,2)}
                </span>
             )}
           </div>

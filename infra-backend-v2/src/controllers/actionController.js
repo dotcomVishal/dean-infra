@@ -179,7 +179,7 @@ export const performTicketAction = async (req, res) => {
       status: t.toStatus,
       current_desk_user_id: nextDeskUser ? nextDeskUser.id : null,
       open_change_request_id: openChangeRequestId ?? null,
-      message: `Ticket updated to ${t.toStatus}`,
+      message: 'Ticket updated.',
     });
   } catch (error) {
     await connection.rollback();

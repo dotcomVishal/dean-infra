@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { Loader2, Search, ChevronLeft, ChevronRight, Filter, ArrowUpDown } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
-import { staffStatusLabel } from '../lib/ticketUi';
+import { staffStatusLabel, errorMessage } from '../lib/ticketUi';
+import { toast } from '../store/toastStore';
 
 // Applicant rows carry a plain-words stage_label; staff rows carry a status.
 const statusText = (t: { status: string; stage_label?: string }) => t.stage_label || staffStatusLabel(t.status);
@@ -40,6 +41,7 @@ export default function MyTickets() {
         setTickets(response.data.tickets || []);
       } catch (err) {
         console.error(err);
+      toast.error(errorMessage(err, 'Could not load your tickets.'));
       } finally {
         setLoading(false);
       }

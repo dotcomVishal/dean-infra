@@ -3,6 +3,7 @@ import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 import { auth, googleProvider } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
+import { errorMessage } from '../lib/ticketUi';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -27,7 +28,7 @@ export default function Login() {
       const status = err.response?.status;
       if (status === 401) setError('Wrong LDAP username or password.');
       else if (status === 503) setError('LDAP sign-in is not available yet. Use Google.');
-      else setError(err.response?.data?.message || 'Failed to sign in.');
+      else setError(errorMessage(err, 'Could not sign in. Try again.'));
     } finally {
       setIsAuthenticating(false);
     }
@@ -54,8 +55,8 @@ export default function Login() {
         login(response.data.user, jwtToken);
       }
     } catch (err: any) {
-      console.error('Authentication Error:', err);
-      setError(err.response?.data?.message || 'Failed to authenticate with the server.');
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') return;
+      setError(errorMessage(err, 'Could not sign in. Try again.') || 'Could not sign in. Try again.');
     } finally {
       setIsAuthenticating(false);
     }

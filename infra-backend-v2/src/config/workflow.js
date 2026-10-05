@@ -180,7 +180,7 @@ export function availableActions(user, ticket, limits = {}) {
       if (limit == null) {
         // Fail closed: a missing financial_limits row must never mean "no limit".
         d = { action: ACTION.APPROVE, enabled: false, code: 'LIMIT_NOT_CONFIGURED',
-              reason: `No financial limit configured for ${key}.` };
+              reason: 'The approval limit is not set. Contact the administrator.' };
       } else if (Number(estimate) > Number(limit)) {
         d = { action: ACTION.APPROVE, enabled: true, escalates_to: NEXT_DESK[desk] };
       }
@@ -221,22 +221,22 @@ export function resolveAction({ user, ticket, limits = {}, action, to_desk, esti
     // specific error; everyone else is simply not on the desk.
     if (action === ACTION.SUBMIT_REPORT && user.role === ROLE.JE) {
       throw new WorkflowError(
-        `A report can only be filed while the ticket is with the JE (ticket is at ${fromStatus}).`,
+        'A report can only be filed while the ticket is with the JE.',
         { code: 'REPORT_NOT_ALLOWED', status: 409 });
     }
-    throw new WorkflowError(`Ticket is at ${fromStatus}, which is nobody's desk for ${action}.`,
+    throw new WorkflowError('This step is not available now. Reload the page.',
       { code: 'NOT_YOUR_DESK', status: 403 });
   }
   if (user.role !== desk || actions.length === 0) {
     throw new WorkflowError(
-      `Ticket is at ${fromStatus}, which is ${desk}'s desk — not yours (${user.role}, or a different person).`,
+      'This ticket is not on your desk now.',
       { code: 'NOT_YOUR_DESK', status: 403 });
   }
 
   const descriptor = actions.find((a) => a.action === action);
   if (!descriptor) {
     throw new WorkflowError(
-      `${user.role} cannot ${action} at ${fromStatus}. Allowed: ${actions.map((a) => a.action).join(', ') || 'none'}.`,
+      'This step is not available now. Reload the page.',
       { code: 'ACTION_NOT_ALLOWED', status: 403 });
   }
   if (!descriptor.enabled) {
@@ -462,10 +462,8 @@ export function resolveTenderStage({ currentStatus, stage, payload = {} }) {
     throw bad(`Unknown tender stage '${stage}'. Allowed: ${Object.values(TENDER_STAGES).join(', ')}.`, 'INVALID_STAGE');
   }
   if (!STAGE_FROM[stage].includes(currentStatus)) {
-    const allowed = tenderStagesFrom(currentStatus);
     throw new WorkflowError(
-      `Cannot ${stage.toLowerCase()} a tender while the ticket is at ${currentStatus}.`
-      + ` Allowed now: ${allowed.length ? allowed.join(', ') : 'none'}.`,
+      'This step is not available now. Reload the page.',
       { code: 'STAGE_NOT_ALLOWED', status: 409 });
   }
   const remarks = text(payload.remarks) || null;
@@ -530,7 +528,7 @@ export const canResolveFrom = (status) => !NOT_RESOLVABLE.includes(status);
  */
 export function resolveResolution({ currentStatus, note }) {
   if (!canResolveFrom(currentStatus)) {
-    throw new WorkflowError(`A ticket at ${currentStatus} cannot be marked resolved.`,
+    throw new WorkflowError('This step is not available now. Reload the page.',
       { code: 'RESOLVE_NOT_ALLOWED', status: 409 });
   }
   if (!text(note)) throw bad('A note is required to mark a ticket resolved.', 'NOTE_REQUIRED');

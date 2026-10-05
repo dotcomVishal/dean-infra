@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
+import { errorMessage } from '../../lib/ticketUi';
 
 interface FinanceTicket {
   id: number;
@@ -91,6 +92,7 @@ export default function AccountantDashboard() {
       }
     } catch (err) {
       console.error('Failed to load financial overview:', err);
+      toast.error(errorMessage(err, 'Could not load the totals.'));
     }
   };
 
@@ -109,6 +111,7 @@ export default function AccountantDashboard() {
       }
     } catch (err) {
       console.error('Failed to load tickets queue:', err);
+      toast.error(errorMessage(err, 'Could not load tickets.'));
     } finally {
       setLoading(false);
     }
@@ -181,7 +184,7 @@ export default function AccountantDashboard() {
       }
     } catch (err: any) {
       console.error('Record bill error:', err);
-      toast.error(err.response?.data?.message || 'Could not record the bill.');
+      toast.error(errorMessage(err, 'Could not record the bill.'));
     } finally {
       setSubmittingBill(false);
     }
@@ -199,6 +202,7 @@ export default function AccountantDashboard() {
       }
     } catch (err) {
       console.error('Failed to load ticket bills:', err);
+      toast.error(errorMessage(err, 'Could not load bills.'));
     } finally {
       setLoadingBills(false);
     }
@@ -226,7 +230,7 @@ export default function AccountantDashboard() {
       }
     } catch (err: any) {
       console.error('Update payment error:', err);
-      toast.error(err.response?.data?.message || 'Could not update the payment.');
+      toast.error(errorMessage(err, 'Could not update the payment.'));
     }
   };
 

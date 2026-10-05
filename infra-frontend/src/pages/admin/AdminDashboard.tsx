@@ -7,6 +7,8 @@ import {
   HardHat, Server, AlertTriangle
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { toast } from '../../store/toastStore';
+import { errorMessage } from '../../lib/ticketUi';
 
 interface AdminMetrics {
   totalTickets: number;
@@ -46,6 +48,7 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       console.error('Failed to load admin metrics:', err);
+      toast.error(errorMessage(err, 'Could not load the dashboard.'));
     } finally {
       setLoading(false);
     }

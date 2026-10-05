@@ -281,7 +281,7 @@ export const getQueue = async (req, res) => {
       queryParams.push(POST_APPROVAL);
     }
   } else if (role !== 'SYSADMIN') {
-    return res.status(403).json({ success: false, message: 'Unauthorized role for queue.' });
+    return res.status(403).json({ success: false, message: 'You do not have access to this.' });
   }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -520,7 +520,7 @@ async function lockBillableTicket(connection, ticketId) {
   const [rows] = await connection.query('SELECT id, status FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
   if (rows.length === 0) throw new WorkflowError(`Ticket ${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
   if (!POST_APPROVAL.includes(rows[0].status)) {
-    throw new WorkflowError(`Ticket ${ticketId} is at ${rows[0].status}; bills can only be booked after approval.`,
+    throw new WorkflowError('Bills can only be booked after approval.',
       { code: 'BILL_NOT_ALLOWED', status: 409 });
   }
   return rows[0];

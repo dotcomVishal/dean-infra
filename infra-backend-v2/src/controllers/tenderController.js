@@ -97,7 +97,7 @@ export const applyTenderStage = async (req, res) => {
     });
 
     await connection.commit();
-    res.json({ success: true, status: step.toStatus, tender_id: tenderId, message: `Ticket updated to ${step.toStatus}` });
+    res.json({ success: true, status: step.toStatus, tender_id: tenderId, message: 'Stage updated.' });
   } catch (error) {
     await connection.rollback();
     cleanupTempFiles(files);

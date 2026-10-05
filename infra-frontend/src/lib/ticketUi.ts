@@ -8,26 +8,24 @@ export const ticketNo = (id: number | string) => `#TKT-${String(id).padStart(4, 
 export const inr = (n: number | string | null | undefined) =>
   n == null || n === '' || Number.isNaN(Number(n)) ? '—' : `₹${Number(n).toLocaleString('en-IN')}`;
 
-// X4: bodies that are not JSON (nginx 413, gateway errors) carry no message,
-// so fall back by status instead of showing one generic line for everything.
+// Statuses whose server text is written for the user. Anything else
+// (401/403/5xx) is replaced here, so one place decides what a user reads.
+const USER_TEXT_STATUS = new Set([400, 409, 413, 415, 429]);
 const STATUS_MESSAGE: Record<number, string> = {
   413: 'Files are too large. Remove some files or use smaller ones.',
   415: 'One of the files is not an allowed type.',
   429: 'Too many requests. Wait a minute and try again.',
-  502: 'Server is not reachable. Try again shortly.',
-  503: 'Server is not reachable. Try again shortly.',
-  504: 'Server is not reachable. Try again shortly.',
 };
 
-/** Pulls the server's message out of an axios error, with the request id when known. */
+/** Turns an axios error into text for a toast. Empty string means show nothing (401: the interceptor already toasts). */
 export const errorMessage = (err: unknown, fallback: string): string => {
-  const e = err as {
-    response?: { status?: number; data?: { message?: string; requestId?: string }; headers?: Record<string, string> };
-  };
-  const res = e?.response;
-  const base = res?.data?.message || (res?.status ? STATUS_MESSAGE[res.status] : undefined) || fallback;
-  const rid = res?.data?.requestId || res?.headers?.['x-request-id'];
-  return rid ? `${base} (ref ${String(rid).slice(0, 8)})` : base;
+  const res = (err as { response?: { status?: number; data?: { message?: string } } })?.response;
+  if (!res) return 'No connection. Check your network and try again.';
+  const status = res.status ?? 0;
+  if (status === 401) return '';
+  if (status === 403) return 'You do not have access to this.';
+  if (USER_TEXT_STATUS.has(status)) return res.data?.message || STATUS_MESSAGE[status] || fallback;
+  return fallback;
 };
 
 export const DESK_ORDER = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'] as const;

@@ -14,7 +14,7 @@ export const requireAuth = async (req, res, next) => {
   }
 
   if (!token) {
-    return res.status(401).json({ success: false, message: 'Unauthorized: No token provided' });
+    return res.status(401).json({ success: false, message: 'Session expired. Sign in again.' });
   }
 
   try {
@@ -29,7 +29,7 @@ export const requireAuth = async (req, res, next) => {
       // Demo LDAP login: a custom token minted by this backend. Accepted only while the demo switch is
       // on, for a fixed uid list, and only for a row flagged is_demo. Never provisions, never links by e-mail.
       if (!demoEnabled() || !DEMO_UIDS.has(firebase_uid)) {
-        return res.status(401).json({ success: false, message: 'Unauthorized: Invalid or expired token', requestId: req.id });
+        return res.status(401).json({ success: false, message: 'Session expired. Sign in again.', requestId: req.id });
       }
       [users] = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE firebase_uid = ? AND is_demo = TRUE`, [firebase_uid]);
     } else {
@@ -40,7 +40,7 @@ export const requireAuth = async (req, res, next) => {
       if (decodedToken.email_verified !== true || provider !== 'google.com') {
         return res.status(403).json({
           success: false,
-          message: 'Forbidden: sign in with a verified Google account.',
+          message: 'Sign in with a verified Google account.',
         });
       }
 
@@ -77,7 +77,7 @@ export const requireAuth = async (req, res, next) => {
     if (users.length === 0 || !users[0].is_active) {
       return res.status(403).json({ 
         success: false, 
-        message: 'Forbidden: Account does not exist or has been deactivated.' 
+        message: 'This account is not active. Contact the administrator.' 
       });
     }
 
@@ -90,6 +90,6 @@ export const requireAuth = async (req, res, next) => {
     // F1: an expired token used to come back as 403, which the frontend
     // interceptor did not treat as a logout signal, so every session silently
     // broke one hour after login instead of prompting a re-login.
-    return res.status(401).json({ success: false, message: 'Unauthorized: Invalid or expired token', requestId: req.id });
+    return res.status(401).json({ success: false, message: 'Session expired. Sign in again.', requestId: req.id });
   }
 };

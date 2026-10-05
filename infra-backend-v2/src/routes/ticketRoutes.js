@@ -164,7 +164,7 @@ router.get(
       }
       const viewer = await loadViewer(pool, req.user, ticketRows[0]);
       if (!capabilities(viewer, ticketRows[0]).tenders) {
-        return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+        return res.status(403).json({ success: false, message: 'You do not have access to this.' });
       }
 
       const [tenders] = await pool.query(
@@ -208,7 +208,7 @@ router.get(
       }
       const viewer = await loadViewer(pool, req.user, ticketRows[0]);
       if (!capabilities(viewer, ticketRows[0]).bills) {
-        return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+        return res.status(403).json({ success: false, message: 'You do not have access to this.' });
       }
       const [bills] = await pool.query(
         `SELECT b.*, u.name as accountant_name 
@@ -259,7 +259,7 @@ router.get('/:ticket_id/details', async (req, res) => {
     // S5: one scope rule for every role (visibility matrix, plan.md §3.6).
     const viewer = await loadViewer(pool, req.user, ticketRow);
     if (!canViewTicket(viewer, ticketRow)) {
-      return res.status(403).json({ success: false, message: 'Unauthorized access to this ticket.' });
+      return res.status(403).json({ success: false, message: 'You do not have access to this.' });
     }
 
     const [attachments] = await pool.query(

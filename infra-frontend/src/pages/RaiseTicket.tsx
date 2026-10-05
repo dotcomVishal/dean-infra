@@ -10,6 +10,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { toast } from '../store/toastStore';
+import { errorMessage } from '../lib/ticketUi';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -113,7 +114,7 @@ export default function RaiseTicket() {
       const validationErrors = err.response?.data?.errors as { path: string; message: string }[] | undefined;
       const message = validationErrors?.length
         ? validationErrors.map((issue) => issue.message).join(' ')
-        : (err.response?.status === 413 ? 'Files are too large. Use fewer or smaller photos.' : err.response?.data?.message) || 'Could not submit the ticket. Try again.';
+        : errorMessage(err, 'Could not submit the ticket. Try again.');
       setError(message);
       setIsSubmitting(false);
     }

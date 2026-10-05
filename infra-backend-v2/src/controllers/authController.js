@@ -8,7 +8,7 @@ export const syncUser = async (req, res) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'No token provided.' });
+    return res.status(401).json({ success: false, message: 'Session expired. Sign in again.' });
   }
 
   const token = authHeader.split(' ')[1];
@@ -22,7 +22,7 @@ export const syncUser = async (req, res) => {
     logger.warn('auth sync: token verification failed', {
       requestId: req.id, firebaseCode: error.code, reason: error.message,
     });
-    return res.status(401).json({ success: false, message: 'Invalid or expired token.', requestId: req.id });
+    return res.status(401).json({ success: false, message: 'Session expired. Sign in again.', requestId: req.id });
   }
 
   try {

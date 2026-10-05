@@ -13,7 +13,7 @@ import { GroupedAttachments } from '../../components/ticket/Attachments';
 import DeleteTicket from '../../components/admin/DeleteTicket';
 import ReassignFields from '../../components/admin/ReassignFields';
 import { NO_REASSIGN, reassignBody, type ReassignValue } from '../../lib/reassign';
-import { deskLabel, placeLabel, staffStatusLabel } from '../../lib/ticketUi';
+import { deskLabel, placeLabel, staffStatusLabel, errorMessage } from '../../lib/ticketUi';
 import { ALL_STATUSES } from '../../lib/statuses';
 
 export default function AdminTicketDetails() {
@@ -45,7 +45,7 @@ export default function AdminTicketDetails() {
       }
     } catch (err: any) {
       console.error('Failed to load master details:', err);
-      setError(err.response?.data?.message || 'Failed to load ticket details.');
+      setError(errorMessage(err, 'Could not load the ticket.'));
     } finally {
       setLoading(false);
     }
@@ -78,7 +78,7 @@ export default function AdminTicketDetails() {
       }
     } catch (err: any) {
       console.error('Override error:', err);
-      toast.error(err.response?.data?.message || 'Could not update the ticket.');
+      toast.error(errorMessage(err, 'Could not update the ticket.'));
     } finally {
       setIsSubmittingOverride(false);
     }

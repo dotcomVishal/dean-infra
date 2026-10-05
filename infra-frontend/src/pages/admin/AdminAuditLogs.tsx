@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
+import { toast } from '../../store/toastStore';
+import { errorMessage } from '../../lib/ticketUi';
 
 interface AuditLogItem {
   id: number;
@@ -103,6 +105,7 @@ export default function AdminAuditLogs() {
       }
     } catch (err) {
       console.error('Failed to load audit logs:', err);
+      toast.error(errorMessage(err, 'Could not load the activity log.'));
     } finally {
       setLoading(false);
     }

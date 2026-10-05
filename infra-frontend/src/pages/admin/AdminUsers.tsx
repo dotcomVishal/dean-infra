@@ -7,6 +7,7 @@ import {
 import { api } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import { toast } from '../../store/toastStore';
+import { errorMessage } from '../../lib/ticketUi';
 
 const ALL_USER_DEPARTMENTS = [
   'Civil', 
@@ -98,6 +99,7 @@ export default function AdminUsers() {
       }
     } catch (err) {
       console.error('Failed to load users:', err);
+      toast.error(errorMessage(err, 'Could not load users.'));
     } finally {
       setLoading(false);
     }
@@ -156,7 +158,7 @@ export default function AdminUsers() {
       }
     } catch (err: any) {
       console.error('Create user error:', err);
-      toast.error(err.response?.data?.message || 'Could not create the user.');
+      toast.error(errorMessage(err, 'Could not create the user.'));
     } finally {
       setIsSaving(false);
     }
@@ -197,7 +199,7 @@ export default function AdminUsers() {
       }
     } catch (err: any) {
       console.error('Update user error:', err);
-      toast.error(err.response?.data?.message || 'Could not update the user.');
+      toast.error(errorMessage(err, 'Could not update the user.'));
     } finally {
       setIsSaving(false);
     }
