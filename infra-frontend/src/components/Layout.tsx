@@ -79,12 +79,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-900 flex flex-col font-sans transition-colors duration-200">
       
-      {user?.is_demo && (
-        <div className="bg-amber-400 text-amber-950 text-center text-[11px] font-black tracking-widest uppercase py-1">
-          Demo account · sample data only
-        </div>
-      )}
-
       {/* TOP NAVBAR */}
       <header className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 sticky top-0 z-50 transition-colors pt-[env(safe-area-inset-top,0px)] h-[calc(4rem+env(safe-area-inset-top,0px))]">
         <div className="flex items-center gap-3">

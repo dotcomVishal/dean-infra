@@ -8,15 +8,15 @@ import logger, { errorFields } from '../utils/logger.js';
 const MIN_PASSWORD_LENGTH = 12;
 
 const ACCOUNTS = [
-  { username: 'demo.applicant',  role: 'APPLICANT',  name: 'Demo Applicant',  department: 'General' },
-  { username: 'demo.je',         role: 'JE',         name: 'Demo JE',         department: 'Civil' },
-  { username: 'demo.ae',         role: 'AE',         name: 'Demo AE',         department: 'Civil' },
-  { username: 'demo.se',         role: 'SE',         name: 'Demo SE',         department: 'Civil' },
-  { username: 'demo.dean',       role: 'DEAN',       name: 'Demo Dean',       department: 'Administration' },
-  { username: 'demo.director',   role: 'DIRECTOR',   name: 'Demo Director',   department: 'Administration' },
-  { username: 'demo.clerical',   role: 'CLERICAL',   name: 'Demo Clerical',   department: 'Administration' },
-  { username: 'demo.accountant', role: 'ACCOUNTANT', name: 'Demo Accountant', department: 'Administration' },
-  { username: 'demo.sysadmin',   role: 'SYSADMIN',   name: 'Demo Sysadmin',   department: 'Administration' },
+  { username: 'demo.applicant',  role: 'APPLICANT',  name: 'Arjun Mehta',  department: 'General' },
+  { username: 'demo.je',         role: 'JE',         name: 'Rohan Verma',         department: 'Civil' },
+  { username: 'demo.ae',         role: 'AE',         name: 'Neha Kulkarni',         department: 'Civil' },
+  { username: 'demo.se',         role: 'SE',         name: 'Sanjay Iyer',         department: 'Civil' },
+  { username: 'demo.dean',       role: 'DEAN',       name: 'Meera Nair',       department: 'Administration' },
+  { username: 'demo.director',   role: 'DIRECTOR',   name: 'Vikram Rao',   department: 'Administration' },
+  { username: 'demo.clerical',   role: 'CLERICAL',   name: 'Kavita Joshi',   department: 'Administration' },
+  { username: 'demo.accountant', role: 'ACCOUNTANT', name: 'Anil Desai', department: 'Administration' },
+  { username: 'demo.sysadmin',   role: 'SYSADMIN',   name: 'Priya Menon',   department: 'Administration' },
 ].map((a) => ({
   ...a,
   firebase_uid: `demo_${a.role.toLowerCase()}`,
