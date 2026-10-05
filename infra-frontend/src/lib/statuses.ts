@@ -42,20 +42,20 @@ export const inGroup = (group: readonly string[], status: string) => group.inclu
 // WORK_IN_PROGRESS and WORK_COMPLETED keep their stored names; they read "Awarded" and "Resolved".
 
 const STAFF_STATUS: Record<string, string> = {
-  UNASSIGNED: 'Unassigned — waiting for AE to choose a JE',
+  UNASSIGNED: 'Unassigned',
   ASSIGNED_TO_JE: 'With JE for inspection',
   RETURNED_TO_JE: 'Changes requested — with JE',
   PENDING_AE_APPROVAL: 'Waiting for AE',
   PENDING_SE_APPROVAL: 'Waiting for SE',
   PENDING_DEAN_APPROVAL: 'Waiting for Dean',
   PENDING_DIRECTOR_APPROVAL: 'Waiting for Director',
-  APPROVED_FOR_TENDERING: 'Approved — awaiting tender',
+  APPROVED_FOR_TENDERING: 'Approved',
   TENDER_PUBLISHED: 'Tender published',
   TECHNICAL_EVALUATION: 'Technical evaluation',
   FINANCIAL_EVALUATION: 'Financial evaluation',
   TENDER_CANCELLED: 'Tender cancelled',
-  WORK_IN_PROGRESS: 'Awarded — work in progress',
-  WORK_COMPLETED: 'Resolved — awaiting applicant',
+  WORK_IN_PROGRESS: 'Awarded',
+  WORK_COMPLETED: 'Resolved',
   CLOSED: 'Closed',
   DENIED: 'Rejected',
 };

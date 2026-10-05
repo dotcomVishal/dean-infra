@@ -48,7 +48,7 @@ const STATE_OF: Record<string, StepState> = {
 const CHAIN = ['JE', 'AE', 'SE', 'DEAN', 'DIRECTOR'];
 const POST = [
   { key: 'tender', label: 'Tendering' },
-  { key: 'work', label: 'Awarded — work in progress' },
+  { key: 'work', label: 'Awarded' },
   { key: 'verify', label: 'Applicant verifies' },
   { key: 'closed', label: 'Closed' },
 ];

@@ -74,7 +74,7 @@ export default function PwaInstallPrompt() {
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="flex items-center gap-2 bg-amber-600 text-white text-xs font-semibold px-4 py-1.5 rounded-full shadow-lg border border-amber-500">
             <WifiOff size={14} className="animate-pulse" />
-            <span>Offline Mode: Operating with cached portal data</span>
+            <span>You are offline.</span>
           </div>
         </div>
       )}

@@ -91,7 +91,7 @@ export default function Login() {
         <div className="w-full max-w-sm space-y-10">
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-mono font-bold tracking-[0.2em] text-slate-900 uppercase">
-              Welcome !
+              Sign in
             </h2>
           </div>
 
@@ -110,7 +110,6 @@ export default function Login() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. b2xxx"
                 className="w-full px-0 py-2 border-b-2 border-gray-200 focus:border-slate-900 bg-transparent outline-none transition-colors placeholder:text-gray-300 text-sm md:text-base font-medium text-slate-900"
                 required
               />
@@ -172,7 +171,7 @@ export default function Login() {
 
         <div className="mt-auto pt-16">
           <p className="text-[10px] md:text-xs text-gray-400 font-medium">
-            © 2026 IIT Mandi
+            © {new Date().getFullYear()} IIT Mandi
           </p>
         </div>
         

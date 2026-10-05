@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Loader2, Search, ChevronLeft, ChevronRight, Filter, ArrowUpDown } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
-import { staffStatusLabel, errorMessage } from '../lib/ticketUi';
+import { staffStatusLabel, errorMessage, ticketNo } from '../lib/ticketUi';
 import { toast } from '../store/toastStore';
 
 // Applicant rows carry a plain-words stage_label; staff rows carry a status.
@@ -91,7 +91,7 @@ export default function MyTickets() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Search by ID or keywords..." 
+              placeholder="Search" 
               value={search}
               onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
               className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-white transition-all"
@@ -140,7 +140,7 @@ export default function MyTickets() {
             <div className="col-span-4">Description</div>
             <div className="col-span-2">Department</div>
             <div className="col-span-2">Status</div>
-            <div className="col-span-2 text-right">Date Reported</div>
+            <div className="col-span-2 text-right">Raised</div>
           </div>
 
           <ul className="divide-y divide-slate-100 dark:divide-slate-700/50">
@@ -153,7 +153,7 @@ export default function MyTickets() {
                 {/* Mobile View */}
                 <div className="md:hidden flex flex-col gap-2">
                   <div className="flex justify-between items-start">
-                    <span className="text-blue-600 dark:text-blue-400 font-mono text-sm font-bold">#TKT-{ticket.id.toString().padStart(4, '0')}</span>
+                    <span className="text-blue-600 dark:text-blue-400 font-mono text-sm font-bold">{ticketNo(ticket.id)}</span>
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md border ${getStatusStyle(ticket.status)}`}>
                       {statusText(ticket)}
                     </span>
@@ -163,7 +163,7 @@ export default function MyTickets() {
                     {ticket.title && <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">{ticket.description}</p>}
                   </div>
                   <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 font-medium pt-1">
-                    <span>{ticket.department} Dept.</span>
+                    <span>{ticket.department}</span>
                     <span>{format(new Date(ticket.created_at), 'MMM dd, yyyy')}</span>
                   </div>
                 </div>
@@ -171,7 +171,7 @@ export default function MyTickets() {
                 {/* Desktop View */}
                 <div className="hidden md:grid grid-cols-12 gap-4 items-center">
                   <div className="col-span-2 text-blue-600 dark:text-blue-400 font-mono text-sm font-bold group-hover:underline">
-                    #TKT-{ticket.id.toString().padStart(4, '0')}
+                    {ticketNo(ticket.id)}
                   </div>
                   <div className="col-span-4 pr-4">
                     <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{ticket.title || ticket.description}</div>

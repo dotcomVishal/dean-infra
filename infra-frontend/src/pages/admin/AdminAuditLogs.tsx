@@ -179,12 +179,9 @@ export default function AdminAuditLogs() {
   return (
     <div className="max-w-7xl mx-auto space-y-6 w-full">
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-200/80 dark:border-slate-700 shadow-sm">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="p-2 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-xl">
-              <History size={24} />
-            </span>
             <div>
               <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Audit Log</h1>
               <p className="text-sm text-slate-500 dark:text-slate-400">

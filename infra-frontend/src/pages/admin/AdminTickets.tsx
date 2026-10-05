@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
-  ClipboardList, Search, ChevronLeft, ChevronRight, 
+  Search, ChevronLeft, ChevronRight, 
   RefreshCw, ShieldAlert, ArrowRight, X, Download, Filter as FilterIcon
 } from 'lucide-react';
 import { api } from '../../services/api';
@@ -196,12 +196,9 @@ export default function AdminTickets() {
     <div className="max-w-7xl mx-auto w-full space-y-6 animate-in fade-in duration-200 pb-16">
       
       {/* Header */}
-      <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-700/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <span className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-              <ClipboardList size={22} />
-            </span>
             <div>
               <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white">
                 Tickets

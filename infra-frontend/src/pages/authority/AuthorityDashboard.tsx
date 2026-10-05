@@ -1,4 +1,3 @@
-import { ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import DeskBoard from '../../components/DeskBoard';
 
@@ -18,14 +17,11 @@ export default function AuthorityDashboard() {
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-5 pb-16 animate-in fade-in duration-300">
-      <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 md:p-6">
-        <span className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400"><ShieldCheck size={22} /></span>
-        <div className="min-w-0">
-          <h1 className="text-lg font-black text-slate-900 dark:text-white md:text-2xl">{TITLE[role] ?? 'Approvals'}</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {user?.name}{wide ? ' · All departments' : ` · ${user?.department ?? ''}`}
-          </p>
-        </div>
+      <div>
+        <h1 className="text-lg font-black text-slate-900 dark:text-white md:text-2xl">{TITLE[role] ?? 'Approvals'}</h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {user?.name}{wide ? ' · All departments' : ` · ${user?.department ?? ''}`}
+        </p>
       </div>
       <DeskBoard allWorks={wide ? 'All tickets' : 'Department tickets'} />
     </div>
