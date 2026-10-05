@@ -12,6 +12,7 @@ import {
 import { loadLimits } from '../models/limitsModel.js';
 import { applicantTicket } from '../services/visibility.js';
 import { sendServerError } from '../utils/httpError.js';
+import { worldClause } from '../config/demo.js';
 
 // Statuses each role works on. AE also owns the UNASSIGNED queue (Q8).
 const DESK_STATUSES = Object.freeze({
@@ -63,7 +64,7 @@ export const getDeskBoard = async (req, res) => {
         params = [userId];
       }
       [myDesk] = await pool.query(
-        `${ROW_SELECT} WHERE t.is_mock = FALSE AND t.status IN (?) AND ${owner} ORDER BY desk_since ASC LIMIT 200`,
+        `${ROW_SELECT} WHERE ${worldClause(req.user)} AND t.status IN (?) AND ${owner} ORDER BY desk_since ASC LIMIT 200`,
         [statuses, ...params]
       );
     }
@@ -76,7 +77,7 @@ export const getDeskBoard = async (req, res) => {
     if (role !== 'APPLICANT') {
       const [watchRows] = await pool.query(
         `${ROW_SELECT}
-          WHERE t.is_mock = FALSE AND t.status NOT IN (?) AND t.applicant_id <> ?
+          WHERE ${worldClause(req.user)} AND t.status NOT IN (?) AND t.applicant_id <> ?
             AND EXISTS (SELECT 1 FROM audit_logs a
                          WHERE a.ticket_id = t.id AND a.user_id = ? AND a.action <> 'REMINDER_SENT')
           ORDER BY desk_since DESC LIMIT 100`,
@@ -86,7 +87,7 @@ export const getDeskBoard = async (req, res) => {
     }
 
     const [mine] = await pool.query(
-      'SELECT * FROM tickets WHERE applicant_id = ? AND is_mock = FALSE ORDER BY created_at DESC LIMIT 200', [userId]);
+      `SELECT * FROM tickets WHERE applicant_id = ? AND ${worldClause(req.user, '')} ORDER BY created_at DESC LIMIT 200`, [userId]);
 
     // on_my_desk = I can act now (an AE in scope also SEES other AEs' UNASSIGNED tickets).
     const strip = ({ current_desk_user_id, ...rest }) => ({ ...rest, current_desk: deskForStatus(rest.status) });
@@ -134,7 +135,7 @@ export const getAssignableJes = async (req, res) => {
               EXISTS (SELECT 1 FROM user_scopes s
                        WHERE s.user_id = u.id AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))) AS same_campus
          FROM users u
-        WHERE u.role = 'JE' AND u.is_active = TRUE
+        WHERE u.role = 'JE' AND u.is_active = TRUE AND u.is_demo = FALSE
           AND EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?)
         ORDER BY on_leave ASC, same_campus DESC, open_tickets ASC, u.name ASC`,
       [t.department, t.campus ?? null, t.campus ?? null, t.department]

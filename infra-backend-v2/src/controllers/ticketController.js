@@ -22,6 +22,7 @@ import { LATEST_REPORT, AWARDED_TENDER, EFFECTIVE_AMOUNT } from '../models/amoun
 import { loadLimits } from '../models/limitsModel.js';
 import { redactQueueRow, loadViewer, uploadCategory, staffRole } from '../services/visibility.js';
 import { sendServerError, sendWorkflowError } from '../utils/httpError.js';
+import { worldClause, findDemoUser } from '../config/demo.js';
 
 export const createTicket = async (req, res) => {
   const applicant_id = req.user.id;
@@ -72,7 +73,12 @@ export const createTicket = async (req, res) => {
         [req.user.id, campus]);
       jeCoversCampus = scope.length > 0;
     }
-    if (jeCoversCampus) {
+    if (req.user.is_demo) {
+      // Demo world: the ticket starts at the demo JE. No fair assignment, no "AE assigns" branch.
+      const je = await findDemoUser(connection, 'JE');
+      if (!je) throw new Error('Demo JE account is missing.');
+      assignment = { status: 'ASSIGNED_TO_JE', assignedJeId: je.id, currentDeskUserId: je.id, deskUser: je };
+    } else if (jeCoversCampus) {
       assignment = {
         status: 'ASSIGNED_TO_JE',
         assignedJeId: req.user.id,
@@ -102,6 +108,11 @@ export const createTicket = async (req, res) => {
     );
 
     const ticket_id = ticketResult.insertId;
+
+    // Flag a demo ticket before anything can queue mail. is_mock keeps it out of every real list, total and mail path.
+    if (req.user.is_demo) {
+      await connection.query('UPDATE tickets SET is_mock = TRUE, is_demo = TRUE WHERE id = ?', [ticket_id]);
+    }
 
     // Insert creation audit logs
     const [createdLog] = await connection.query(
@@ -185,8 +196,8 @@ export const getQueue = async (req, res) => {
     ) b ON t.id = b.ticket_id
   `;
 
-  // Sysadmin test tickets never appear in real queues.
-  let whereClauses = ['t.is_mock = FALSE'];
+  // Sysadmin test tickets never appear in real queues; a demo viewer sees demo tickets only.
+  let whereClauses = [worldClause(req.user)];
   let queryParams = [];
 
   if (search) {
@@ -197,8 +208,10 @@ export const getQueue = async (req, res) => {
   if (role === 'AE') {
     // The ticket is on this AE's desk, or inside their (department, campus)
     // scopes -- never the other campus's tickets (A5).
-    whereClauses.push(SCOPE_OR_DESK);
-    queryParams.push(req.user.id, req.user.id);
+    if (!req.user.is_demo) {
+      whereClauses.push(SCOPE_OR_DESK);
+      queryParams.push(req.user.id, req.user.id);
+    }
     if (tab === 'pending') {
       // UNASSIGNED tickets routed here by the fair-assignment engine
       // (plan.md Q8) surface in the AE's pending tab alongside their normal
@@ -210,8 +223,10 @@ export const getQueue = async (req, res) => {
       queryParams.push(STATUS.RETURNED_TO_JE);
     }
   } else if (role === 'SE') {
-    whereClauses.push(SCOPE_OR_DESK);
-    queryParams.push(req.user.id, req.user.id);
+    if (!req.user.is_demo) {
+      whereClauses.push(SCOPE_OR_DESK);
+      queryParams.push(req.user.id, req.user.id);
+    }
     if (tab === 'pending') {
       whereClauses.push('t.status = ?');
       queryParams.push(STATUS.PENDING_SE_APPROVAL);
@@ -615,14 +630,14 @@ export const getAccountantOverview = async (req, res) => {
       LEFT JOIN ${LATEST_REPORT} r ON r.ticket_id = t.id
       LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
       WHERE t.status IN (?)
-        AND t.is_mock = FALSE
+        AND ${worldClause(req.user)}
     `, [POST_APPROVAL]);
 
     // 2. Total contract value awarded
     const [contracts] = await pool.query(`
       SELECT COALESCE(SUM(tn.work_order_value), 0) as total_contract_value
       FROM tenders tn JOIN tickets t ON t.id = tn.ticket_id
-      WHERE tn.status = 'AWARDED' AND t.is_mock = FALSE
+      WHERE tn.status = 'AWARDED' AND ${worldClause(req.user)}
     `);
 
     // 3. Total disbursed from bills
@@ -632,7 +647,7 @@ export const getAccountantOverview = async (req, res) => {
         COALESCE(SUM(CASE WHEN b.payment_status = 'PENDING' THEN b.net_amount ELSE 0 END), 0) as total_pending_disbursement,
         COUNT(b.id) as total_bills_count
       FROM bills b JOIN tickets t ON t.id = b.ticket_id
-      WHERE t.is_mock = FALSE
+      WHERE ${worldClause(req.user)}
     `);
 
     res.json({

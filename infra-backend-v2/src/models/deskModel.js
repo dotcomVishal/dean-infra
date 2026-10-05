@@ -3,6 +3,7 @@
 // a desk may DO live in config/workflow.js.
 
 import logger from '../utils/logger.js';
+import { findDemoUser } from '../config/demo.js';
 import { STATUS, deskForStatus, AE_STAGE } from '../config/workflow.js';
 
 const PERSON = 'u.id, u.name, u.email, u.role';
@@ -17,7 +18,7 @@ export async function resolveAeForScope(connection, { department, campus }) {
     `SELECT ${PERSON}
        FROM users u
        JOIN user_scopes s ON s.user_id = u.id
-      WHERE u.role = 'AE' AND u.is_active = TRUE
+      WHERE u.role = 'AE' AND u.is_active = TRUE AND u.is_demo = FALSE
         AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))
       ORDER BY (s.campus = 'BOTH') ASC,
         (SELECT COUNT(*) FROM tickets t
@@ -32,7 +33,7 @@ export async function resolveAeForScope(connection, { department, campus }) {
 /** Last-resort desk owner when a desk has nobody active (plan.md §3.3). */
 export async function fallbackSysadmin(connection) {
   const [rows] = await connection.query(
-    `SELECT id, name, email, role FROM users WHERE role = 'SYSADMIN' AND is_active = TRUE ORDER BY id ASC LIMIT 1`
+    `SELECT id, name, email, role FROM users WHERE role = 'SYSADMIN' AND is_active = TRUE AND is_demo = FALSE ORDER BY id ASC LIMIT 1`
   );
   return rows[0] ?? null;
 }
@@ -54,7 +55,15 @@ async function findMockOwner(connection, ticket) {
 
 /** The active person at `desk` for this ticket, or null. No fallback. */
 export async function findDeskOwner(connection, ticket, desk) {
-  if (ticket.is_mock && ticket.applicant_id != null) return findMockOwner(connection, ticket);
+  if (ticket.is_mock && ticket.applicant_id != null) {
+    // Demo tickets: each desk is held by the demo account of that role. The row may come without is_demo.
+    let demo = ticket.is_demo;
+    if (demo === undefined) {
+      const [rows] = await connection.query('SELECT is_demo FROM tickets WHERE id = ?', [ticket.id]);
+      demo = !!rows[0]?.is_demo;
+    }
+    return demo ? findDemoUser(connection, desk) : findMockOwner(connection, ticket);
+  }
   switch (desk) {
     case 'JE': {
       if (ticket.assigned_je_id == null) return null;
@@ -72,7 +81,7 @@ export async function findDeskOwner(connection, ticket, desk) {
       if (pinned) return pinned;
       const [rows] = await connection.query(
         `SELECT ${PERSON} FROM users u
-          WHERE u.role = 'SE' AND u.is_active = TRUE
+          WHERE u.role = 'SE' AND u.is_active = TRUE AND u.is_demo = FALSE
           ORDER BY EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?) DESC, u.id ASC
           LIMIT 1`,
         [ticket.department]
@@ -82,7 +91,7 @@ export async function findDeskOwner(connection, ticket, desk) {
     case 'DEAN':
     case 'DIRECTOR': {
       const [rows] = await connection.query(
-        `SELECT ${PERSON} FROM users u WHERE u.role = ? AND u.is_active = TRUE ORDER BY u.id ASC LIMIT 1`,
+        `SELECT ${PERSON} FROM users u WHERE u.role = ? AND u.is_active = TRUE AND u.is_demo = FALSE ORDER BY u.id ASC LIMIT 1`,
         [desk]
       );
       return rows[0] ?? null;
@@ -127,7 +136,7 @@ const DESK_STATUSES = Object.values(STATUS).filter((s) => deskForStatus(s));
 /** Re-point every open desk ticket whose stored owner is stale. Returns how many changed. */
 export async function reconcileDeskOwners(connection) {
   const [tickets] = await connection.query(
-    `SELECT id, status, department, campus, applicant_id, is_mock, assigned_je_id, assigned_ae_id, assigned_se_id,
+    `SELECT id, status, department, campus, applicant_id, is_mock, is_demo, assigned_je_id, assigned_ae_id, assigned_se_id,
             current_desk_user_id
        FROM tickets WHERE status IN (?)`,
     [DESK_STATUSES]
@@ -163,7 +172,7 @@ export async function findOwners(connection, ticket, desks) {
 export async function getEligibleJe(connection, jeId, department, campus = null) {
   const [rows] = await connection.query(
     `SELECT ${PERSON} FROM users u
-      WHERE u.id = ? AND u.role = 'JE' AND u.is_active = TRUE
+      WHERE u.id = ? AND u.role = 'JE' AND u.is_active = TRUE AND u.is_demo = FALSE
         AND EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?
                     AND (? IS NULL OR s.campus IN (?, 'BOTH')))`,
     [jeId, department, campus, campus]

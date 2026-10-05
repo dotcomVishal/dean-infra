@@ -2,6 +2,7 @@ import { auth } from '../config/firebase.js';
 import pool from '../config/db.js';
 import logger from '../utils/logger.js';
 import { sendServerError } from '../utils/httpError.js';
+import { demoEnabled, findDemoAccount, demoPasswordMatches, demoAccountsReady } from '../config/demo.js';
 
 export const syncUser = async (req, res) => {
   const authHeader = req.headers.authorization;
@@ -87,5 +88,35 @@ export const syncUser = async (req, res) => {
 
   } catch (error) {
     return sendServerError(req, res, error, 'syncUser');
+  }
+};
+
+// POST /api/auth/ldap: demo stand-in for the LDAP form (Agent/demo-plan.md). Fixed usernames, one shared
+// password from the environment, answered with a Firebase custom token for the matching demo account.
+export const demoLdapLogin = async (req, res) => {
+  const { username, password } = req.body ?? {};
+  try {
+    if (!demoEnabled() || !(await demoAccountsReady(pool))) {
+      return res.status(503).json({ success: false, code: 'LDAP_DISABLED', message: 'LDAP sign-in is not available.' });
+    }
+    const account = findDemoAccount(username);
+    // Always compare the password, so a wrong username and a wrong password take the same time.
+    const passwordOk = demoPasswordMatches(password);
+    if (!account || !passwordOk) {
+      logger.warn('demo ldap: login refused', { requestId: req.id, username: String(username ?? '').slice(0, 64) });
+      return res.status(401).json({ success: false, message: 'Wrong LDAP username or password.' });
+    }
+    const [rows] = await pool.query(
+      'SELECT id, name, email, role, department, is_active, is_demo FROM users WHERE firebase_uid = ? AND is_demo = TRUE',
+      [account.firebase_uid]);
+    const user = rows[0];
+    if (!user || !user.is_active) {
+      return res.status(503).json({ success: false, code: 'LDAP_DISABLED', message: 'LDAP sign-in is not available.' });
+    }
+    const token = await auth.createCustomToken(account.firebase_uid);
+    logger.info('demo ldap: login ok', { requestId: req.id, username: account.username, role: account.role });
+    res.json({ success: true, token, user: { ...user, is_demo: true } });
+  } catch (error) {
+    return sendServerError(req, res, error, 'demoLdapLogin');
   }
 };

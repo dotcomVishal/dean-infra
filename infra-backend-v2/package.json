@@ -8,6 +8,7 @@
     "migrate": "node scripts/migrate.mjs",
     "seed:staff": "node scripts/seed-staff.mjs",
     "seed:mock-users": "node scripts/seed-mock-users.mjs",
+    "demo:reset": "node scripts/demo-reset.mjs",
     "test": "NODE_ENV=test node --test 'test/unit/*.test.mjs' scripts/test-workflow.mjs scripts/test-visibility.mjs",
     "test:unit": "NODE_ENV=test node --test 'test/unit/*.test.mjs' scripts/test-workflow.mjs scripts/test-visibility.mjs",
     "test:integration": "NODE_ENV=test node scripts/prepare-test-db.mjs && NODE_ENV=test node --test --test-concurrency=1 'test/integration/*.test.mjs'",

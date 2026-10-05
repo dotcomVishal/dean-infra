@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 import { auth, googleProvider } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
@@ -12,10 +12,25 @@ export default function Login() {
   
   const login = useAuthStore((state) => state.login);
 
-  const handleLdapLogin = (e: React.FormEvent) => {
+  // Demo stand-in for LDAP: the backend answers a Firebase custom token for a fixed demo account.
+  const handleLdapLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // LDAP integration pending college instructions
-    console.log('LDAP Username:', username);
+    setIsAuthenticating(true);
+    setError('');
+
+    try {
+      const response = await api.post('/auth/ldap', { username: username.trim(), password });
+      const result = await signInWithCustomToken(auth, response.data.token);
+      const idToken = await result.user.getIdToken();
+      login(response.data.user, idToken);
+    } catch (err: any) {
+      const status = err.response?.status;
+      if (status === 401) setError('Wrong LDAP username or password.');
+      else if (status === 503) setError('LDAP sign-in is not available yet. Use Google.');
+      else setError(err.response?.data?.message || 'Failed to sign in.');
+    } finally {
+      setIsAuthenticating(false);
+    }
   };
 
   const handleGoogleLogin = async () => {
@@ -116,9 +131,10 @@ export default function Login() {
 
             <button
               type="submit"
-              className="w-full bg-[#0f172a] hover:bg-slate-800 text-white font-semibold py-3.5 md:py-4 rounded transition-all shadow-md hover:shadow-lg text-sm md:text-base tracking-wide"
+              disabled={isAuthenticating}
+              className="w-full bg-[#0f172a] hover:bg-slate-800 text-white font-semibold py-3.5 md:py-4 rounded transition-all shadow-md hover:shadow-lg text-sm md:text-base tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              LOGIN
+              {isAuthenticating ? 'SIGNING IN…' : 'LOGIN'}
             </button>
           </form>
 

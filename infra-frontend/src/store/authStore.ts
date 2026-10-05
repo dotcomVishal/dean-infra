@@ -11,6 +11,7 @@ interface User {
   email: string;
   role: string;
   department: string;
+  is_demo?: boolean;
 }
 
 interface AuthState {

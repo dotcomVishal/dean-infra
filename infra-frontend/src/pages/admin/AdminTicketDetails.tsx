@@ -7,6 +7,7 @@ import {
   ShieldAlert, RefreshCw, FileCheck
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 import { toast } from '../../store/toastStore';
 import { GroupedAttachments } from '../../components/ticket/Attachments';
 import DeleteTicket from '../../components/admin/DeleteTicket';
@@ -18,6 +19,7 @@ import { ALL_STATUSES } from '../../lib/statuses';
 export default function AdminTicketDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const isDemo = useAuthStore((s) => !!s.user?.is_demo); // the demo Sysadmin is read-only
   
   const [ticket, setTicket] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -220,6 +222,7 @@ export default function AdminTicketDetails() {
           </div>
 
           {/* Override */}
+          {!isDemo && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-amber-500/30 dark:border-amber-500/20 space-y-4">
             <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-700">
               <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
@@ -287,6 +290,7 @@ export default function AdminTicketDetails() {
               </div>
             </form>
           </div>
+          )}
 
           {/* Audit log */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200/80 dark:border-slate-700/80 space-y-4">
@@ -395,7 +399,7 @@ export default function AdminTicketDetails() {
 
       </div>
 
-      <DeleteTicket ticketId={ticket.id} onDeleted={() => navigate('/admin/tickets')} />
+      {!isDemo && <DeleteTicket ticketId={ticket.id} onDeleted={() => navigate('/admin/tickets')} />}
 
     </div>
   );

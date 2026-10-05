@@ -51,8 +51,10 @@ export function buildViewer(user, ticket, facts = {}) {
   const role = user.role;
   const scopes = facts.scopes ?? [];
   const campusOk = (s) => ticket.campus == null || s.campus === 'BOTH' || s.campus === ticket.campus;
+  const demo = !!user.is_demo;
   const aeInScope = role === 'AE' && (
-    ticket.current_desk_user_id === user.id
+    (demo && !!ticket.is_demo) // demo AE: the demo world is its whole scope
+    || ticket.current_desk_user_id === user.id
     || ticket.assigned_ae_id === user.id // pinned holder keeps sight after the ticket moves on
     || (scopes.length > 0
       ? scopes.some((s) => s.department === ticket.department && campusOk(s))
@@ -64,6 +66,7 @@ export function buildViewer(user, ticket, facts = {}) {
     // Sysadmin acting as staff on a mock ticket must see what that role sees, not the union with the applicant view.
     isApplicant: ticket.applicant_id === user.id && !(user.isTest && role !== 'APPLICANT'),
     isTest: user.isTest === true,
+    isDemo: demo,
     isAssignedJe: role === 'JE' && ticket.assigned_je_id === user.id,
     wasJe: role === 'JE' && facts.filedReport === true,
     aeInScope,
@@ -85,8 +88,17 @@ export async function loadViewer(connection, user, ticket) {
   return buildViewer(user, ticket, facts);
 }
 
+/**
+ * Demo world rule: a demo viewer sees demo tickets only; a real viewer never sees a demo ticket,
+ * except the real Sysadmin (admin console). A ticket row without is_demo counts as real.
+ */
+const sameWorld = (viewer, ticket) => (viewer.isDemo
+  ? !!ticket.is_demo
+  : !ticket.is_demo || viewer.role === 'SYSADMIN');
+
 /** The role under which this viewer may see the ticket as STAFF, or null. */
 export function staffRole(viewer, ticket) {
+  if (!sameWorld(viewer, ticket)) return null;
   switch (viewer.role) {
     case 'SYSADMIN': case 'SE': case 'DEAN': case 'DIRECTOR':
       return viewer.role;
@@ -102,7 +114,7 @@ export function staffRole(viewer, ticket) {
 }
 
 export function canViewTicket(viewer, ticket) {
-  return viewer.isApplicant || staffRole(viewer, ticket) !== null;
+  return sameWorld(viewer, ticket) && (viewer.isApplicant || staffRole(viewer, ticket) !== null);
 }
 
 /** What each part of the matrix (§3.6) grants this viewer on this ticket. */
@@ -110,7 +122,7 @@ export function capabilities(viewer, ticket) {
   const staff = staffRole(viewer, ticket);
   const rank = staff ? (DESK_RANK[staff] ?? 0) : 0;
   return {
-    applicantView: viewer.isApplicant,
+    applicantView: viewer.isApplicant && sameWorld(viewer, ticket),
     staff,
     rank,
     identities: staff !== null,

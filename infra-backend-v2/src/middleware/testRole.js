@@ -6,9 +6,9 @@
 // real tickets. Fails closed:
 //   * header absent                                   -> no-op
 //   * MOCK_TESTING_ENABLED=false                      -> 403
-//   * real role is not SYSADMIN                       -> 403
+//   * real role is not SYSADMIN (or is a demo account) -> 403
 //   * unknown role in the header                      -> 400
-//   * ticket missing or not is_mock                   -> 403
+//   * ticket missing, not is_mock, or a demo ticket   -> 403
 //   * header on a route with no ticket id (queue,     -> 400
 //     desk, create, ...)
 // Every audit row is still written under the real Sysadmin's user id.
@@ -38,7 +38,7 @@ async function apply(req, res, next, mockLookupSql, id) {
 
   if (!mockTestingEnabled()) return deny(res, 403, 'Test mode is disabled.');
   const real = req.realUser ?? req.user;
-  if (!real || real.role !== 'SYSADMIN') return deny(res, 403, 'Test mode is for the Sysadmin only.');
+  if (!real || real.role !== 'SYSADMIN' || real.is_demo) return deny(res, 403, 'Test mode is for the Sysadmin only.');
   if (!TEST_ROLES.includes(role)) return deny(res, 400, `X-Test-Role must be one of ${TEST_ROLES.join(', ')}.`);
 
   try {
@@ -54,12 +54,12 @@ async function apply(req, res, next, mockLookupSql, id) {
 
 /** router.param('ticket_id', ...) handler. */
 export const testRoleForTicketParam = (req, res, next, ticketId) =>
-  apply(req, res, next, 'SELECT is_mock FROM tickets WHERE id = ?', ticketId);
+  apply(req, res, next, 'SELECT (is_mock AND NOT is_demo) AS is_mock FROM tickets WHERE id = ?', ticketId);
 
 /** router.param('id', ...) handler for /api/attachments/:id (the ticket comes from the attachment). */
 export const testRoleForAttachmentParam = (req, res, next, attachmentId) =>
   apply(req, res, next,
-    'SELECT t.is_mock FROM attachments a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
+    'SELECT (t.is_mock AND NOT t.is_demo) AS is_mock FROM attachments a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
 
 /** Router-level guard: the header is only meaningful under /:ticket_id/... */
 export const rejectStrayTestRole = (req, res, next) => {

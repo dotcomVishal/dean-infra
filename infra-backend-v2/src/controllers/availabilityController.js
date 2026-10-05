@@ -48,6 +48,13 @@ async function actorCoversTarget(connection, actorId, targetId) {
   return rows.length > 0;
 }
 
+/** A demo actor may only touch leave of demo accounts (never a real JE). */
+async function demoActorBlocked(req, targetUserId) {
+  if (!req.user.is_demo || targetUserId === req.user.id) return false;
+  const [rows] = await pool.query('SELECT is_demo FROM users WHERE id = ?', [targetUserId]);
+  return !rows[0]?.is_demo;
+}
+
 export const markLeave = async (req, res) => {
   const parsed = markLeaveSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -64,6 +71,9 @@ export const markLeave = async (req, res) => {
   const actorRole = req.user.role;
 
   try {
+    if (await demoActorBlocked(req, targetUserId)) {
+      return res.status(404).json({ success: false, message: 'Target user not found.' });
+    }
     if (targetUserId !== actorId) {
       // Only AE/SE/SYSADMIN may mark leave for someone else, and only for a JE.
       if (!['AE', 'SE', 'SYSADMIN'].includes(actorRole)) {
@@ -123,6 +133,9 @@ export const removeLeave = async (req, res) => {
     const targetUserId = rows[0].user_id;
     const actorId = req.user.id;
     const actorRole = req.user.role;
+    if (await demoActorBlocked(req, targetUserId)) {
+      return res.status(404).json({ success: false, message: 'Leave entry not found.' });
+    }
 
     if (targetUserId !== actorId) {
       if (!['AE', 'SE', 'SYSADMIN'].includes(actorRole)) {
@@ -150,6 +163,9 @@ export const listAvailability = async (req, res) => {
   try {
     // Case 1: asking about a specific other user.
     if (requestedUserId && requestedUserId !== actorId) {
+      if (await demoActorBlocked(req, requestedUserId)) {
+        return res.status(404).json({ success: false, message: 'Target user not found.' });
+      }
       if (!privileged) {
         return res.status(403).json({ success: false, message: 'You may only view your own leave.' });
       }
@@ -171,7 +187,9 @@ export const listAvailability = async (req, res) => {
         ? await pool.query(
             `SELECT a.id, a.user_id, u.name AS user_name, a.start_at, a.end_at, a.reason, a.created_by, a.created_at
                FROM user_availability a JOIN users u ON u.id = a.user_id
-              ORDER BY a.start_at DESC`
+              WHERE u.is_demo = ?
+              ORDER BY a.start_at DESC`,
+            [!!req.user.is_demo]
           )
         : await pool.query(
             `SELECT a.id, a.user_id, u.name AS user_name, a.start_at, a.end_at, a.reason, a.created_by, a.created_at

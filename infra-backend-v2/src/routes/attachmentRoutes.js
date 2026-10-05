@@ -2,6 +2,7 @@ import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { attachmentLimiter } from '../middleware/rateLimit.js';
 import { testRoleForAttachmentParam } from '../middleware/testRole.js';
+import { demoAttachmentParam } from '../middleware/demoWorld.js';
 import { downloadAttachment } from '../controllers/attachmentController.js';
 
 const router = express.Router();
@@ -11,6 +12,7 @@ const router = express.Router();
 router.use(requireAuth);
 router.use(attachmentLimiter);
 router.param('id', testRoleForAttachmentParam);
+router.param('id', demoAttachmentParam);
 router.get('/:id', downloadAttachment);
 
 export default router;

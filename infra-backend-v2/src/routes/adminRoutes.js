@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimit.js';
 import { requireRole } from '../middleware/rbac.js';
 import { requireMockTesting } from '../middleware/testRole.js';
+import { demoAdminGuard, demoTicketParam } from '../middleware/demoWorld.js';
 import {
   getAdminMetrics,
   getAllTickets,
@@ -31,6 +32,9 @@ const router = express.Router();
 router.use(requireAuth);
 router.use(userLimiter);
 router.use(requireRole(['SYSADMIN']));
+// A demo Sysadmin gets six read routes, limited to the demo world; everything else is 403.
+router.use(demoAdminGuard);
+router.param('ticket_id', demoTicketParam);
 
 // Overview & Metrics
 router.get('/metrics', getAdminMetrics);

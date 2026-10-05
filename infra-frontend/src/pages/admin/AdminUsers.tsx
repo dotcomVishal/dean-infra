@@ -5,6 +5,7 @@ import {
   CheckCircle2, XCircle
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 import { toast } from '../../store/toastStore';
 
 const ALL_USER_DEPARTMENTS = [
@@ -57,6 +58,7 @@ interface UserItem {
 }
 
 export default function AdminUsers() {
+  const isDemo = useAuthStore((s) => !!s.user?.is_demo); // the demo Sysadmin is read-only
   const [users, setUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -244,6 +246,7 @@ export default function AdminUsers() {
         </div>
 
         <div className="flex items-center gap-2">
+          {!isDemo && (
           <button
             onClick={() => setCreateUserModalOpen(true)}
             className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
@@ -251,6 +254,7 @@ export default function AdminUsers() {
             <PlusCircle size={15} />
             Create Account
           </button>
+          )}
           <button
             onClick={fetchUsers}
             disabled={loading}
@@ -364,6 +368,7 @@ export default function AdminUsers() {
                       {u.created_at ? format(new Date(u.created_at), 'dd MMM yyyy') : '—'}
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
+                      {!isDemo && (
                       <button
                         onClick={() => handleOpenEditUser(u)}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition"
@@ -371,6 +376,7 @@ export default function AdminUsers() {
                       >
                         <Edit3 size={15} />
                       </button>
+                      )}
                     </td>
                   </tr>
                 ))}

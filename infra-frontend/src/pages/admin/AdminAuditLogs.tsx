@@ -6,6 +6,7 @@ import {
   ExternalLink, Filter, ShieldAlert, CheckCircle, Clock, AlertTriangle, XCircle
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 
 interface AuditLogItem {
   id: number;
@@ -77,6 +78,7 @@ function DeletedTickets() {
 }
 
 export default function AdminAuditLogs() {
+  const isDemo = useAuthStore((s) => !!s.user?.is_demo); // no deleted-tickets tab for the read-only demo Sysadmin
   const [tab, setTab] = useState<'log' | 'deleted'>('log');
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -199,6 +201,7 @@ export default function AdminAuditLogs() {
         </button>
       </div>
 
+      {!isDemo && (
       <div className="flex gap-1 p-1 bg-slate-200/60 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 w-fit">
         {([['log', 'Audit log'], ['deleted', 'Deleted tickets']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
@@ -207,8 +210,9 @@ export default function AdminAuditLogs() {
           </button>
         ))}
       </div>
+      )}
 
-      {tab === 'deleted' ? <DeletedTickets /> : (<>
+      {tab === 'deleted' && !isDemo ? <DeletedTickets /> : (<>
       {/* Filter and Search Bar */}
       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-gray-200/80 dark:border-slate-700 shadow-sm space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">

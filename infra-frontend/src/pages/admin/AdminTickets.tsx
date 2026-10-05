@@ -6,6 +6,7 @@ import {
   RefreshCw, ShieldAlert, ArrowRight, X, Download, Filter as FilterIcon
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 import { toast } from '../../store/toastStore';
 import ReassignFields from '../../components/admin/ReassignFields';
 import { NO_REASSIGN, reassignBody, type ReassignValue } from '../../lib/reassign';
@@ -42,6 +43,7 @@ interface TicketItem {
 }
 
 export default function AdminTickets() {
+  const isDemo = useAuthStore((s) => !!s.user?.is_demo); // the demo Sysadmin is read-only
   const [tickets, setTickets] = useState<TicketItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -384,12 +386,14 @@ export default function AdminTickets() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap space-x-2">
+                      {!isDemo && (
                       <button
                         onClick={() => handleOpenOverride(t)}
                         className="px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs font-semibold hover:bg-amber-100 transition"
                       >
                         Override
                       </button>
+                      )}
                       <Link
                         to={`/admin/ticket/${t.id}`}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-semibold hover:bg-blue-100 transition"

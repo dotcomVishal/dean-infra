@@ -128,7 +128,7 @@ export async function previewDigestFor(connection, user, now = new Date()) {
 export async function queueWeeklyDigests({ now = new Date(), connection = pool } = {}) {
   const week = isoWeekKey(now);
   const [users] = await connection.query(
-    `SELECT id, name, email, role FROM users WHERE is_active = TRUE AND role IN (?) AND email NOT LIKE '%.invalid'`,
+    `SELECT id, name, email, role FROM users WHERE is_active = TRUE AND is_demo = FALSE AND role IN (?) AND email NOT LIKE '%.invalid'`,
     [DIGEST_ROLES]);
   const out = { queued: 0, skipped: 0 };
   for (const user of users) {

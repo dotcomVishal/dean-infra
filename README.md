@@ -51,3 +51,14 @@ Rollback: `git reset --hard <previous sha>` (printed in the deploy log), then `.
 
 - Uploaded files persist in `infra-backend-v2/uploads`.
 - MySQL data persists in the `mysql_data` named volume.
+
+## Demo login (stand-in for LDAP)
+
+The LDAP form on the login page signs in nine fixed demo accounts (`demo.applicant`, `demo.je`, `demo.ae`, `demo.se`, `demo.dean`, `demo.director`, `demo.clerical`, `demo.accountant`, `demo.sysadmin`). It is not real LDAP. A demo account only sees demo tickets, sends no mail, and cannot touch real tickets or users. The demo Sysadmin has the admin console read-only. Full design: `Agent/demo-plan.md`.
+
+- Off by default. To turn it on, add to the root `.env` on the server, then `docker compose restart backend`:
+  - `DEMO_LDAP_ENABLED=true`
+  - `DEMO_LDAP_PASSWORD=<12+ characters>` (one shared password, never commit it)
+- To turn it off, set `DEMO_LDAP_ENABLED=false` and restart. Demo accounts become inactive and demo sessions are signed out.
+- Demo tickets are kept between sessions (hidden while the switch is off). They use the same ticket number sequence as real tickets.
+- To delete the demo data for good: `docker compose exec backend npm run demo:reset -- --yes` (add `--purge-users` to remove the accounts too).

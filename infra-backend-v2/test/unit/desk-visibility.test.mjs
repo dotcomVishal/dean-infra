@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildViewer, buildTicketDetails, applicantTicket, filterAudit, staffRole,
+  buildViewer, buildTicketDetails, applicantTicket, filterAudit, staffRole, canViewTicket, capabilities,
 } from '../../src/services/visibility.js';
 import { availableActions } from '../../src/config/workflow.js';
 import { isPlaceholderEmail } from '../../src/utils/mailer.js';
@@ -71,4 +71,29 @@ test('isPlaceholderEmail matches only the reserved .invalid TLD', () => {
   assert.equal(isPlaceholderEmail('dean@campus.edu'), false);
   assert.equal(isPlaceholderEmail('invalid@campus.edu'), false);
   assert.equal(isPlaceholderEmail(null), false);
+});
+
+test('demo world: a demo viewer sees demo tickets only, a real viewer never sees one (except the real Sysadmin)', () => {
+  const real = { ...ticket, is_demo: 0 };
+  const demo = { ...ticket, is_demo: 1 };
+  const view = (user, t) => buildViewer(user, t);
+  for (const role of ['DEAN', 'SE', 'DIRECTOR', 'SYSADMIN']) {
+    const d = { id: 90, role, is_demo: 1 };
+    assert.equal(canViewTicket(view(d, demo), demo), true, `demo ${role} on demo`);
+    assert.equal(canViewTicket(view(d, real), real), false, `demo ${role} on real`);
+    assert.equal(capabilities(view(d, real), real).tenders, false, `demo ${role} tenders on real`);
+    const r = { id: 91, role };
+    assert.equal(canViewTicket(view(r, real), real), true, `real ${role} on real`);
+    assert.equal(canViewTicket(view(r, demo), demo), role === 'SYSADMIN', `real ${role} on demo`);
+  }
+  // A ticket row that carries no is_demo field counts as real.
+  const bare = { ...ticket }; delete bare.is_demo;
+  assert.equal(canViewTicket(view({ id: 90, role: 'DEAN', is_demo: 1 }, bare), bare), false);
+  // A demo AE has no scopes: the demo world is its scope.
+  const ae = { id: 92, role: 'AE', department: 'Civil', is_demo: 1 };
+  assert.equal(canViewTicket(view(ae, { ...demo, department: 'Electrical', current_desk_user_id: 5 }), { ...demo, department: 'Electrical', current_desk_user_id: 5 }), true);
+  // A demo applicant sees only their own demo ticket; never a real one.
+  const app = { id: 1, role: 'APPLICANT', is_demo: 1 };
+  assert.equal(canViewTicket(view(app, demo), demo), true);
+  assert.equal(canViewTicket(view(app, real), real), false);
 });

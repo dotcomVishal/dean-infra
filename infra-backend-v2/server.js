@@ -5,6 +5,7 @@ import pool from './src/config/db.js'; // This triggers the database connection 
 import { runMigrations } from './src/config/migrate.js';
 import { logDeskHealth } from './src/services/deskHealth.js';
 import { reconcileDeskOwners } from './src/models/deskModel.js';
+import { syncDemoAccounts } from './src/config/demo.js';
 import { startEmailWorker } from './src/cron/emailReminders.js';
 import { sweepTempUploads } from './src/utils/fileManager.js';
 import { purgeTrash } from './src/services/ticketDeletion.js';
@@ -24,6 +25,9 @@ const PORT = process.env.PORT || 5000;
     logger.error('migration startup failed', errorFields(err));
     process.exit(1);
   }
+
+  // Demo accounts follow DEMO_LDAP_ENABLED. Never fatal: a failure only leaves demo login unavailable.
+  await syncDemoAccounts(pool);
 
   try {
     await logDeskHealth(pool);

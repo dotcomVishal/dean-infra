@@ -22,29 +22,34 @@ import { CSV_BOM, csvRow } from '../utils/csv.js';
 import logger, { errorFields } from '../utils/logger.js';
 import { kickOutbox } from '../cron/emailReminders.js';
 import { sendServerError, sendWorkflowError } from '../utils/httpError.js';
+import { worldClause, userWorldClause } from '../config/demo.js';
 
 // 1. System Overview Metrics
 export const getAdminMetrics = async (req, res) => {
+  const tw = worldClause(req.user, 't.');   // tickets world: real (not mock) or demo
+  const tw0 = worldClause(req.user, '');
+  const uw = userWorldClause(req.user, 'u.');
+  const uw0 = userWorldClause(req.user, '');
   try {
     // Ticket status counts
     const [statusCounts] = await pool.query(`
-      SELECT status, COUNT(*) as count FROM tickets WHERE is_mock = FALSE GROUP BY status
+      SELECT status, COUNT(*) as count FROM tickets WHERE ${tw0} GROUP BY status
     `);
 
     // Department counts
     const [deptCounts] = await pool.query(`
-      SELECT department, COUNT(*) as count FROM tickets WHERE is_mock = FALSE GROUP BY department
+      SELECT department, COUNT(*) as count FROM tickets WHERE ${tw0} GROUP BY department
     `);
 
     // Work type counts
     const [typeCounts] = await pool.query(`
-      SELECT type, COUNT(*) as count FROM tickets WHERE is_mock = FALSE GROUP BY type
+      SELECT type, COUNT(*) as count FROM tickets WHERE ${tw0} GROUP BY type
     `);
 
     // User counts by role
     const [userRoleCounts] = await pool.query(`
       SELECT role, COUNT(*) as count, SUM(CASE WHEN is_active = TRUE THEN 1 ELSE 0 END) as active_count 
-      FROM users GROUP BY role
+      FROM users WHERE ${uw0} GROUP BY role
     `);
 
     // Financial estimates sum: all estimates vs approved
@@ -53,7 +58,7 @@ export const getAdminMetrics = async (req, res) => {
       FROM reports r
       JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
       JOIN tickets t ON t.id = r.ticket_id
-      WHERE t.is_mock = FALSE
+      WHERE ${tw}
     `);
 
     // Approved work: the award amount where there is one, else the JE's estimate (per ticket).
@@ -64,22 +69,22 @@ export const getAdminMetrics = async (req, res) => {
       LEFT JOIN ${LATEST_REPORT} r ON r.ticket_id = t.id
       LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
       WHERE t.status IN (?)
-        AND t.is_mock = FALSE
+        AND ${tw}
     `, [POST_APPROVAL]);
 
     // JE Workloads
     const [jeWorkloads] = await pool.query(`
       SELECT u.id, u.name as full_name, u.email, u.department, COUNT(t.id) as active_tickets_count
       FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN (?) AND t.is_mock = FALSE
-      WHERE u.role = 'JE' AND u.is_active = TRUE
+      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN (?) AND ${tw}
+      WHERE u.role = 'JE' AND u.is_active = TRUE AND ${uw}
       GROUP BY u.id, u.name, u.email, u.department
       ORDER BY active_tickets_count DESC
     `, [TERMINAL]);
 
     // Total ticket count
-    const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM tickets WHERE is_mock = FALSE`);
-    const [totalUsersRow] = await pool.query(`SELECT COUNT(*) as total FROM users`);
+    const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM tickets WHERE ${tw0}`);
+    const [totalUsersRow] = await pool.query(`SELECT COUNT(*) as total FROM users WHERE ${uw0}`);
 
     // Calculate stage groups
     let pendingInspection = 0;
@@ -101,10 +106,10 @@ export const getAdminMetrics = async (req, res) => {
       }
     }
 
-    const deskHealth = await checkSingleHolders(pool);
+    const deskHealth = req.user?.is_demo ? undefined : await checkSingleHolders(pool);
     const [[selfRow]] = await pool.query(`
       SELECT COUNT(*) AS n FROM audit_logs a JOIN tickets t ON t.id = a.ticket_id
-       WHERE a.is_self_action = TRUE AND t.is_mock = FALSE AND a.created_at >= NOW() - INTERVAL 30 DAY
+       WHERE a.is_self_action = TRUE AND ${tw} AND a.created_at >= NOW() - INTERVAL 30 DAY
     `);
 
     const byDepartment = deptCounts.map(d => ({ department: d.department, count: Number(d.count) }));
@@ -154,7 +159,7 @@ const filterError = (res, errors) => res.status(400).json({
   success: false, code: 'INVALID_FILTER', message: 'A filter value is not valid.', errors });
 
 export const getAllTickets = async (req, res) => {
-  const filter = buildAdminTicketFilter(req.query);
+  const filter = buildAdminTicketFilter(req.query, req.user);
   if (!filter.ok) return filterError(res, filter.errors);
   const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limitNum = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 25));
@@ -192,7 +197,7 @@ const EXPORT_HEADER = [
 ];
 
 export const exportTickets = async (req, res) => {
-  const filter = buildAdminTicketFilter(req.query);
+  const filter = buildAdminTicketFilter(req.query, req.user);
   if (!filter.ok) return filterError(res, filter.errors);
 
   try {
@@ -501,7 +506,7 @@ export const getStaff = async (req, res) => {
               EXISTS (SELECT 1 FROM user_availability a
                        WHERE a.user_id = u.id AND NOW() BETWEEN a.start_at AND a.end_at) AS on_leave
          FROM users u
-        WHERE u.role = ? AND u.is_active = TRUE
+        WHERE u.role = ? AND u.is_active = TRUE AND u.is_demo = FALSE
         ORDER BY scope_match DESC, on_leave ASC, open_tickets ASC, u.name ASC`,
       [...loadParams, department ?? null, campus ?? null, campus ?? null, role]
     );
@@ -530,7 +535,7 @@ export const getAllUsers = async (req, res) => {
   let query = `
     SELECT id, firebase_uid, name, email, role, department, phone, is_active, created_at 
     FROM users 
-    WHERE 1=1
+    WHERE ${userWorldClause(req.user, '')}
   `;
   const params = [];
 
@@ -569,7 +574,7 @@ const SINGLETON_ROLES = ['DEAN', 'DIRECTOR'];
 // (e.g. a Civil AE who also runs Horticulture). Then stale desk owners are healed.
 async function syncStaffRouting(connection, userId, scopes) {
   const [[u]] = await connection.query(
-    'SELECT id, role, department, campus, is_active FROM users WHERE id = ?', [userId]);
+    'SELECT id, role, department, campus, is_active, is_demo FROM users WHERE id = ?', [userId]);
   if (SCOPED_ROLES.includes(u.role)) {
     if (scopes) await connection.query('DELETE FROM user_scopes WHERE user_id = ?', [userId]);
     const all = [...(u.campus ? [{ department: u.department, campus: u.campus }] : []), ...(scopes || [])];
@@ -580,8 +585,8 @@ async function syncStaffRouting(connection, userId, scopes) {
     }
   }
   // Dean/Director are singleton desks: a real account replaces the dummy seed.
-  if (SINGLETON_ROLES.includes(u.role) && u.is_active) {
-    await connection.query('UPDATE users SET is_active = FALSE WHERE role = ? AND id <> ?', [u.role, userId]);
+  if (SINGLETON_ROLES.includes(u.role) && u.is_active && !u.is_demo) {
+    await connection.query('UPDATE users SET is_active = FALSE WHERE role = ? AND id <> ? AND is_demo = FALSE', [u.role, userId]);
   }
   await reconcileDeskOwners(connection);
 }
@@ -652,6 +657,10 @@ export const updateUser = async (req, res) => {
 
   const connection = await pool.getConnection();
   try {
+    const [target] = await connection.query('SELECT is_demo FROM users WHERE id = ?', [id]);
+    if (target[0]?.is_demo) {
+      return res.status(403).json({ success: false, message: 'Demo accounts are managed by the server.' });
+    }
     const bad = validateStaffInput({ campus, scopes });
     if (bad) return res.status(400).json({ success: false, message: bad });
 
@@ -729,7 +738,8 @@ export const getMasterAuditLogs = async (req, res) => {
     params.push(ticket_id);
   }
   if (self_only === '1') query += ` AND a.is_self_action = TRUE`;
-  if (include_mock !== '1') query += ` AND t.is_mock = FALSE`;
+  if (req.user?.is_demo) query += ` AND t.is_demo = TRUE`;
+  else if (include_mock !== '1') query += ` AND t.is_mock = FALSE`;
 
   query += ` ORDER BY a.created_at DESC LIMIT ? OFFSET ?`;
   params.push(parseInt(limit, 10), offset);
@@ -749,7 +759,7 @@ export const getActiveJes = async (req, res) => {
       SELECT u.id, u.name, u.email, u.department, COUNT(t.id) as active_tickets
       FROM users u
       LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED') AND t.is_mock = FALSE
-      WHERE u.role = 'JE' AND u.is_active = TRUE
+      WHERE u.role = 'JE' AND u.is_active = TRUE AND u.is_demo = FALSE
       GROUP BY u.id, u.name, u.email, u.department
       ORDER BY u.department, u.name
     `);
@@ -773,9 +783,9 @@ const removeTicketFiles = (ticketId) => {
 
 // Locks a ticket and refuses anything that is not a test ticket.
 async function lockMockTicket(connection, ticketId) {
-  const [rows] = await connection.query('SELECT id, is_mock FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+  const [rows] = await connection.query('SELECT id, is_mock, is_demo FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
   if (rows.length === 0) throw new WorkflowError(`Ticket #${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
-  if (!rows[0].is_mock) {
+  if (!rows[0].is_mock || rows[0].is_demo) { // demo tickets belong to the demo world, not to this page
     throw new WorkflowError('Only test tickets can be changed here.', { code: 'NOT_A_TEST_TICKET', status: 403 });
   }
 }
@@ -794,7 +804,7 @@ const testAudit = (connection, ticketId, adminId, remarks) => insertAudit(connec
 export const listTestTickets = async (req, res) => {
   try {
     const [tickets] = await pool.query(
-      `SELECT id, title, department, campus, status, created_at FROM tickets WHERE is_mock = TRUE ORDER BY id DESC LIMIT 50`);
+      `SELECT id, title, department, campus, status, created_at FROM tickets WHERE is_mock = TRUE AND is_demo = FALSE ORDER BY id DESC LIMIT 50`);
     res.json({ success: true, tickets });
   } catch (error) {
     return sendServerError(req, res, error, 'listTestTickets error');

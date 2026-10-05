@@ -47,7 +47,7 @@ export async function pickAvailableJe(connection, { department, campus, applican
   const [candidates] = await connection.query(
     `SELECT u.id
        FROM users u
-      WHERE u.role = 'JE' AND u.is_active = TRUE
+      WHERE u.role = 'JE' AND u.is_active = TRUE AND u.is_demo = FALSE
         AND EXISTS (
           SELECT 1 FROM user_scopes s
            WHERE s.user_id = u.id AND s.department = ? AND s.campus IN (?, 'BOTH')

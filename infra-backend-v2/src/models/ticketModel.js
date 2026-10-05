@@ -1,7 +1,7 @@
 /** tickets table access for the workflow. Rules live in config/workflow.js. */
 
 const COLUMNS = `id, status, department, campus, applicant_id, assigned_je_id, assigned_ae_id, assigned_se_id,
-  is_mock, current_desk_user_id, open_change_request_id`;
+  is_mock, is_demo, current_desk_user_id, open_change_request_id`;
 
 export async function lockById(connection, ticketId) {
   const [rows] = await connection.query(`SELECT ${COLUMNS} FROM tickets WHERE id = ? FOR UPDATE`, [ticketId]);

@@ -51,10 +51,11 @@ const IST_TO_SESSION = "CONVERT_TZ(?, '+05:30', @@session.time_zone)";
 
 /**
  * @param {object} query  req.query
+ * @param {object} [viewer] req.user; a demo viewer sees demo tickets only and include_mock is ignored
  * @returns {{ ok: true, whereSql: string, params: any[], filters: object } | { ok: false, errors: Array<{path:string, message:string}> }}
  * `whereSql` starts with "WHERE 1=1" and expects the aliases t (tickets) and u_app (applicant).
  */
-export function buildAdminTicketFilter(query) {
+export function buildAdminTicketFilter(query, viewer = null) {
   const parsed = schema.safeParse(query ?? {});
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) };
@@ -63,7 +64,8 @@ export function buildAdminTicketFilter(query) {
   const clauses = [];
   const params = [];
 
-  if (!f.include_mock) clauses.push('t.is_mock = FALSE');
+  if (viewer?.is_demo) clauses.push('t.is_demo = TRUE');
+  else if (!f.include_mock) clauses.push('t.is_mock = FALSE');
   if (f.status) { clauses.push('t.status IN (?)'); params.push(f.status); }
   for (const col of ['department', 'campus', 'priority', 'type']) {
     if (f[col]) { clauses.push(`t.${col} = ?`); params.push(f[col]); }

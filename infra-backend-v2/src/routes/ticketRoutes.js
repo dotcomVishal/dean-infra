@@ -28,6 +28,8 @@ import {
   loadViewer, canViewTicket, staffRole, capabilities, applicantTicket, buildTicketDetails,
 } from '../services/visibility.js';
 import { sendServerError } from '../utils/httpError.js';
+import { worldClause } from '../config/demo.js';
+import { demoTicketParam, demoBillParam } from '../middleware/demoWorld.js';
 import { LATEST_REPORT, AWARDED_TENDER, EFFECTIVE_AMOUNT } from '../models/amountsModel.js';
 
 const router = express.Router();
@@ -39,6 +41,8 @@ router.use(userLimiter);
 // Sysadmin "act as" on mock tickets only (plan2.md F5). Runs before any route-level requireRole.
 router.use(rejectStrayTestRole);
 router.param('ticket_id', testRoleForTicketParam);
+router.param('ticket_id', demoTicketParam); // a demo account only ever reaches demo tickets
+router.param('bill_id', demoBillParam);
 
 // 1.5 Applicant Dashboard (Fetch tickets created by this specific user)
 // W15: "My tickets" is open to every authenticated, active role -- being the
@@ -46,7 +50,7 @@ router.param('ticket_id', testRoleForTicketParam);
 router.get('/applicant', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT * FROM tickets WHERE applicant_id = ? AND is_mock = FALSE ORDER BY created_at DESC`,
+      `SELECT * FROM tickets WHERE applicant_id = ? AND ${worldClause(req.user, '')} ORDER BY created_at DESC`,
       [req.user.id]
     );
     // Applicant view: no assignee / desk-owner ids, stage in plain words (Q11).
@@ -151,7 +155,7 @@ router.get(
     try {
       const [ticketRows] = await pool.query(
         `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
-                is_mock, current_desk_user_id
+                is_mock, is_demo, current_desk_user_id
            FROM tickets WHERE id = ?`,
         [ticket_id]
       );
@@ -195,7 +199,7 @@ router.get(
     try {
       const [ticketRows] = await pool.query(
         `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
-                is_mock, current_desk_user_id
+                is_mock, is_demo, current_desk_user_id
            FROM tickets WHERE id = ?`,
         [ticket_id]
       );
