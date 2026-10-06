@@ -86,6 +86,10 @@ function TicketRow({ t, mode, now }: { t: Row; mode: TabKey; now: number }) {
   );
 }
 
+// The last desk answer, kept in memory only and per user, so a revisit shows the board at once
+// and refreshes in the background. Never storage (shared PCs), never shared between users.
+let lastBoard: { userId: number | undefined; data: Board } | null = null;
+
 /**
  * Role dashboard body: My desk (with SLA ageing colours), Watching, My tickets.
  * The AE's My desk includes the UNASSIGNED queue (the API puts it there).
@@ -94,16 +98,17 @@ function TicketRow({ t, mode, now }: { t: Row; mode: TabKey; now: number }) {
 export default function DeskBoard({ allWorks }: { allWorks?: string }) {
   const role = useAuthStore((s) => s.user?.role) ?? 'APPLICANT';
   const isStaff = role !== 'APPLICANT';
-  const [board, setBoard] = useState<Board | null>(null);
+  const userId = useAuthStore((s) => s.user?.id);
+  const [board, setBoard] = useState<Board | null>(() => (lastBoard && lastBoard.userId === userId ? lastBoard.data : null));
   const [all, setAll] = useState<Row[] | null>(null);
   const [tab, setTab] = useState<TabKey>(isStaff ? 'desk' : 'mine');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(board === null);
   const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await api.get('/tickets/desk');
+      lastBoard = { userId, data: res.data };
       setBoard(res.data);
       setNow(Date.now());
     } catch (err) {
@@ -111,7 +116,7 @@ export default function DeskBoard({ allWorks }: { allWorks?: string }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
@@ -174,7 +179,7 @@ export default function DeskBoard({ allWorks }: { allWorks?: string }) {
             </button>
           ))}
         </div>
-        <button onClick={load} aria-label="Refresh" className="rounded-xl bg-slate-100 p-2.5 text-slate-700 transition hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">
+        <button onClick={() => { setLoading(true); load(); }} aria-label="Refresh" className="rounded-xl bg-slate-100 p-2.5 text-slate-700 transition hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>

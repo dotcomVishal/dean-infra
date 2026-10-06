@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Suspense, useState, useEffect } from 'react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { 
@@ -10,7 +10,7 @@ import {
 import PwaInstallPrompt from './PwaInstallPrompt';
 import { deskLabel } from '../lib/ticketUi';
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
@@ -81,7 +81,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-900 flex flex-col font-sans transition-colors duration-200">
       
       {/* TOP NAVBAR */}
-      <header className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 sticky top-0 z-50 transition-colors pt-[env(safe-area-inset-top,0px)] h-[calc(4rem+env(safe-area-inset-top,0px))]">
+      <header className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 sticky top-0 z-50 transition-colors pt-[env(safe-area-inset-top,0px)] h-[calc(4rem+env(safe-area-inset-top,0px))]">
         <div className="flex items-center gap-3">
           <button 
             onClick={() => window.innerWidth < 768 ? setIsMobileMenuOpen(true) : setIsDesktopCollapsed(!isDesktopCollapsed)}
@@ -89,10 +89,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           >
             <Menu size={20} />
           </button>
-          <div className="flex flex-col">
-            <span className="text-[11px] font-black tracking-widest uppercase text-blue-600 dark:text-blue-400 leading-none mb-0.5">IIT Mandi</span>
-            <span className="text-sm md:text-base font-semibold text-slate-900 dark:text-slate-100 leading-none">Deanery of Infrastructure</span>
-          </div>
+          <img src="/logo.png" width={640} height={437} alt="IIT Mandi"
+               className="h-9 w-auto shrink-0 rounded-md bg-white p-0.5" />
+          <span className="text-[13px] md:text-base font-semibold leading-tight text-slate-900 dark:text-slate-100">
+            Maintenance and <br className="md:hidden" />Ticket Raising
+          </span>
         </div>
         
         <div className="flex items-center gap-1 md:gap-2">
@@ -166,7 +167,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* MAIN CONTENT */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 w-full flex flex-col">
-          {children}
+          <Suspense fallback={<div className="flex flex-1 items-center justify-center py-24"><div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" role="status" aria-label="Loading" /></div>}>
+            <Outlet />
+          </Suspense>
           <footer className="mt-auto pt-12 pb-4 text-center text-xs font-medium text-slate-400 dark:text-slate-500">
             © {new Date().getFullYear()} IIT Mandi · Deanery of Infrastructure
           </footer>
@@ -174,7 +177,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* MOBILE BOTTOM NAV */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl border-t border-gray-200/50 dark:border-slate-700/50 flex justify-around p-2 pb-safe shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.1)] z-40">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-slate-700/50 flex justify-around p-2 pb-safe shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.1)] z-40">
         {navLinks.slice(0, 4).map((link) => {
           const Icon = link.icon;
           const isActive = location.pathname === link.path;

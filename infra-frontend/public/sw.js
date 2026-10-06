@@ -1,13 +1,14 @@
 // IIT Mandi Deanery of Infrastructure Service Worker
-// v2.0.4: tender stages moved to /tender-stage and /resolve (old endpoints answer 410). Bumping the name makes activate() delete every older cache (v2.0.3: form lost category and building; v2.0.2: private attachments, S14).
-const CACHE_NAME = 'dean-infra-v2.0.4';
+// v2.0.5: new logo and icon set, logo.png and favicon.ico pre-cached, manifest.json removed. v2.0.4: tender stages moved to /tender-stage and /resolve (old endpoints answer 410). Bumping the name makes activate() delete every older cache (v2.0.3: form lost category and building; v2.0.2: private attachments, S14).
+const CACHE_NAME = 'dean-infra-v2.0.5';
 
 const CORE_ASSETS = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/manifest.json',
   '/favicon.png',
+  '/favicon.ico',
+  '/logo.png',
   '/pwa-192x192.png',
   '/pwa-512x512.png',
   '/pwa-maskable-512x512.png',

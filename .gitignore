@@ -25,6 +25,9 @@ firebase-adminsdk*.json
 !**/uploads/.gitkeep
 !/uploads/.gitkeep
 
+# ---- Local scratch output (npm run email:preview) ----
+tmp/
+
 # ---- Build output ----
 dist/
 build/

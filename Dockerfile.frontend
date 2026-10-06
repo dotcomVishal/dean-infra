@@ -2,6 +2,9 @@ FROM node:22-alpine AS build
 
 WORKDIR /app/frontend
 
+COPY infra-frontend/package*.json /app/frontend/
+RUN npm ci
+
 COPY infra-frontend/ /app/frontend/
 
 ARG VITE_API_URL
@@ -20,7 +23,6 @@ ENV VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}
 ENV VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}
 ENV VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}
 
-RUN npm install
 RUN npm run build
 
 FROM nginx:alpine

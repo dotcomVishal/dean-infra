@@ -15,6 +15,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { toast } from '../../store/toastStore';
 import { errorMessage } from '../../lib/ticketUi';
+import { shrinkAll } from '../../lib/shrinkImage';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -122,7 +123,7 @@ export default function JeRaiseTicket() {
       formData.append('lng', String(coordinates.lng));
     }
 
-    files.forEach((file) => formData.append('files', file));
+    for (const f of await shrinkAll(files)) formData.append('files', f);
 
     try {
       const response = await api.post('/tickets', formData, {

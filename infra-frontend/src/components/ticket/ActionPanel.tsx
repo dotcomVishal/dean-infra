@@ -7,6 +7,7 @@ import { DESK_RANK, deskLabel, errorMessage, inr, visibleDesks } from '../../lib
 import type { AvailableAction, TicketDetail } from './types';
 import ReportForm from './ReportForm';
 import { checkFiles, loadUploadLimits, type UploadLimits } from '../../lib/uploadLimits';
+import { shrinkAll } from '../../lib/shrinkImage';
 
 // Must match the API allow-list (middleware/upload.js).
 const FILE_ACCEPT = '.jpg,.jpeg,.png,.webp,.heic,.pdf,.xlsx,.docx';
@@ -156,7 +157,7 @@ export default function ActionPanel({ ticket, onDone }: { ticket: TicketDetail; 
       const fd = new FormData();
       Object.entries(payload).forEach(([k, v]) => fd.append(k, String(v)));
       if (restricted) fd.append('restricted_files', 'true');
-      files.forEach((f) => fd.append('files', f));
+      for (const f of await shrinkAll(files)) fd.append('files', f);
       body = fd;
     }
 

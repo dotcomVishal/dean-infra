@@ -38,8 +38,8 @@ test('reassigning the JE at a JE stage mails the old JE and the new JE, and rest
   await override(admin, id, { remarks: 'cover', reassign: { desk: 'JE', user_id: newJe } });
   const rows = await mails(id);
   assert.deepEqual(rows.map((r) => `${r.to_user_id}/${r.kind}`).sort(), [`${newJe}/REMINDER`, `${oldJe}/EMAIL`].sort());
-  assert.match(rows.find((r) => r.to_user_id === oldJe).subject, /Reassigned$/);
-  assert.match(rows.find((r) => r.to_user_id === newJe).subject, /Assigned to you$/);
+  assert.match(rows.find((r) => r.to_user_id === oldJe).subject, /Reassigned to another engineer$/);
+  assert.match(rows.find((r) => r.to_user_id === newJe).subject, /Assigned to you for inspection$/);
 
   // Same JE again: no mail at all.
   const before = (await mails(id)).length;
@@ -81,8 +81,43 @@ test('a ticket with no available JE mails the AE once and starts no reminder ser
     const rows = await mails(id);
     assert.deepEqual(rows.map((r) => r.kind).sort(), ['EMAIL', 'EMAIL']);          // AE arrival + applicant "received"
     assert.equal(rows.filter((r) => r.kind === 'REMINDER').length, 0);
-    assert.ok(rows.some((r) => /Needs a JE$/.test(r.subject)));
-    assert.ok(rows.some((r) => /Received$/.test(r.subject)));
+    assert.ok(rows.some((r) => /No engineer assigned, please assign$/.test(r.subject)));
+    assert.ok(rows.some((r) => /Request received$/.test(r.subject)));
+  } finally {
+    await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [id]);
+    await pool.query('DELETE FROM mnt_user_availability WHERE created_by = ?', [ae]);
+  }
+});
+
+test('a ticket raised with a free JE tells the JE, the AE (for information) and the applicant, each with an HTML part', async () => {
+  const applicant = await makeUser({ role: 'APPLICANT' });
+  const ae = await makeUser({ role: 'AE' }); await civilScope(ae);
+  const [jes] = await pool.query(
+    "SELECT DISTINCT u.id FROM mnt_users u JOIN mnt_user_scopes s ON s.user_id = u.id WHERE u.role = 'JE' AND u.is_active = TRUE AND s.department = 'Civil' AND s.campus IN ('NORTH','BOTH')");
+  for (const j of jes) await putOnLeave(j.id, ae);
+  const je = await makeUser({ role: 'JE' }); await civilScope(je);
+  const res = fakeRes();
+  await createTicket({
+    user: { id: applicant, role: 'APPLICANT', name: 'CI A', email: 'a@test.local' },
+    body: { department: 'Civil', campus: 'NORTH', description: 'x', landmark: 'gate', contact_phone: '9999999999' },
+  }, res);
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  const id = res.body.ticket_id;
+  try {
+    assert.equal(res.body.status, 'ASSIGNED_TO_JE');
+    const [rows] = await pool.query(
+      `SELECT n.to_user_id, n.kind, n.subject, n.body_html, u.role FROM mnt_notifications n JOIN mnt_users u ON u.id = n.to_user_id
+        WHERE n.ticket_id = ? ORDER BY n.id`, [id]);
+    const by = (role) => rows.filter((r) => r.role === role);
+    assert.equal(by('JE').length, 1);
+    assert.equal(by('JE')[0].kind, 'REMINDER');
+    assert.match(by('JE')[0].subject, /Assigned to you for inspection$/);
+    assert.equal(by('AE').length, 1);
+    assert.equal(by('AE')[0].kind, 'EMAIL');
+    assert.match(by('AE')[0].subject, /New request in your area$/);
+    assert.equal(by('APPLICANT').length, 1);
+    assert.match(by('APPLICANT')[0].subject, /Request received$/);
+    assert.ok(rows.every((r) => r.body_html?.startsWith('<!doctype html>')), 'every row carries the HTML part');
   } finally {
     await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [id]);
     await pool.query('DELETE FROM mnt_user_availability WHERE created_by = ?', [ae]);

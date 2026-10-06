@@ -21,7 +21,7 @@ import { deliverEmail, isPlaceholderEmail } from '../utils/mailer.js';
 import * as notificationModel from '../models/notificationModel.js';
 import { insertAudit } from '../models/auditModel.js';
 import { reminderDueAt } from '../services/notifier.js';
-import { jeReminderEmail } from '../services/emailTemplates.js';
+import { build } from '../services/emailTemplates.js';
 import { remindersAllowed } from '../services/emailPolicy.js';
 import { startWeeklyDigest } from './weeklyDigest.js';
 
@@ -54,6 +54,7 @@ async function sendOne(row, { now, send }) {
   const isReminder = row.kind === 'REMINDER';
   let subject = row.subject;
   let body = row.body;
+  let html = row.body_html ?? undefined; // rows queued before migration 002 have no HTML part
   const number = row.reminder_no + 1;
   let ticket = null;
 
@@ -64,8 +65,9 @@ async function sendOne(row, { now, send }) {
       return 'cancelled';
     }
     if (number > 1) {
-      ({ subject, body } = jeReminderEmail({
-        ticketId: ticket.id, number, hoursPending: Math.floor((now - new Date(row.anchor_at)) / HOUR),
+      ({ subject, body, html } = build('je/reminder', {
+        id: ticket.id, name: row.to_name, title: ticket.title, number,
+        hours: Math.floor((now - new Date(row.anchor_at)) / HOUR),
       }));
     }
   } else if (!row.to_active) {
@@ -75,7 +77,7 @@ async function sendOne(row, { now, send }) {
   }
 
   try {
-    await send({ to: row.to_email, subject, text: body });
+    await send({ to: row.to_email, subject, text: body, html });
   } catch (err) {
     const attempts = row.attempts + 1;
     const giveUp = attempts >= MAX_ATTEMPTS;

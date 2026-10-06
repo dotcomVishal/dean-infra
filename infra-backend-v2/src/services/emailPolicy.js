@@ -6,7 +6,9 @@
 //
 //    JE                    instant event mail, recurring reminders
 //    AE, SE, Dean          ONE mail when a ticket arrives on their desk (never
-//                          repeated), plus the weekly digest
+//                          repeated), plus the weekly digest. The AE also gets one
+//                          information mail when a ticket is raised in the area
+//                          and a JE is assigned automatically
 //    Clerical, Accountant  weekly digest only
 //    Director, Sysadmin    nothing automated
 //    Applicant (creator)   received / resolved / rejected / closed only
@@ -22,8 +24,11 @@ export const EVENT = Object.freeze({
   APPROVED: 'APPROVED',
   REJECTED_JE: 'REJECTED_JE',
   APPLICANT_SENT_BACK: 'APPLICANT_SENT_BACK',
+  JE_TICKET_CLOSED: 'JE_TICKET_CLOSED',
   // AE / SE / Dean: a ticket landed on the desk
   ARRIVAL: 'ARRIVAL',
+  // AE: a ticket was raised in the area and a JE was assigned automatically (information only)
+  NEW_TICKET_INFO: 'NEW_TICKET_INFO',
   // Applicant (ticket creator, whatever their role)
   RECEIVED: 'RECEIVED',
   RESOLVED: 'RESOLVED',
@@ -33,14 +38,14 @@ export const EVENT = Object.freeze({
 
 const JE_EVENTS = [
   EVENT.JE_ASSIGNED, EVENT.JE_REASSIGNED_TO, EVENT.JE_REASSIGNED_AWAY, EVENT.CHANGES_REQUESTED,
-  EVENT.APPROVED, EVENT.REJECTED_JE, EVENT.APPLICANT_SENT_BACK,
+  EVENT.APPROVED, EVENT.REJECTED_JE, EVENT.APPLICANT_SENT_BACK, EVENT.JE_TICKET_CLOSED,
 ];
 const APPLICANT_EVENTS = [EVENT.RECEIVED, EVENT.RESOLVED, EVENT.REJECTED, EVENT.CLOSED];
 const none = Object.freeze({ events: new Set(), reminders: false, digest: false });
 
 export const POLICY = Object.freeze({
   JE:         { events: new Set(JE_EVENTS), reminders: true, digest: false },
-  AE:         { events: new Set([EVENT.ARRIVAL]), reminders: false, digest: true },
+  AE:         { events: new Set([EVENT.ARRIVAL, EVENT.NEW_TICKET_INFO]), reminders: false, digest: true },
   SE:         { events: new Set([EVENT.ARRIVAL]), reminders: false, digest: true },
   DEAN:       { events: new Set([EVENT.ARRIVAL]), reminders: false, digest: true },
   CLERICAL:   { events: new Set(), reminders: false, digest: true },
@@ -74,7 +79,7 @@ export async function queueFor(connection, { ticketId, user, kind, event, email,
   if (!allows(recipientKind, event)) return null;
   return notificationModel.insertEmail(connection, {
     ticketId, toUserId: user.id, audience: recipientKind === 'APPLICANT' ? 'APPLICANT' : 'STAFF',
-    subject: email.subject, body: email.body, dueAt: now,
+    subject: email.subject, body: email.body, html: email.html, dueAt: now,
   });
 }
 
@@ -88,7 +93,7 @@ export async function startReminders(connection, { ticketId, user, email, stopSt
   const role = user ? await roleOf(connection, user) : null;
   if (!user || !remindersAllowed(role)) return null;
   return notificationModel.insertReminder(connection, {
-    ticketId, toUserId: user.id, desk: 'JE', subject: email.subject, body: email.body,
+    ticketId, toUserId: user.id, desk: 'JE', subject: email.subject, body: email.body, html: email.html,
     anchor, dueAt: firstDueAt, stopStatuses, audience: 'STAFF',
   });
 }

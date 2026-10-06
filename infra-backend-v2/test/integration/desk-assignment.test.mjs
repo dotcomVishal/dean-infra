@@ -485,7 +485,7 @@ test('no JE available: UNASSIGNED at the AE, then the AE assigns', async () => {
     assert.match(assigned.remarks, /no available JE for Civil\/NORTH/);
 
     const [mail] = await pool.query('SELECT subject FROM mnt_notifications WHERE ticket_id = ?', [out.ticket_id]);
-    assert.ok(mail.some((r) => /Needs a JE/.test(r.subject)), JSON.stringify(mail.map((r) => r.subject)));
+    assert.ok(mail.some((r) => /No engineer assigned/.test(r.subject)), JSON.stringify(mail.map((r) => r.subject)));
 
     for (const fn of undo) await fn();
     const aeUser = await userRow(expectedAe);

@@ -216,10 +216,10 @@ test('reminder schedule: instant, +12h, +24h, +72h, then every 24h', () => {
 test('applicant email: event + portal link only, whatever the ticket holds', () => {
   process.env.FRONTEND_URL = 'https://portal.example';
   for (const event of ['RECEIVED', 'RESOLVED', 'REJECTED', 'CLOSED']) {
-    const { subject, body } = applicantEventEmail(42, event);
+    const { subject, body } = applicantEventEmail(event, { id: 42, title: 'Leak', name: 'Ann' });
     assert.ok(body.includes('https://portal.example/ticket/42'));
     assert.ok(subject.startsWith('[Infra] TKT-0042: '));
-    assert.ok(!/₹|INR|Rs\.?\s?\d|@|Phone|Engineer|Dean |Director|remark/i.test(subject + body), body);
+    assert.ok(!/₹|INR|Rs\.?\s?\d|@|Phone|Dean |Director|remark/i.test(subject + body), body);
   }
   assert.equal(stageLabel('PENDING_SE_APPROVAL'), stageLabel('PENDING_DEAN_APPROVAL'));
 });

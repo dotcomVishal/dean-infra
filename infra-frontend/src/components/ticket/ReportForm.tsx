@@ -5,6 +5,7 @@ import { toast } from '../../store/toastStore';
 import { errorMessage } from '../../lib/ticketUi';
 import type { Report } from './types';
 import { checkFiles, loadUploadLimits, type UploadLimits } from '../../lib/uploadLimits';
+import { shrinkAll } from '../../lib/shrinkImage';
 
 // Must match the API allow-list (middleware/upload.js).
 const PHOTO_ACCEPT = '.jpg,.jpeg,.png,.webp,.heic';
@@ -54,14 +55,14 @@ export default function ReportForm({ ticketId, previous, replyTo, onDone }: {
       if (tooBig) return toast.error(tooBig);
     }
 
+    setBusy(true);
     const fd = new FormData();
     fd.append('nature_of_work', nature.trim());
     fd.append('estimated_amount', String(n));
     if (remarks.trim()) fd.append('remarks', remarks.trim());
-    photos.forEach((f) => fd.append('site_photos', f));
+    for (const f of await shrinkAll(photos)) fd.append('site_photos', f);
     docs.forEach((f) => fd.append('estimate_docs', f));
 
-    setBusy(true);
     try {
       // No Content-Type header: the browser adds the multipart boundary.
       const res = await api.post(`/tickets/${ticketId}/report`, fd);

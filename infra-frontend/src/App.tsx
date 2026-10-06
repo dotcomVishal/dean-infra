@@ -1,31 +1,32 @@
+import { lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { useAuthStore, useIsSignedIn } from './store/authStore';
 
 // Common Pages & Components
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
 import Layout from './components/Layout';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import ToastHost from './components/ToastHost';
-import RaiseTicket from './pages/RaiseTicket';
-import MyTickets from './pages/MyTickets';
-import TicketDetails from './pages/TicketDetails';
+const RaiseTicket = lazy(() => import('./pages/RaiseTicket'));
+const MyTickets = lazy(() => import('./pages/MyTickets'));
+const TicketDetails = lazy(() => import('./pages/TicketDetails'));
 
 // JE pages
-import JeDashboard from './pages/je/JeDashboard';
-import JeRaiseTicket from './pages/je/JeRaiseTicket';
-import JeTenderControl from './pages/je/JeTenderControl';
+const JeDashboard = lazy(() => import('./pages/je/JeDashboard'));
+const JeRaiseTicket = lazy(() => import('./pages/je/JeRaiseTicket'));
+const JeTenderControl = lazy(() => import('./pages/je/JeTenderControl'));
 // Sysadmin pages
-import AdminDashboard from './pages/admin/AdminDashboard';
-import AdminTickets from './pages/admin/AdminTickets';
-import AdminTicketDetails from './pages/admin/AdminTicketDetails';
-import AdminUsers from './pages/admin/AdminUsers';
-import AdminAuditLogs from './pages/admin/AdminAuditLogs';
-import AdminTestTicket from './pages/admin/AdminTestTicket';
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+const AdminTickets = lazy(() => import('./pages/admin/AdminTickets'));
+const AdminTicketDetails = lazy(() => import('./pages/admin/AdminTicketDetails'));
+const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
+const AdminAuditLogs = lazy(() => import('./pages/admin/AdminAuditLogs'));
+const AdminTestTicket = lazy(() => import('./pages/admin/AdminTestTicket'));
 // Approvals, tenders and bills
-import AuthorityDashboard from './pages/authority/AuthorityDashboard';
-import ClericalDashboard from './pages/clerical/ClericalDashboard';
-import AccountantDashboard from './pages/finance/AccountantDashboard';
+const AuthorityDashboard = lazy(() => import('./pages/authority/AuthorityDashboard'));
+const ClericalDashboard = lazy(() => import('./pages/clerical/ClericalDashboard'));
+const AccountantDashboard = lazy(() => import('./pages/finance/AccountantDashboard'));
 
 // Old per-role ticket URL: keep bookmarks and emailed links working.
 function TicketRedirect({ base }: { base: string }) {
@@ -61,12 +62,12 @@ export default function App() {
         {/* 2. SECURE ROUTE GUARD: Only authenticated users pass this point */}
         <Route element={<ProtectedRoute />}>
           
+          <Route element={<Layout />}>
+
           {/* 3. DASHBOARD HUB: Role-aware conditional routing */}
           <Route 
             path="/" 
-            element={
-              <Layout>
-                {isSysAdmin ? (
+            element={isSysAdmin ? (
                   <AdminDashboard />
                 ) : isJe ? (
                   <JeDashboard />
@@ -78,38 +79,24 @@ export default function App() {
                   <AuthorityDashboard />
                 ) : (
                   <Dashboard />
-                )}
-              </Layout>
-            } 
+                )} 
           />
 
           {/* New ticket: the same form for every role. A JE's proposal form is at /je/raise. */}
           <Route 
             path="/raise" 
-            element={
-              <Layout>
-                <RaiseTicket />
-              </Layout>
-            } 
+            element={<RaiseTicket />} 
           />
 
           <Route 
             path="/tickets" 
-            element={
-              <Layout>
-                {isSysAdmin ? <AdminTickets /> : <MyTickets />}
-              </Layout>
-            } 
+            element={isSysAdmin ? <AdminTickets /> : <MyTickets />} 
           />
 
           {/* Ticket Details: ONE page for every role. It renders its sections from the role and the API payload. */}
           <Route 
             path="/ticket/:id" 
-            element={
-              <Layout>
-                <TicketDetails />
-              </Layout>
-            } 
+            element={<TicketDetails />} 
           />
 
           {/* 4. JE routes */}
@@ -120,36 +107,20 @@ export default function App() {
             />
             <Route 
               path="/je/dashboard" 
-              element={
-                <Layout>
-                  <JeDashboard />
-                </Layout>
-              } 
+              element={<JeDashboard />} 
             />
             <Route 
               path="/je/raise" 
-              element={
-                <Layout>
-                  <JeRaiseTicket />
-                </Layout>
-              } 
+              element={<JeRaiseTicket />} 
             />
             <Route path="/je/ticket/:id" element={<TicketRedirect base="/ticket" />} />
             <Route 
               path="/je/tender/:id" 
-              element={
-                <Layout>
-                  <JeTenderControl />
-                </Layout>
-              } 
+              element={<JeTenderControl />} 
             />
             <Route 
               path="/je/tender" 
-              element={
-                <Layout>
-                  <JeTenderControl />
-                </Layout>
-              } 
+              element={<JeTenderControl />} 
             />
           </Route>
 
@@ -161,43 +132,23 @@ export default function App() {
             />
             <Route 
               path="/admin/tickets" 
-              element={
-                <Layout>
-                  <AdminTickets />
-                </Layout>
-              } 
+              element={<AdminTickets />} 
             />
             <Route 
               path="/admin/ticket/:id" 
-              element={
-                <Layout>
-                  <AdminTicketDetails />
-                </Layout>
-              } 
+              element={<AdminTicketDetails />} 
             />
             <Route 
               path="/admin/users" 
-              element={
-                <Layout>
-                  <AdminUsers />
-                </Layout>
-              } 
+              element={<AdminUsers />} 
             />
             <Route 
               path="/admin/audit" 
-              element={
-                <Layout>
-                  <AdminAuditLogs />
-                </Layout>
-              } 
+              element={<AdminAuditLogs />} 
             />
             <Route 
               path="/admin/test" 
-              element={
-                <Layout>
-                  <AdminTestTicket />
-                </Layout>
-              } 
+              element={<AdminTestTicket />} 
             />
           </Route>
 
@@ -205,11 +156,7 @@ export default function App() {
           <Route element={<ProtectedRoute allowedRoles={['AE', 'SE', 'DEAN', 'DIRECTOR']} />}>
             <Route 
               path="/approvals" 
-              element={
-                <Layout>
-                  <AuthorityDashboard />
-                </Layout>
-              } 
+              element={<AuthorityDashboard />} 
             />
           </Route>
 
@@ -217,11 +164,7 @@ export default function App() {
           <Route element={<ProtectedRoute allowedRoles={['CLERICAL', 'SYSADMIN']} />}>
             <Route 
               path="/clerical" 
-              element={
-                <Layout>
-                  <ClericalDashboard />
-                </Layout>
-              } 
+              element={<ClericalDashboard />} 
             />
           </Route>
 
@@ -229,12 +172,9 @@ export default function App() {
           <Route element={<ProtectedRoute allowedRoles={['ACCOUNTANT', 'SYSADMIN', 'DEAN', 'DIRECTOR']} />}>
             <Route 
               path="/finance" 
-              element={
-                <Layout>
-                  <AccountantDashboard />
-                </Layout>
-              } 
+              element={<AccountantDashboard />} 
             />
+          </Route>
           </Route>
         </Route>
         

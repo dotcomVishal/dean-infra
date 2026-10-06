@@ -22,7 +22,8 @@
     "test:assignment": "node scripts/test-assignment.mjs",
     "test:visibility": "node --test scripts/test-visibility.mjs",
     "test:notifications": "node scripts/test-notifications.mjs",
-    "test:desk": "node scripts/test-desk.mjs"
+    "test:desk": "node scripts/test-desk.mjs",
+    "email:preview": "node scripts/preview-emails.mjs"
   },
   "dependencies": {
     "cors": "^2.8.6",

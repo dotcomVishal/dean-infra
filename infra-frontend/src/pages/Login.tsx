@@ -4,6 +4,7 @@ import { auth, googleProvider } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../services/api';
 import { errorMessage } from '../lib/ticketUi';
+import campusBg from '../assets/campus-bg.jpg';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -69,7 +70,7 @@ export default function Login() {
       <div className="relative w-full md:w-1/2 lg:w-5/12 flex flex-col items-center justify-center min-h-[35vh] md:min-h-screen p-8">
         <div 
           className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{ backgroundImage: "url('/campus-bg.jpg')" }} // Update to your actual image
+          style={{ backgroundImage: `url(${campusBg})` }}
         />
         <div className="absolute inset-0 bg-slate-900/50 mix-blend-multiply" />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-slate-900/40" />
@@ -89,6 +90,8 @@ export default function Login() {
       <div className="w-full md:w-1/2 lg:w-7/12 flex flex-col items-center justify-center p-8 md:p-12 lg:p-24">
         
         <div className="w-full max-w-sm space-y-10">
+          <img src="/logo.png" width={640} height={437} alt="Indian Institute of Technology Mandi"
+               className="mx-auto h-24 w-auto" />
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-mono font-bold tracking-[0.2em] text-slate-900 uppercase">
               Sign in

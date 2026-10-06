@@ -1,6 +1,6 @@
 // Pure digest helpers: dates in IST and the mail text. No database, so unit tests can import
 // them without opening a connection pool (which would keep the test process alive).
-import { SIGNATURE, portalUrl, ticketRef } from './emailTemplates.js';
+import { build, portalUrl } from './emailTemplates.js';
 
 export const DAY = 24 * 60 * 60 * 1000;
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -35,8 +35,8 @@ export function weekRangeLabel(date) {
 }
 
 // ---- pure builder -------------------------------------------------------------------------
-// data = { sections: [{ label, items: [{ id, days, note? }] }], counts: [{ label, n }] } would be
-// heavier than needed; each role passes the same two lists instead:
+// Each role passes the same lists:
+//   name:   the recipient's name, for the greeting
 //   counts: [[label, n], ...]            shown first, zero rows are dropped
 //   oldest: [{ id, days, label }, ...]   at most 10 lines, oldest first
 const LINK = Object.freeze({
@@ -44,19 +44,13 @@ const LINK = Object.freeze({
 });
 
 /**
- * @returns {{subject:string, body:string}|null} null when there is nothing to report
+ * @returns {{subject:string, body:string, html:string}|null} null when there is nothing to report
  */
 export function buildDigest(role, data, now = new Date()) {
   const counts = (data.counts ?? []).filter(([, n]) => n > 0);
   if (counts.length === 0) return null;
   const oldest = [...(data.oldest ?? [])].sort((a, b) => b.days - a.days).slice(0, MAX_ITEMS);
-
-  const lines = counts.map(([label, n]) => `${label}: ${n}`);
-  if (oldest.length > 0) {
-    lines.push('', 'Oldest:');
-    for (const o of oldest) lines.push(`${ticketRef(o.id)}, ${o.days} day${o.days === 1 ? '' : 's'}, ${o.label}`);
-  }
-  lines.push('', `${portalUrl()}${LINK[role] ?? ''}`, '', SIGNATURE);
-  return { subject: `[Infra] Weekly summary, ${weekRangeLabel(now)}`, body: lines.join('\n') };
+  return build('digest', {
+    name: data.name, range: weekRangeLabel(now), counts, oldest, link: `${portalUrl()}${LINK[role] ?? ''}`,
+  });
 }
-

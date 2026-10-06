@@ -24,13 +24,14 @@ export const transporter = nodemailer.createTransport({
  * outbox worker (cron/emailReminders.js) owns retry, backoff and give-up.
  * Do not call this from request handlers: enqueue via services/notifier.js.
  */
-export const deliverEmail = async ({ to, cc, subject, text }) => {
+export const deliverEmail = async ({ to, cc, subject, text, html }) => {
   await transporter.sendMail({
     from: `"Deanery Infra" <${process.env.SMTP_USER}>`,
     to,
     ...(cc ? { cc } : {}),
     subject,
     text,
+    ...(html ? { html } : {}),
     headers: { 'Auto-Submitted': 'auto-generated' },
   });
 };

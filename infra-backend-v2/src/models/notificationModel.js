@@ -3,23 +3,23 @@
  *  Every timestamp is a JS Date passed in by the caller (never NOW()), so a
  *  test can drive the whole engine with a fake clock. */
 
-export async function insertEmail(connection, { ticketId, toUserId, audience = 'STAFF', subject, body, dueAt }) {
+export async function insertEmail(connection, { ticketId, toUserId, audience = 'STAFF', subject, body, html = null, dueAt }) {
   const [r] = await connection.query(
-    `INSERT INTO mnt_notifications (ticket_id, to_user_id, kind, audience, subject, body, next_due_at)
-     VALUES (?, ?, 'EMAIL', ?, ?, ?, ?)`,
-    [ticketId, toUserId, audience, subject.slice(0, 255), body, dueAt]
+    `INSERT INTO mnt_notifications (ticket_id, to_user_id, kind, audience, subject, body, body_html, next_due_at)
+     VALUES (?, ?, 'EMAIL', ?, ?, ?, ?, ?)`,
+    [ticketId, toUserId, audience, subject.slice(0, 255), body, html, dueAt]
   );
   return r.insertId;
 }
 
 export async function insertReminder(connection, {
-  ticketId, toUserId, desk, subject, body, anchor, dueAt, stopStatuses, audience = 'STAFF',
+  ticketId, toUserId, desk, subject, body, html = null, anchor, dueAt, stopStatuses, audience = 'STAFF',
 }) {
   const [r] = await connection.query(
     `INSERT INTO mnt_notifications
-       (ticket_id, to_user_id, kind, audience, desk, subject, body, anchor_at, next_due_at, stop_when_status_not_in)
-     VALUES (?, ?, 'REMINDER', ?, ?, ?, ?, ?, ?, ?)`,
-    [ticketId, toUserId, audience, desk, subject.slice(0, 255), body, anchor, dueAt, stopStatuses.join(',')]
+       (ticket_id, to_user_id, kind, audience, desk, subject, body, body_html, anchor_at, next_due_at, stop_when_status_not_in)
+     VALUES (?, ?, 'REMINDER', ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [ticketId, toUserId, audience, desk, subject.slice(0, 255), body, html, anchor, dueAt, stopStatuses.join(',')]
   );
   return r.insertId;
 }
@@ -105,11 +105,11 @@ export async function advanceReminder(connection, id, { reminderNo, nextDueAt, n
  * user and week (a restart, or a second backend instance) is silently ignored.
  * @returns {Promise<boolean>} true when a row was queued
  */
-export async function insertDigest(connection, { toUserId, subject, body, dueAt, dedupeKey }) {
+export async function insertDigest(connection, { toUserId, subject, body, html = null, dueAt, dedupeKey }) {
   const [r] = await connection.query(
-    `INSERT IGNORE INTO mnt_notifications (ticket_id, to_user_id, kind, audience, subject, body, next_due_at, dedupe_key)
-     VALUES (NULL, ?, 'DIGEST', 'STAFF', ?, ?, ?, ?)`,
-    [toUserId, subject.slice(0, 255), body, dueAt, dedupeKey]
+    `INSERT IGNORE INTO mnt_notifications (ticket_id, to_user_id, kind, audience, subject, body, body_html, next_due_at, dedupe_key)
+     VALUES (NULL, ?, 'DIGEST', 'STAFF', ?, ?, ?, ?, ?)`,
+    [toUserId, subject.slice(0, 255), body, html, dueAt, dedupeKey]
   );
   return r.affectedRows === 1;
 }

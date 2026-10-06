@@ -43,7 +43,7 @@ test('JE completes -> applicant mailed once; dispute reopens; confirm closes', a
   assert.deepEqual(await liveReminders(id), []);
   const sent = [];
   await processDueNotifications({ now: new Date(Date.now() + 60_000), send: async (m) => { sent.push(m); } });
-  assert.deepEqual(sent.map((m) => m.subject), [`[Infra] TKT-${String(id).padStart(4, '0')}: Resolved, please verify`]);
+  assert.deepEqual(sent.map((m) => m.subject), [`[Infra] TKT-${String(id).padStart(4, '0')}: Work completed, please confirm`]);
   await processDueNotifications({ now: new Date(Date.now() + 100 * 3600e3), send: async (m) => { sent.push(m); } });
   assert.equal(sent.length, 1, 'no reminder follows');
 
@@ -66,9 +66,21 @@ test('JE completes -> applicant mailed once; dispute reopens; confirm closes', a
   assert.equal((await liveReminders(id)).length, 0);
   const [closed] = await pool.query("SELECT subject FROM mnt_notifications WHERE ticket_id = ? AND to_user_id = ? ORDER BY id DESC LIMIT 1", [id, applicantId]);
   assert.match(closed[0].subject, /: Closed$/);
+  // The JE is told the applicant closed it; both mails carry an HTML part.
+  const [toJeClosed] = await pool.query("SELECT subject, body_html FROM mnt_notifications WHERE ticket_id = ? AND to_user_id = ? ORDER BY id DESC LIMIT 1", [id, jeId]);
+  assert.match(toJeClosed[0].subject, /: Closed by the applicant$/);
+  assert.ok(toJeClosed[0].body_html.startsWith('<!doctype html>'));
 
   const [log] = await pool.query('SELECT action FROM mnt_audit_logs WHERE ticket_id = ? ORDER BY id', [id]);
   assert.deepEqual(log.map((r) => r.action), ['RESOLVED', 'SENT_BACK', 'RESOLVED', 'CLOSED']);
+});
+
+test('applicant closes a ticket they raised as the JE: one mail, not two', async () => {
+  const jeId = await makeUser({ role: 'JE' });
+  const id = await makeOpenTicket(jeId, jeId, 'WORK_COMPLETED');
+  assert.equal((await call(confirmCompletion, { user: { id: jeId, role: 'JE', name: 'CI JE' }, ticketId: id, body: { accepted: true } })).status, 200);
+  const [rows] = await pool.query("SELECT subject FROM mnt_notifications WHERE ticket_id = ? AND to_user_id = ?", [id, jeId]);
+  assert.deepEqual(rows.map((r) => r.subject.replace(/^\[Infra\] TKT-\d+: /, '')), ['Closed']);
 });
 
 test('uploads: category from the uploader; outsiders and closed tickets refused', async () => {

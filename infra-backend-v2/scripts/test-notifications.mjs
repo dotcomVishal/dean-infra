@@ -71,21 +71,22 @@ async function run() {
   const id = await mkTicket(applicant.id, deepak.id, deepak.id, 'ASSIGNED_TO_JE', { title: 'Leaking roof' });
   await enqueueCreated(id, { status: 'ASSIGNED_TO_JE', deskUser: deepak }, T0);
 
-  await ok('creation queues 1 JE reminder series (instant) + 1 sanitized applicant mail, nothing sent inline', async () => {
+  await ok('creation queues 1 JE reminder series (instant) + 1 AE information mail + 1 sanitized applicant mail, nothing sent inline', async () => {
     const rows = await all('SELECT kind, audience, desk, status, reminder_no FROM mnt_notifications WHERE ticket_id = ? ORDER BY id', [id]);
     eq(rows.map((r) => `${r.kind}/${r.audience}/${r.desk}/${r.status}/${r.reminder_no}`),
-      ['REMINDER/STAFF/JE/PENDING/0', 'EMAIL/APPLICANT/null/PENDING/0'], 'rows');
+      ['REMINDER/STAFF/JE/PENDING/0', 'EMAIL/STAFF/null/PENDING/0', 'EMAIL/APPLICANT/null/PENDING/0'], 'rows');
     eq(sent.length, 0, 'no SMTP call yet');
   });
 
   await ok('instant pass: JE gets assignment mail (#1), applicant gets stage + link only', async () => {
     const t = await pass_(0);
-    eq(t.sent, 2, 'two sent');
+    eq(t.sent, 3, 'three sent: JE, AE (information), applicant');
     const je = sent.find((m) => m.to === deepak.email);
     const ap = sent.find((m) => m.to === applicant.email);
     eq(je.subject.includes('Assigned to you'), true, 'JE assignment mail');
-    eq(ap.subject.includes('Received') && ap.text.includes(`/ticket/${id}`), true, 'event + link');
-    for (const bad of [deepak.name, deepak.email, ae.name, 'Phone', 'INR', '₹', 'Leaking roof', 'desc']) {
+    eq(ap.subject.includes('Request received') && ap.text.includes(`/ticket/${id}`), true, 'event + link');
+    eq(typeof ap.html === 'string' && ap.html.includes('Leaking roof'), true, 'HTML part carries the applicant\'s own title');
+    for (const bad of [deepak.name, deepak.email, ae.name, 'Phone', 'INR', '₹', 'desc']) {
       eq(ap.subject.includes(bad) || ap.text.includes(bad), false, `applicant mail must not contain "${bad}"`);
     }
     const r = await one("SELECT reminder_no, next_due_at FROM mnt_notifications WHERE ticket_id = ? AND kind = 'REMINDER'", [id]);
@@ -125,7 +126,10 @@ async function run() {
     eq(sent.filter((m) => m.to === deepak.email && m.subject.includes('Reminder')).length, 0, 'JE not reminded after report');
     eq(sent.filter((m) => m.to === ae.email && m.subject.includes('Awaiting your review')).length, 1, 'AE told once');
     eq(sent.some((m) => m.to === applicant.email), false, 'applicant: no mail for internal movement (R9)');
-    eq(sent.some((m) => /₹|15000|Replace sheet|Phone/.test(m.text)), false, 'no amount / remark in any mail');
+    // The approval desk sees the estimate on the ticket page, so its arrival mail may carry it. Nobody else's mail does.
+    eq(sent.filter((m) => m.to !== ae.email).some((m) => /₹|15000|Replace sheet|Phone/.test(m.text)), false, 'no amount / remark outside the AE mail');
+    eq(sent.some((m) => /Replace sheet|Phone/.test(m.text)), false, 'no report text or phone number in any mail');
+    eq(sent.find((m) => m.to === ae.email).text.includes('Estimate: ₹15,000'), true, 'AE mail shows the estimate');
   });
 
   await ok('retry with backoff, then FAILED after MAX_ATTEMPTS; other mail unaffected', async () => {
@@ -154,8 +158,8 @@ async function run() {
     await enqueueCreated(id2, { status: 'UNASSIGNED', deskUser: ae }, T0);
     sent.length = 0;
     await pass_(0);
-    eq(sent.some((m) => m.to === ae.email && m.subject.includes('Needs a JE')), true, 'AE arrival mail');
-    eq(sent.find((m) => m.to === applicant.email).subject.includes('Received'), true, 'applicant: Received');
+    eq(sent.some((m) => m.to === ae.email && m.subject.includes('No engineer assigned')), true, 'AE arrival mail');
+    eq(sent.find((m) => m.to === applicant.email).subject.includes('Request received'), true, 'applicant: Request received');
     sent.length = 0;
     await pass_(12 * H);
     eq(sent.filter((m) => m.to === ae.email).length, 0, 'AE is not reminded');

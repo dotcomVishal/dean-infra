@@ -117,7 +117,7 @@ export async function loadDigestData(connection, user, now = new Date()) {
 
 /** Mail text for one user, or null when empty. Used by the Sysadmin preview. */
 export async function previewDigestFor(connection, user, now = new Date()) {
-  return buildDigest(user.role, await loadDigestData(connection, user, now), now);
+  return buildDigest(user.role, { ...(await loadDigestData(connection, user, now)), name: user.name }, now);
 }
 
 /**
@@ -136,7 +136,7 @@ export async function queueWeeklyDigests({ now = new Date(), connection = pool }
       const mail = await previewDigestFor(connection, user, now);
       if (!mail) { out.skipped += 1; continue; }
       const queued = await notificationModel.insertDigest(connection, {
-        toUserId: user.id, subject: mail.subject, body: mail.body, dueAt: now, dedupeKey: `digest:${week}:${user.id}`,
+        toUserId: user.id, subject: mail.subject, body: mail.body, html: mail.html, dueAt: now, dedupeKey: `digest:${week}:${user.id}`,
       });
       if (queued) out.queued += 1;
     } catch (err) {

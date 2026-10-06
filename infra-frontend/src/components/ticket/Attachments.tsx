@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileText, Loader2, ImageOff, X, Download, Upload } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../store/toastStore';
@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { isImageFile, errorMessage, deskLabel } from '../../lib/ticketUi';
 import { cachedObjectUrl } from '../../lib/blobCache';
 import { checkFiles, loadUploadLimits, type UploadLimits } from '../../lib/uploadLimits';
+import { shrinkAll } from '../../lib/shrinkImage';
 
 // Files are never addressed by path (S2): the API hands out an authenticated
 // /api/attachments/:id URL, and <img src> cannot send a bearer token, so every
@@ -37,11 +38,26 @@ async function fetchBlob(downloadUrl: string): Promise<Blob> {
 
 const cachedBlobUrl = (downloadUrl: string) => cachedObjectUrl(downloadUrl, () => fetchBlob(downloadUrl));
 
+// Fetch only when the thumbnail scrolls into view, so a ticket with many photos
+// does not download them all at once.
 function useBlobUrl(downloadUrl: string) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return setVisible(true);
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { setVisible(true); io.disconnect(); }
+    }, { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
     let alive = true;
     setUrl(null);
     setFailed(false);
@@ -51,13 +67,13 @@ function useBlobUrl(downloadUrl: string) {
     return () => {
       alive = false;
     };
-  }, [downloadUrl]);
+  }, [downloadUrl, visible]);
 
-  return { url, failed };
+  return { url, failed, ref };
 }
 
 export function PhotoThumb({ file, dark = false }: { file: Attachment; dark?: boolean }) {
-  const { url, failed } = useBlobUrl(file.download_url);
+  const { url, failed, ref } = useBlobUrl(file.download_url);
   const [open, setOpen] = useState(false);
   const box = dark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900';
 
@@ -71,6 +87,7 @@ export function PhotoThumb({ file, dark = false }: { file: Attachment; dark?: bo
   return (
     <>
       <button
+        ref={ref}
         type="button"
         onClick={() => url && setOpen(true)}
         className={`relative aspect-square overflow-hidden rounded-xl border transition hover:opacity-85 ${box}`}
@@ -244,9 +261,9 @@ export function UploadFiles({ ticketId, onDone, label = 'Add files' }: { ticketI
     if (files.length === 0) return;
     const tooBig = limits && checkFiles(files, limits);
     if (tooBig) { toast.error(tooBig); return; }
-    const fd = new FormData();
-    files.forEach((f) => fd.append('files', f));
     setBusy(true);
+    const fd = new FormData();
+    for (const f of await shrinkAll(files)) fd.append('files', f);
     try {
       await api.post(`/tickets/${ticketId}/attachments`, fd);
       toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded.`);
