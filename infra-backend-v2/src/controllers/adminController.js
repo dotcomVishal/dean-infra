@@ -587,7 +587,11 @@ async function syncStaffRouting(connection, userId, scopes) {
   }
   // Dean/Director are singleton desks: a real account replaces the dummy seed.
   if (SINGLETON_ROLES.includes(u.role) && u.is_active && !u.is_demo) {
-    await connection.query('UPDATE mnt_users SET is_active = FALSE WHERE role = ? AND id <> ? AND is_demo = FALSE', [u.role, userId]);
+    // Module-level only: the previous holder is blocked in this module, not account-wide.
+    await connection.query(
+      `UPDATE mnt_members m JOIN core_users cu ON cu.id = m.user_id
+          SET m.is_active = FALSE
+        WHERE m.role = ? AND m.user_id <> ? AND cu.is_demo = FALSE`, [u.role, userId]);
   }
   await reconcileDeskOwners(connection);
 }
@@ -631,15 +635,33 @@ export const createUser = async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [result] = await connection.query(
-      `INSERT INTO mnt_users (firebase_uid, name, email, role, department, campus, phone, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)`,
-      [generatedUid, name.trim(), email.trim().toLowerCase(), role, department, campus || null, phone || null]
+    const cleanEmail = email.trim().toLowerCase();
+    // The person may already exist in core_users (signed in before, or created by another module):
+    // then only the member row is new.
+    const [known] = await connection.query('SELECT id FROM core_users WHERE email = ? FOR UPDATE', [cleanEmail]);
+    let userId;
+    if (known.length > 0) {
+      userId = known[0].id;
+      const [member] = await connection.query('SELECT 1 FROM mnt_members WHERE user_id = ? FOR UPDATE', [userId]);
+      if (member.length > 0) {
+        await connection.rollback();
+        return res.status(409).json({ success: false, message: 'A user with this email already has a role in this module.' });
+      }
+    } else {
+      const [result] = await connection.query(
+        `INSERT INTO core_users (firebase_uid, name, email, phone, is_active) VALUES (?, ?, ?, ?, TRUE)`,
+        [generatedUid, name.trim(), cleanEmail, phone || null]
+      );
+      userId = result.insertId;
+    }
+    await connection.query(
+      `INSERT INTO mnt_members (user_id, role, department, campus, is_active) VALUES (?, ?, ?, ?, TRUE)`,
+      [userId, role, department, campus || null]
     );
-    await syncStaffRouting(connection, result.insertId, scopes);
+    await syncStaffRouting(connection, userId, scopes);
     await connection.commit();
 
-    const [createdUsers] = await pool.query('SELECT * FROM mnt_users WHERE id = ?', [result.insertId]);
+    const [createdUsers] = await pool.query('SELECT * FROM mnt_users WHERE id = ?', [userId]);
     const warnings = await deskWarnings([role]);
     res.json({ success: true, user: createdUsers[0], ...(warnings.length ? { warnings } : {}) });
   } catch (error) {
@@ -683,25 +705,35 @@ export const updateUser = async (req, res) => {
       }
     }
 
+    // Identity fields belong to core_users; role, department, campus and the module-level
+    // active switch belong to this module's mnt_members row (created on first change).
     const updates = [];
     const params = [];
+    const member = {};
 
     if (name !== undefined) { updates.push('name = ?'); params.push(name.trim()); }
     if (email !== undefined) { updates.push('email = ?'); params.push(email.trim().toLowerCase()); }
-    if (role !== undefined) { updates.push('role = ?'); params.push(role); }
-    if (department !== undefined) { updates.push('department = ?'); params.push(department); }
-    if (campus !== undefined) { updates.push('campus = ?'); params.push(campus || null); }
     if (phone !== undefined) { updates.push('phone = ?'); params.push(phone); }
-    if (is_active !== undefined) { updates.push('is_active = ?'); params.push(Boolean(is_active)); }
+    if (role !== undefined) member.role = role;
+    if (department !== undefined) member.department = department;
+    if (campus !== undefined) member.campus = campus || null;
+    if (is_active !== undefined) member.is_active = Boolean(is_active);
 
-    if (updates.length === 0 && scopes === undefined) {
+    if (updates.length === 0 && Object.keys(member).length === 0 && scopes === undefined) {
       return res.status(400).json({ success: false, message: 'No fields provided for update.' });
     }
 
     const [before] = await connection.query('SELECT role FROM mnt_users WHERE id = ?', [id]);
     await connection.beginTransaction();
     if (updates.length > 0) {
-      await connection.query(`UPDATE mnt_users SET ${updates.join(', ')} WHERE id = ?`, [...params, id]);
+      await connection.query(`UPDATE core_users SET ${updates.join(', ')} WHERE id = ?`, [...params, id]);
+    }
+    const memberCols = Object.keys(member); // fixed whitelist above, never user input
+    if (memberCols.length > 0) {
+      await connection.query(
+        `INSERT INTO mnt_members (user_id, ${memberCols.join(', ')}) VALUES (?, ${memberCols.map(() => '?').join(', ')})
+         ON DUPLICATE KEY UPDATE ${memberCols.map((c) => `${c} = VALUES(${c})`).join(', ')}`,
+        [id, ...memberCols.map((c) => member[c])]);
     }
     await syncStaffRouting(connection, id, scopes);
     await connection.commit();

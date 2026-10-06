@@ -38,7 +38,7 @@ try {
   console.log('Demo tickets deleted.');
 
   if (purgeUsers) {
-    const [r] = await conn.query('DELETE FROM mnt_users WHERE is_demo = TRUE');
+    const [r] = await conn.query('DELETE FROM core_users WHERE is_demo = TRUE');
     console.log(`Demo accounts deleted: ${r.affectedRows}.`);
   }
 } finally {

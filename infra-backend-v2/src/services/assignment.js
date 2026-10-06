@@ -94,7 +94,7 @@ export async function assignTicket(
 ) {
   const je = await pickAvailableJe(connection, { department, campus, applicantId });
   if (je) {
-    await connection.query('UPDATE mnt_users SET last_assigned_at = NOW() WHERE id = ?', [je.id]);
+    await connection.query('UPDATE mnt_members SET last_assigned_at = NOW() WHERE user_id = ?', [je.id]);
     return { status: 'ASSIGNED_TO_JE', assignedJeId: je.id, currentDeskUserId: je.id, deskUser: je };
   }
 

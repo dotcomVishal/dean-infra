@@ -28,7 +28,7 @@ after(async () => {
   await pool.query("DELETE FROM mnt_tickets WHERE is_demo = TRUE");
   await pool.query("DELETE FROM mnt_notifications WHERE to_user_id IN (SELECT id FROM mnt_users WHERE is_demo = TRUE)");
   await pool.query("DELETE FROM mnt_user_availability WHERE user_id IN (SELECT id FROM mnt_users WHERE is_demo = TRUE) OR created_by IN (SELECT id FROM mnt_users WHERE is_demo = TRUE)");
-  await pool.query('DELETE FROM mnt_users WHERE is_demo = TRUE');
+  await pool.query('DELETE FROM core_users WHERE is_demo = TRUE'); // mnt_members cascade
   await cleanup();
   await stopServer();
   await pool.end();
@@ -239,7 +239,9 @@ test('8. routing never picks a demo account, even when no real holder is active'
   await turnOn();
   const t = { id: 0, status: 'PENDING_SE_APPROVAL', department: 'Civil', campus: 'NORTH', applicant_id: 1, is_mock: 0, is_demo: 0 };
   await inRolledBackTx(async (conn) => {
-    await conn.query("UPDATE mnt_users SET is_active = FALSE WHERE is_demo = FALSE AND role IN ('AE','SE','DEAN','DIRECTOR','SYSADMIN')");
+    await conn.query(
+      `UPDATE mnt_members m JOIN core_users u ON u.id = m.user_id SET m.is_active = FALSE
+        WHERE u.is_demo = FALSE AND m.role IN ('AE','SE','DEAN','DIRECTOR','SYSADMIN')`);
     for (const desk of ['AE', 'SE', 'DEAN', 'DIRECTOR']) {
       assert.equal(await findDeskOwner(conn, t, desk), null, desk);
     }

@@ -9,6 +9,7 @@ import fs from 'fs';
 import mysql from 'mysql2/promise';
 import pool from '../../src/config/db.js';
 import { openConnection } from '../../src/config/dbOptions.js';
+import { insertUser, setRoleActive } from './helpers.mjs';
 import { runMigrations } from '../../src/config/migrate.js';
 
 after(() => pool.end());
@@ -26,8 +27,8 @@ test('tickets.status ENUM holds every STATUS the machine can produce', async () 
   assert.deepEqual(Object.values(STATUS).filter((s) => !db.includes(s)), []);
 });
 
-test('users.role ENUM holds every ROLE', async () => {
-  const db = await enumValues('mnt_users', 'role');
+test('mnt_members.role ENUM holds every ROLE', async () => {
+  const db = await enumValues('mnt_members', 'role');
   assert.deepEqual(Object.values(ROLE).filter((r) => !db.includes(r)), []);
 });
 
@@ -37,7 +38,7 @@ test('audit_logs.action ENUM holds every LOG_ACTION', async () => {
 });
 
 test('every desk in the approval chain is a valid role', async () => {
-  const roles = await enumValues('mnt_users', 'role');
+  const roles = await enumValues('mnt_members', 'role');
   assert.deepEqual(Object.keys(DESK_RANK).filter((d) => !roles.includes(d)), []);
 });
 
@@ -116,8 +117,8 @@ test('baseline: foreign keys and indexes exist', async () => {
 for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 'director@placeholder.invalid']]) {
   test(`baseline: no active ${role} -> exactly one placeholder, stable on re-run`, async () => {
     await withTx(async (conn) => {
-      await conn.query(`UPDATE mnt_users SET is_active = FALSE WHERE role = ?`, [role]);
-      await conn.query(`DELETE FROM mnt_users WHERE email = ?`, [email]);
+      await setRoleActive(role, false, conn);
+      await conn.query('DELETE FROM core_users WHERE email = ?', [email]);
       await conn.query(PLACEHOLDER_SQL);
       await conn.query(PLACEHOLDER_SQL);
       const holders = await activeHolders(conn, role);
@@ -127,13 +128,11 @@ for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 
 
   test(`baseline: real active ${role} -> no placeholder inserted`, async () => {
     await withTx(async (conn) => {
-      await conn.query(`DELETE FROM mnt_users WHERE email = ?`, [email]);
-      await conn.query(`UPDATE mnt_users SET is_active = FALSE WHERE role = ?`, [role]);
-      await conn.query(
-        `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
-         VALUES ('ci-real-holder', 'Real', 'ci-real-holder@test.local', ?, 'Administration', TRUE)`, [role]);
+      await conn.query('DELETE FROM core_users WHERE email = ?', [email]);
+      await setRoleActive(role, false, conn);
+      await insertUser(conn, { firebaseUid: 'ci-real-holder', name: 'Real', email: 'ci-real-holder@test.local', role });
       await conn.query(PLACEHOLDER_SQL);
-      const [rows] = await conn.query('SELECT 1 FROM mnt_users WHERE email = ?', [email]);
+      const [rows] = await conn.query('SELECT 1 FROM core_users WHERE email = ?', [email]);
       assert.equal(rows.length, 0);
       assert.equal((await activeHolders(conn, role)).length, 1);
     });
@@ -141,11 +140,20 @@ for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 
 
   test(`baseline: inactive ${role} placeholder is reactivated when no holder is active`, async () => {
     await withTx(async (conn) => {
-      await conn.query(`UPDATE mnt_users SET is_active = FALSE WHERE role = ?`, [role]);
-      await conn.query(`DELETE FROM mnt_users WHERE email = ?`, [email]);
+      await setRoleActive(role, false, conn);
+      await conn.query('DELETE FROM core_users WHERE email = ?', [email]);
+      await insertUser(conn, { firebaseUid: `ci-ph-${role}`, name: 'old placeholder', email, role, isActive: false });
+      await conn.query(PLACEHOLDER_SQL);
+      assert.deepEqual((await activeHolders(conn, role)).map((h) => h.email), [email]);
+    });
+  });
+
+  test(`baseline: a placeholder with no member row gets one, with the ${role} role`, async () => {
+    await withTx(async (conn) => {
+      await setRoleActive(role, false, conn);
+      await conn.query('DELETE FROM core_users WHERE email = ?', [email]);
       await conn.query(
-        `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
-         VALUES (?, 'old placeholder', ?, ?, 'Administration', FALSE)`, [`ci-ph-${role}`, email, role]);
+        'INSERT INTO core_users (firebase_uid, name, email, is_active) VALUES (?, ?, ?, TRUE)', [`ci-ph2-${role}`, 'half placeholder', email]);
       await conn.query(PLACEHOLDER_SQL);
       assert.deepEqual((await activeHolders(conn, role)).map((h) => h.email), [email]);
     });

@@ -14,6 +14,7 @@
 // Run with:
 //   node scripts/seed-staff.mjs
 import 'dotenv/config';
+if (process.env.NODE_ENV === 'production') { console.error('seed-staff: refusing to run with NODE_ENV=production (invented addresses nobody can sign in with). Use scripts/bootstrap-sysadmin.mjs, then Admin -> Users.'); process.exit(1); }
 import pool from '../src/config/db.js';
 
 // Campus values match the ENUM added in migrations/003 (NORTH, SOUTH, BOTH).
@@ -96,10 +97,16 @@ async function seedRoster(connection) {
     const firebaseUid = `seed_staff_${slug}`;
 
     const [result] = await connection.query(
-      `INSERT IGNORE INTO mnt_users (firebase_uid, name, email, role, department, campus, phone)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [firebaseUid, person.name, email, person.role, person.department, person.campus, person.phone]
+      `INSERT IGNORE INTO core_users (firebase_uid, name, email, phone) VALUES (?, ?, ?, ?)`,
+      [firebaseUid, person.name, email, person.phone]
     );
+    if (result.affectedRows > 0) {
+      await connection.query(
+        `INSERT INTO mnt_members (user_id, role, department, campus)
+         SELECT id, ?, ?, ? FROM core_users WHERE email = ?`,
+        [person.role, person.department, person.campus, email]
+      );
+    }
 
     if (result.affectedRows > 0) {
       inserted += 1;
@@ -156,10 +163,13 @@ async function seedDummyAuthority(connection, authority) {
   const slug = slugify(authority.name);
   const firebaseUid = `seed_staff_${slug}`;
 
+  const [created] = await connection.query(
+    `INSERT INTO core_users (firebase_uid, name, email, phone) VALUES (?, ?, ?, ?)`,
+    [firebaseUid, authority.name, authority.email, authority.phone]
+  );
   await connection.query(
-    `INSERT INTO mnt_users (firebase_uid, name, email, role, department, campus, phone)
-     VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    [firebaseUid, authority.name, authority.email, authority.role, authority.department, authority.phone]
+    `INSERT INTO mnt_members (user_id, role, department) VALUES (?, ?, ?)`,
+    [created.insertId, authority.role, authority.department]
   );
 
   console.log(`  + ${authority.name} (${authority.role}) -> ${authority.email}`);

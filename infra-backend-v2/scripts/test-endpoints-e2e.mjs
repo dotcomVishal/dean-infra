@@ -69,10 +69,11 @@ async function runTests() {
     let jeId;
     if (jeUsers.length === 0) {
       const [insertJe] = await connection.query(`
-        INSERT INTO mnt_users (firebase_uid, name, email, role, department) 
-        VALUES ('mock_je_civil_uid', 'Test JE Civil', 'test.je.civil@example.com', 'JE', 'Civil')
+        INSERT INTO core_users (firebase_uid, name, email) 
+        VALUES ('mock_je_civil_uid', 'Test JE Civil', 'test.je.civil@example.com')
       `);
       jeId = insertJe.insertId;
+      await connection.query(`INSERT INTO mnt_members (user_id, role, department) VALUES (?, 'JE', 'Civil')`, [jeId]);
     } else {
       jeId = jeUsers[0].id;
     }
@@ -85,8 +86,8 @@ async function runTests() {
     let applicantId;
     if (appUsers.length === 0) {
       const [insertApp] = await connection.query(`
-        INSERT INTO mnt_users (firebase_uid, name, email, role, department) 
-        VALUES ('mock_app_uid', 'Test Applicant User', 'applicant.test@gmail.com', 'APPLICANT', 'General')
+        INSERT INTO core_users (firebase_uid, name, email) 
+        VALUES ('mock_app_uid', 'Test Applicant User', 'applicant.test@gmail.com')
       `);
       applicantId = insertApp.insertId;
     } else {

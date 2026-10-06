@@ -87,11 +87,15 @@ try {
       console.error(`schema check: ${EXPECTED_FILE} is missing`);
       process.exitCode = 1;
     } else {
-      const expected = fs.readFileSync(EXPECTED_FILE, 'utf8').split('\n').filter(Boolean).sort();
-      const got = new Set(lines);
+      // A view definition is rendered slightly differently by different MySQL builds, so the
+      // check compares a view by name and security type only. Its columns are listed above.
+      const norm = (l) => (l.startsWith('VIEW ') ? l.split(' ').slice(0, 3).join(' ') : l);
+      const expected = fs.readFileSync(EXPECTED_FILE, 'utf8').split('\n').filter(Boolean).map(norm).sort();
+      const found = lines.map(norm);
+      const got = new Set(found);
       const want = new Set(expected);
       const missing = expected.filter((l) => !got.has(l));
-      const extra = lines.filter((l) => !want.has(l));
+      const extra = found.filter((l) => !want.has(l));
       if (missing.length === 0 && extra.length === 0) {
         console.log('schema OK');
       } else {

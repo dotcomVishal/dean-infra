@@ -27,7 +27,7 @@ test('valid stored owner is kept; deactivated one is replaced', async () => {
   const a = await makeUser({ role: 'AE', campus: 'NORTH', scopes: ['NORTH'] });
   const b = await makeUser({ role: 'AE', campus: 'NORTH', scopes: ['NORTH'] });
   assert.equal(await owner(tk(b)), b);
-  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [b]);
+  await pool.query('UPDATE core_users SET is_active = FALSE WHERE id = ?', [b]);
   assert.equal(await owner(tk(b)), a);
 });
 

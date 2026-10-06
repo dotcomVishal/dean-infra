@@ -2,6 +2,7 @@ import { auth } from '../config/firebase.js';
 import pool from '../config/db.js';
 import logger from '../utils/logger.js';
 import { demoEnabled, DEMO_UIDS } from '../config/demo.js';
+import { provisionApplicant } from '../services/userProvisioning.js';
 
 const USER_COLUMNS = 'id, name, email, role, department, is_active, is_demo';
 
@@ -54,18 +55,14 @@ export const requireAuth = async (req, res, next) => {
         if (byEmail.length > 0) {
           // A Google account can never link to (and so become) a demo account.
           if (!byEmail[0].is_demo) {
-            await pool.query('UPDATE mnt_users SET firebase_uid = ? WHERE id = ?', [firebase_uid, byEmail[0].id]);
+            await pool.query('UPDATE core_users SET firebase_uid = ? WHERE id = ?', [firebase_uid, byEmail[0].id]);
             users = byEmail;
           }
         } else {
           // Any google account: auto-provision as APPLICANT
           const displayName = decodedToken.name || decodedToken.email.split('@')[0];
-          const [result] = await pool.query(
-            `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active) 
-             VALUES (?, ?, ?, 'APPLICANT', 'General', TRUE)`,
-            [firebase_uid, displayName, decodedToken.email]
-          );
-          const [created] = await pool.query(`SELECT ${USER_COLUMNS} FROM mnt_users WHERE id = ?`, [result.insertId]);
+          const id = await provisionApplicant(pool, { firebaseUid: firebase_uid, name: displayName, email: decodedToken.email });
+          const [created] = await pool.query(`SELECT ${USER_COLUMNS} FROM mnt_users WHERE id = ?`, [id]);
           users = created;
         }
       }

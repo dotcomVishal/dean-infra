@@ -4,8 +4,20 @@
 -- never run). Generated from the tested schema, then reviewed.
 -- No USE, no database name: the connection decides the database.
 -- Tables are in dependency order; foreign key checks stay on.
--- Shared identity lives in core_users (migrations/core).
+-- Shared identity lives in core_users (migrations/core); this module's role data in mnt_members.
 -- ============================================================
+
+-- This module's data about a person. The row is optional: no row = APPLICANT.
+CREATE TABLE IF NOT EXISTS mnt_members (
+  user_id          INT PRIMARY KEY,
+  role             ENUM('APPLICANT','JE','AE','SE','DEAN','DIRECTOR','SYSADMIN','CLERICAL','ACCOUNTANT') NOT NULL DEFAULT 'APPLICANT',
+  department       ENUM('Civil','Electrical','Horticulture','Administration','General') NOT NULL DEFAULT 'General',
+  campus           ENUM('NORTH','SOUTH','BOTH') NULL,
+  last_assigned_at DATETIME NULL,
+  is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+  CONSTRAINT fk_mnt_members_user FOREIGN KEY (user_id) REFERENCES core_users(id) ON DELETE CASCADE,
+  INDEX idx_mnt_members_role_dept (role, department)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS mnt_tickets (
   `id` int NOT NULL AUTO_INCREMENT,
@@ -260,10 +272,17 @@ CREATE TABLE IF NOT EXISTS mnt_deleted_tickets (
   KEY `idx_deleted_tickets_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- One-table view: the module reads its users through mnt_users (replaced in Phase D).
+-- The view the module reads: the columns the code reads from `users` today.
+-- Writes go to core_users and mnt_members, never to this view (it is a join).
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW mnt_users AS
-SELECT id, firebase_uid, name, email, role, department, campus, last_assigned_at, phone, is_active, is_demo, created_at
-  FROM core_users;
+SELECT u.id, u.firebase_uid, u.name, u.email,
+       COALESCE(m.role, 'APPLICANT')     AS role,
+       COALESCE(m.department, 'General') AS department,
+       m.campus, m.last_assigned_at, u.phone,
+       (u.is_active AND COALESCE(m.is_active, TRUE)) AS is_active,
+       u.is_demo, u.created_at
+  FROM core_users u
+  LEFT JOIN mnt_members m ON m.user_id = u.id;
 
 -- Seed data ------------------------------------------------------------------
 INSERT IGNORE INTO mnt_financial_limits (`key`, max_amount) VALUES
@@ -272,26 +291,40 @@ INSERT IGNORE INTO mnt_financial_limits (`key`, max_amount) VALUES
   ('DIRECT_AWARD', 10000.00),
   ('DEAN_HIGH_VALUE', 200000.00);
 
--- Single Dean / Director placeholders. Insert only when no active holder exists
--- and the placeholder is absent. .invalid is reserved (RFC 2606): mail can
--- never reach a real person.
-INSERT INTO core_users (firebase_uid, name, email, role, department, is_active)
-SELECT 'placeholder_dean', 'Dean (placeholder)', 'dean@placeholder.invalid', 'DEAN', 'Administration', TRUE
+-- Single Dean / Director placeholders. Created only when no active holder exists
+-- and the placeholder is absent; reactivated when no holder is active.
+-- .invalid is reserved (RFC 2606): mail can never reach a real person.
+-- The derived table x is required: MySQL forbids a subquery on the table being updated.
+INSERT INTO core_users (firebase_uid, name, email, is_active)
+SELECT 'placeholder_dean', 'Dean (placeholder)', 'dean@placeholder.invalid', TRUE
   FROM DUAL
  WHERE NOT EXISTS (SELECT 1 FROM mnt_users WHERE role = 'DEAN' AND is_active = TRUE)
    AND NOT EXISTS (SELECT 1 FROM core_users WHERE email = 'dean@placeholder.invalid');
 
--- The derived table x is required: MySQL forbids a subquery on the table being updated.
-UPDATE core_users SET is_active = TRUE
- WHERE email = 'dean@placeholder.invalid'
+INSERT IGNORE INTO mnt_members (user_id, role, department, is_active)
+SELECT u.id, 'DEAN', 'Administration', TRUE
+  FROM core_users u
+ WHERE u.email = 'dean@placeholder.invalid'
+   AND NOT EXISTS (SELECT 1 FROM mnt_users WHERE role = 'DEAN' AND is_active = TRUE);
+
+UPDATE core_users u JOIN mnt_members m ON m.user_id = u.id
+   SET u.is_active = TRUE, m.is_active = TRUE
+ WHERE u.email = 'dean@placeholder.invalid'
    AND (SELECT c FROM (SELECT COUNT(*) AS c FROM mnt_users WHERE role = 'DEAN' AND is_active = TRUE) x) = 0;
 
-INSERT INTO core_users (firebase_uid, name, email, role, department, is_active)
-SELECT 'placeholder_director', 'Director (placeholder)', 'director@placeholder.invalid', 'DIRECTOR', 'Administration', TRUE
+INSERT INTO core_users (firebase_uid, name, email, is_active)
+SELECT 'placeholder_director', 'Director (placeholder)', 'director@placeholder.invalid', TRUE
   FROM DUAL
  WHERE NOT EXISTS (SELECT 1 FROM mnt_users WHERE role = 'DIRECTOR' AND is_active = TRUE)
    AND NOT EXISTS (SELECT 1 FROM core_users WHERE email = 'director@placeholder.invalid');
 
-UPDATE core_users SET is_active = TRUE
- WHERE email = 'director@placeholder.invalid'
+INSERT IGNORE INTO mnt_members (user_id, role, department, is_active)
+SELECT u.id, 'DIRECTOR', 'Administration', TRUE
+  FROM core_users u
+ WHERE u.email = 'director@placeholder.invalid'
+   AND NOT EXISTS (SELECT 1 FROM mnt_users WHERE role = 'DIRECTOR' AND is_active = TRUE);
+
+UPDATE core_users u JOIN mnt_members m ON m.user_id = u.id
+   SET u.is_active = TRUE, m.is_active = TRUE
+ WHERE u.email = 'director@placeholder.invalid'
    AND (SELECT c FROM (SELECT COUNT(*) AS c FROM mnt_users WHERE role = 'DIRECTOR' AND is_active = TRUE) x) = 0;

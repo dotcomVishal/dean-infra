@@ -51,7 +51,7 @@ async function withLeave(userIdValue, fn) {
 
 async function resetLastAssigned(...emails) {
   for (const email of emails) {
-    await pool.query('UPDATE mnt_users SET last_assigned_at = NULL WHERE email = ?', [email]);
+    await pool.query('UPDATE mnt_members SET last_assigned_at = NULL WHERE user_id = (SELECT id FROM core_users WHERE email = ?)', [email]);
   }
 }
 

@@ -10,19 +10,39 @@ export const DEPT = 'Administration';
 const run = randomUUID().slice(0, 8);
 const created = { users: [], tickets: [] };
 
-export async function makeUser({ role, campus = null, scopes = [], name }) {
-  const tag = randomUUID().slice(0, 6);
-  const [r] = await pool.query(
-    `INSERT INTO mnt_users (firebase_uid, name, email, role, department, campus, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
-    [`ci-${run}-${tag}`, name ?? `CI ${role} ${tag}`, `ci-${run}-${tag}@test.local`, role, DEPT, campus]
-  );
-  created.users.push(r.insertId);
-  for (const s of scopes) {
-    await pool.query('INSERT INTO mnt_user_scopes (user_id, department, campus) VALUES (?, ?, ?)', [r.insertId, DEPT, s]);
+/**
+ * Insert a person: a core_users row, plus a mnt_members row when they have a module role
+ * (no row = APPLICANT). `db` is the pool or a connection. Returns the new id.
+ */
+export async function insertUser(db, { firebaseUid, name, email, role = 'APPLICANT', department = DEPT, campus = null, isActive = true, isDemo = false, phone = null }) {
+  const [r] = await db.query(
+    'INSERT INTO core_users (firebase_uid, name, email, phone, is_active, is_demo) VALUES (?, ?, ?, ?, ?, ?)',
+    [firebaseUid, name, email, phone, isActive, isDemo]);
+  if (role !== 'APPLICANT' || campus !== null) {
+    await db.query('INSERT INTO mnt_members (user_id, role, department, campus) VALUES (?, ?, ?, ?)', [r.insertId, role, department, campus]);
   }
   return r.insertId;
 }
+
+export async function makeUser({ role, campus = null, scopes = [], name }) {
+  const tag = randomUUID().slice(0, 6);
+  const id = await insertUser(pool, {
+    firebaseUid: `ci-${run}-${tag}`, name: name ?? `CI ${role} ${tag}`, email: `ci-${run}-${tag}@test.local`, role, campus,
+  });
+  created.users.push(id);
+  for (const s of scopes) {
+    await pool.query('INSERT INTO mnt_user_scopes (user_id, department, campus) VALUES (?, ?, ?)', [id, DEPT, s]);
+  }
+  return id;
+}
+
+/** Block or allow people account-wide (core_users.is_active). `ids` is an id or a list. */
+export const setActive = (ids, active, db = pool) =>
+  db.query('UPDATE core_users SET is_active = ? WHERE id IN (?)', [active, [].concat(ids)]);
+
+/** Block or allow every member holding `role` in this module only (mnt_members.is_active). */
+export const setRoleActive = (role, active, db = pool) =>
+  db.query('UPDATE mnt_members SET is_active = ? WHERE role = ?', [active, role]);
 
 export async function makeOpenTicket(applicantId, jeId, status = 'ASSIGNED_TO_JE') {
   const [r] = await pool.query(
@@ -60,7 +80,7 @@ export async function cleanup() {
   if (created.users.length) {
     await pool.query('DELETE FROM mnt_notifications WHERE to_user_id IN (?)', [created.users]); // weekly digests have no ticket to cascade from
     await pool.query('DELETE FROM mnt_user_availability WHERE user_id IN (?) OR created_by IN (?)', [created.users, created.users]);
-    await pool.query('DELETE FROM mnt_users WHERE id IN (?)', [created.users]); // user_scopes cascade
+    await pool.query('DELETE FROM core_users WHERE id IN (?)', [created.users]); // mnt_members and mnt_user_scopes cascade
   }
   created.tickets.length = 0;
   created.users.length = 0;

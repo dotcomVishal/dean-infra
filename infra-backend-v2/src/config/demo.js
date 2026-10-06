@@ -50,16 +50,22 @@ export async function syncDemoAccounts(connection) {
       logger.warn('demo login stays off: DEMO_LDAP_PASSWORD must be at least 12 characters');
     }
     if (!demoEnabled()) {
-      await connection.query('UPDATE mnt_users SET is_active = FALSE WHERE is_demo = TRUE');
+      await connection.query('UPDATE core_users SET is_active = FALSE WHERE is_demo = TRUE');
       return false;
     }
     for (const a of DEMO_ACCOUNTS) {
       await connection.query(
-        `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active, is_demo)
-         VALUES (?, ?, ?, ?, ?, TRUE, TRUE)
-         ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), role = VALUES(role),
-           department = VALUES(department), is_active = TRUE, is_demo = TRUE`,
-        [a.firebase_uid, a.name, a.email, a.role, a.department]
+        `INSERT INTO core_users (firebase_uid, name, email, is_active, is_demo)
+         VALUES (?, ?, ?, TRUE, TRUE)
+         ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), is_active = TRUE, is_demo = TRUE`,
+        [a.firebase_uid, a.name, a.email]
+      );
+      const [[{ id }]] = await connection.query('SELECT id FROM core_users WHERE firebase_uid = ?', [a.firebase_uid]);
+      await connection.query(
+        `INSERT INTO mnt_members (user_id, role, department, is_active)
+         VALUES (?, ?, ?, TRUE)
+         ON DUPLICATE KEY UPDATE role = VALUES(role), department = VALUES(department), is_active = TRUE`,
+        [id, a.role, a.department]
       );
     }
     logger.info('demo accounts ready', { count: DEMO_ACCOUNTS.length });

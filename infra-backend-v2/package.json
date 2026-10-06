@@ -7,6 +7,7 @@
     "dev": "nodemon server.js",
     "migrate": "node scripts/migrate.mjs",
     "schema:check": "node scripts/schema-fingerprint.mjs --check",
+    "bootstrap:sysadmin": "node scripts/bootstrap-sysadmin.mjs",
     "seed:staff": "node scripts/seed-staff.mjs",
     "seed:mock-users": "node scripts/seed-mock-users.mjs",
     "demo:reset": "node scripts/demo-reset.mjs",

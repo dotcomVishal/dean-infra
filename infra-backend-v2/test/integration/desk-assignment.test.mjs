@@ -12,7 +12,7 @@ import { getQueue, createTicket } from '../../src/controllers/ticketController.j
 import { notifyTicketCreated } from '../../src/services/notifier.js';
 import { checkSingleHolders } from '../../src/services/deskHealth.js';
 import { processDueNotifications } from '../../src/cron/emailReminders.js';
-import { DEPT, makeUser, makeOpenTicket, putOnLeave, inRolledBackTx, cleanup, pool } from './helpers.mjs';
+import { DEPT, makeUser, makeOpenTicket, putOnLeave, inRolledBackTx, cleanup, pool, insertUser, setRoleActive } from './helpers.mjs';
 
 beforeEach(cleanup);
 after(async () => { await cleanup(); await pool.end(); });
@@ -62,7 +62,7 @@ test('inactive or wrong-role pin falls back to scope resolution', async () => {
   const scopeAe = await makeUser({ role: 'AE' }); await civilScope(scopeAe);
   const pinnedAe = await makeUser({ role: 'AE' });
   const id = await ticketAtAe({ applicant, ae: pinnedAe });
-  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [pinnedAe]);
+  await pool.query('UPDATE core_users SET is_active = FALSE WHERE id = ?', [pinnedAe]);
   // Seeded staff in a dev DB may also cover Civil/NORTH: compare with the scope rule itself.
   const byScope = (await resolveAeForScope(pool, { department: 'Civil', campus: 'NORTH' })).id;
   assert.equal((await findDeskOwner(pool, await ticketRow(id), 'AE')).id, byScope);
@@ -220,7 +220,7 @@ test('override rejects bad input with 400 and changes nothing', async () => {
   const ae = await makeUser({ role: 'AE' });
   const se = await makeUser({ role: 'SE' });
   const inactive = await makeUser({ role: 'AE' });
-  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [inactive]);
+  await pool.query('UPDATE core_users SET is_active = FALSE WHERE id = ?', [inactive]);
   const id = await ticketAtAe({ applicant, ae });
   const before = await ticketRow(id);
 
@@ -245,7 +245,7 @@ test('getStaff lists active users of one desk, scope match first', async () => {
   const other = await makeUser({ role: 'AE', name: 'CI other' });
   const match = await makeUser({ role: 'AE', name: 'CI match' }); await civilScope(match);
   const off = await makeUser({ role: 'AE' });
-  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [off]);
+  await pool.query('UPDATE core_users SET is_active = FALSE WHERE id = ?', [off]);
   const res = fakeRes();
   await getStaff({ query: { role: 'AE', department: 'Civil', campus: 'NORTH' } }, res);
   const ids = res.body.staff.map((s) => s.id);
@@ -290,14 +290,12 @@ test('assignees: full for staff, only the JE desk and the current desk for a JE'
 // ---- single-holder health --------------------------------------------------------------------------------------------
 test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', async () => {
   await inRolledBackTx(async (c) => {
-    await c.query("UPDATE mnt_users SET is_active = FALSE WHERE role = 'DEAN'");
+    await setRoleActive('DEAN', false, c);
     let h = await checkSingleHolders(c);
     assert.equal(h.DEAN.count, 0);
     assert.equal(h.DEAN.ok, false);
 
-    const add = (email) => c.query(
-      `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
-       VALUES (?, 'CI Dean', ?, 'DEAN', 'Administration', TRUE)`, [randomUUID(), email]);
+    const add = (email) => insertUser(c, { firebaseUid: randomUUID(), name: 'CI Dean', email, role: 'DEAN' });
     await add('ph-ci@placeholder.invalid');
     h = await checkSingleHolders(c);
     assert.deepEqual([h.DEAN.count, h.DEAN.placeholder, h.DEAN.ok], [1, true, false]);
@@ -308,7 +306,7 @@ test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', asy
     assert.equal(h.DEAN.placeholder, false);
     assert.match(h.DEAN.message, /Deactivate all but one/);
 
-    await c.query("UPDATE mnt_users SET is_active = FALSE WHERE email = 'ph-ci@placeholder.invalid'");
+    await c.query("UPDATE core_users SET is_active = FALSE WHERE email = 'ph-ci@placeholder.invalid'");
     h = await checkSingleHolders(c);
     assert.deepEqual([h.DEAN.count, h.DEAN.ok, h.DEAN.message], [1, true, null]);
   });
@@ -317,12 +315,10 @@ test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', asy
 // ---- mail ------------------------------------------------------------------------------------------------------------------
 test('mail to a .invalid placeholder is cancelled, never sent or retried', async () => {
   const email = `ph-${randomUUID().slice(0, 6)}@placeholder.invalid`;
-  const [u] = await pool.query(
-    `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
-     VALUES (?, 'Placeholder', ?, 'DEAN', 'Administration', TRUE)`, [randomUUID(), email]);
+  const userId = await insertUser(pool, { firebaseUid: randomUUID(), name: 'Placeholder', email, role: 'DEAN' });
   const [n] = await pool.query(
     `INSERT INTO mnt_notifications (to_user_id, kind, subject, body, next_due_at) VALUES (?, 'EMAIL', 's', 'b', NOW() - INTERVAL 1 MINUTE)`,
-    [u.insertId]);
+    [userId]);
   try {
     const sent = [];
     const tally = await processDueNotifications({ send: async (m) => { sent.push(m); } });
@@ -331,8 +327,8 @@ test('mail to a .invalid placeholder is cancelled, never sent or retried', async
     const [[row]] = await pool.query('SELECT status, last_error, attempts FROM mnt_notifications WHERE id = ?', [n.insertId]);
     assert.deepEqual([row.status, row.last_error, row.attempts], ['CANCELLED', 'placeholder address', 0]);
   } finally {
-    await pool.query('DELETE FROM mnt_notifications WHERE to_user_id = ?', [u.insertId]);
-    await pool.query('DELETE FROM mnt_users WHERE id = ?', [u.insertId]);
+    await pool.query('DELETE FROM mnt_notifications WHERE to_user_id = ?', [userId]);
+    await pool.query('DELETE FROM core_users WHERE id = ?', [userId]);
   }
 });
 

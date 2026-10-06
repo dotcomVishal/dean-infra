@@ -38,7 +38,7 @@ test('JE on leave is skipped', async () => {
 
 test('inactive JE is skipped', async () => {
   const off = await makeUser({ role: 'JE', campus: 'NORTH', scopes: ['NORTH'] });
-  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [off]);
+  await pool.query('UPDATE core_users SET is_active = FALSE WHERE id = ?', [off]);
   assert.equal(await pick('NORTH'), null);
 });
 

@@ -47,10 +47,11 @@ async function runAdminTests() {
   let sysadmin;
   if (adminRows.length === 0) {
     const [res] = await pool.query(
-      `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
-       VALUES ('mock_sysadmin_uid', 'System Administrator', 'admin.test@iitmandi.ac.in', 'SYSADMIN', 'IT', TRUE)`
+      `INSERT INTO core_users (firebase_uid, name, email, is_active)
+       VALUES ('mock_sysadmin_uid', 'System Administrator', 'admin.test@iitmandi.ac.in', TRUE)`
     );
-    sysadmin = { id: res.insertId, name: 'System Administrator', email: 'admin.test@iitmandi.ac.in', role: 'SYSADMIN', department: 'IT' };
+    await pool.query(`INSERT INTO mnt_members (user_id, role, department) VALUES (?, 'SYSADMIN', 'Administration')`, [res.insertId]);
+    sysadmin = { id: res.insertId, name: 'System Administrator', email: 'admin.test@iitmandi.ac.in', role: 'SYSADMIN', department: 'Administration' };
   } else {
     sysadmin = adminRows[0];
   }

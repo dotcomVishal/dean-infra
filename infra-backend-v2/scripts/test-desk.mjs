@@ -105,7 +105,7 @@ try {
   const asUser = async (u) => {
     if (!saved.has(u.id)) {
       saved.set(u.id, (await one('SELECT firebase_uid FROM mnt_users WHERE id = ?', [u.id])).firebase_uid);
-      await pool.query('UPDATE mnt_users SET firebase_uid = ? WHERE id = ?', [`test-desk-${u.id}`, u.id]);
+      await pool.query('UPDATE core_users SET firebase_uid = ? WHERE id = ?', [`test-desk-${u.id}`, u.id]);
     }
     return { Authorization: `Bearer test-desk-${u.id}` };
   };
@@ -163,7 +163,7 @@ try {
   } finally {
     auth.verifyIdToken = realVerify;
     await new Promise((r) => server.close(r));
-    for (const [id, uid] of saved) await pool.query('UPDATE mnt_users SET firebase_uid = ? WHERE id = ?', [uid, id]);
+    for (const [id, uid] of saved) await pool.query('UPDATE core_users SET firebase_uid = ? WHERE id = ?', [uid, id]);
   }
 } finally {
   for (const id of created) await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [id]).catch((e) => console.error('cleanup failed', e.message));

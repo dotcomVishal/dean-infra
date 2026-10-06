@@ -12,7 +12,7 @@ const ticketsToClean = [];
 let deactivated = [];
 beforeEach(cleanup);
 after(async () => {
-  if (deactivated.length) await pool.query('UPDATE mnt_users SET is_active = TRUE WHERE id IN (?)', [deactivated]);
+  if (deactivated.length) await pool.query('UPDATE core_users SET is_active = TRUE WHERE id IN (?)', [deactivated]);
   for (const id of ticketsToClean) fs.rmSync(path.join(TICKETS_DIR, String(id)), { recursive: true, force: true });
   await cleanup();
   await stopServer();
@@ -35,7 +35,7 @@ async function soleHolders() {
   const [others] = await pool.query(
     "SELECT id FROM mnt_users WHERE role IN ('DEAN','DIRECTOR') AND is_active = TRUE AND id NOT IN (?, ?)", [dean, director]);
   deactivated = others.map((r) => r.id);
-  if (deactivated.length) await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id IN (?)', [deactivated]);
+  if (deactivated.length) await pool.query('UPDATE core_users SET is_active = FALSE WHERE id IN (?)', [deactivated]);
   return { dean, director };
 }
 

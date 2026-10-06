@@ -1,7 +1,10 @@
 -- Dev/test fixtures only. Never load in production. Run: npm run seed:mock-users
 
 
-INSERT INTO mnt_users (firebase_uid, name, email, role, department, phone) VALUES
+CREATE TEMPORARY TABLE mnt_tmp_mock_users (
+  firebase_uid VARCHAR(128), name VARCHAR(100), email VARCHAR(100), role VARCHAR(20), department VARCHAR(20), phone VARCHAR(20));
+
+INSERT INTO mnt_tmp_mock_users (firebase_uid, name, email, role, department, phone) VALUES
 -- The Top Brass & Admins
 ('mock_uid_01', 'Dr. S. K. Mehta', 'director@campus.edu', 'DIRECTOR', 'Administration', '9876543001'),
 ('mock_uid_02', 'Prof. K. N. Rao', 'dean.infra@campus.edu', 'DEAN', 'Administration', '9876543002'),
@@ -33,3 +36,13 @@ INSERT INTO mnt_users (firebase_uid, name, email, role, department, phone) VALUE
 -- General Applicants
 ('mock_uid_19', 'Rohan Verma', 'applicant1@campus.edu', 'APPLICANT', 'General', '9876543019'),
 ('mock_uid_20', 'Aditi Rao', 'applicant2@campus.edu', 'APPLICANT', 'General', '9876543020');
+
+INSERT INTO core_users (firebase_uid, name, email, phone)
+SELECT firebase_uid, name, email, phone FROM mnt_tmp_mock_users;
+
+INSERT INTO mnt_members (user_id, role, department)
+SELECT u.id, m.role, m.department
+  FROM mnt_tmp_mock_users m JOIN core_users u ON u.firebase_uid = m.firebase_uid
+ WHERE m.role <> 'APPLICANT';
+
+DROP TEMPORARY TABLE mnt_tmp_mock_users;

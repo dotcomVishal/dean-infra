@@ -97,7 +97,7 @@ test('forwarding to the Director mails nobody; forwarding to the Dean mails them
   const director = await makeUser({ role: 'DIRECTOR' });
   const [others] = await pool.query(
     "SELECT id FROM mnt_users WHERE role IN ('DEAN','DIRECTOR') AND is_active = TRUE AND id NOT IN (?, ?)", [dean, director]);
-  if (others.length) await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id IN (?)', [others.map((r) => r.id)]);
+  if (others.length) await pool.query('UPDATE core_users SET is_active = FALSE WHERE id IN (?)', [others.map((r) => r.id)]);
   try {
     const id = await makeOpenTicket(applicant, je, 'PENDING_SE_APPROVAL');
     await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ?, assigned_se_id = ? WHERE id = ?', [se, se, id]);
@@ -111,7 +111,7 @@ test('forwarding to the Director mails nobody; forwarding to the Dean mails them
     await act({ id: dean, role: 'DEAN' }, { action: 'FORWARD' });
     assert.deepEqual((await mails(id)).map((r) => r.to_user_id), [dean], 'the Director is not mailed');
   } finally {
-    if (others.length) await pool.query('UPDATE mnt_users SET is_active = TRUE WHERE id IN (?)', [others.map((r) => r.id)]);
+    if (others.length) await pool.query('UPDATE core_users SET is_active = TRUE WHERE id IN (?)', [others.map((r) => r.id)]);
   }
 });
 
