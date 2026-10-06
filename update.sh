@@ -49,6 +49,14 @@ for var in DB_HOST DB_NAME DB_USER DB_PASSWORD; do
 done
 mkdir -p infra-backend-v2/uploads
 
+# DB_HOST=mysql means "use the bundled MySQL": load docker-compose.dev.yml for every compose call
+# in this script, whether or not .env also carries COMPOSE_FILE.
+if grep -Eq '^DB_HOST=mysql[[:space:]]*$' .env; then
+  export COMPOSE_FILE="docker-compose.yml:docker-compose.dev.yml"
+  grep -Eq '^DEV_DB_ROOT_PASSWORD=.+' .env || fail "DEV_DB_ROOT_PASSWORD is empty in .env (needed by the bundled MySQL)."
+  echo "DB_HOST=mysql: using the bundled MySQL (docker-compose.dev.yml)"
+fi
+
 # 3. Sync code. The server checkout is deploy-only, so it is made to match origin exactly.
 #    Secrets (.env, key files), uploads/ and backups/ are untracked/ignored and are not touched.
 log "Sync code to origin/${BRANCH}"
