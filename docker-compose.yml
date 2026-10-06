@@ -67,7 +67,7 @@ services:
     image: nginx:alpine
     container_name: dean-proxy
     ports:
-      - "127.0.0.1:8085:80"
+      - "127.0.0.1:8140:80"
     volumes:
       - ./nginx-proxy.conf:/etc/nginx/nginx.conf:ro
     depends_on:

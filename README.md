@@ -42,7 +42,7 @@ What it does, in order, stopping with a non-zero exit at the first failure:
 4. `docker compose build`, then runs the migration runner (`scripts/migrate.mjs`) and the schema check (`scripts/schema-fingerprint.mjs --check`) in throwaway containers. An unreachable database, a failing migration or an unexpected schema stops the deploy here, while the previous containers are still serving.
 5. `docker compose up -d --remove-orphans`.
 6. Waits up to 180 s for `backend`, `frontend` and `proxy` to be healthy; on timeout prints logs and fails.
-7. Smoke-tests `http://127.0.0.1:8085/api/health` through the proxy (it also checks the database), then prunes dangling images.
+7. Smoke-tests `http://127.0.0.1:8140/api/health` through the proxy (it also checks the database), then prunes dangling images.
 
 The database is the shared college MySQL and is backed up by the college, not by this script. Uploaded files live on the application server and are not covered by that backup.
 

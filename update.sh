@@ -25,7 +25,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 BRANCH="${DEPLOY_BRANCH:-tazer}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
-PROXY_URL="http://127.0.0.1:8085/api/health"
+PROXY_URL="http://127.0.0.1:8140/api/health"
 
 log()  { printf '\n==> %s\n' "$*"; }
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
