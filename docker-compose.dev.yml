@@ -9,6 +9,10 @@
 #
 # Set in .env: DB_HOST=mysql DB_NAME=infraseva DB_USER=infraseva_user DB_PASSWORD=<throwaway>
 #              DEV_DB_ROOT_PASSWORD=<throwaway>
+#
+# To run the whole stack (and update.sh) on this database, add one line to .env:
+#              COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+# To move to the college database later: delete that line and change the DB_* lines.
 services:
   mysql:
     image: mysql:8.0
@@ -25,11 +29,14 @@ services:
       - infraseva_dev_db:/var/lib/mysql
     networks:
       - infra-network
+    # TCP ping as root: the image's temporary init server listens on the socket only, so
+    # "healthy" means the real server is up and the app account exists.
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 30
+      start_period: 20s
 
   backend:
     depends_on:

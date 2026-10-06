@@ -68,6 +68,13 @@ docker compose config -q || fail "docker-compose.yml / .env does not validate"
 log "Build"
 docker compose build
 
+# A stack that includes docker-compose.dev.yml (COMPOSE_FILE in .env) has its own mysql service.
+# Start it first: the migration runs with --no-deps and would not.
+if docker compose config --services | grep -qx mysql; then
+  log "Start local MySQL"
+  docker compose up -d --wait mysql || fail "local MySQL did not become healthy"
+fi
+
 log "Migrate database"
 docker compose run --rm --no-deps backend node scripts/migrate.mjs \
   || fail "migration failed; the previous containers are still running. Previous commit was ${PREVIOUS}."
