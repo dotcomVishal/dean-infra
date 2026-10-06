@@ -14,6 +14,7 @@ import metaRoutes from './routes/metaRoutes.js';
 import { requestId } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authFailureLimiter } from './middleware/rateLimit.js';
+import pool from './config/db.js';
 
 // 1. Initialize __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -62,7 +63,15 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/attachments', attachmentRoutes);
 app.use('/api/meta', metaRoutes);
-app.get('/api/health', (_req, res) => res.status(200).json({ success: true, status: 'ok' }));
+// Health includes the database: a pool that cannot reach MySQL answers 503, not a false 200.
+app.get('/api/health', async (_req, res) => {
+  try {
+    await pool.query({ sql: 'SELECT 1', timeout: 2000 });
+    res.status(200).json({ success: true, status: 'ok' });
+  } catch {
+    res.status(503).json({ success: false, status: 'database unavailable' });
+  }
+});
 
 // Unknown route (this is also what a direct /uploads/... URL now gets)
 app.use((req, res) => res.status(404).json({ success: false, message: 'Not found', requestId: req.id }));

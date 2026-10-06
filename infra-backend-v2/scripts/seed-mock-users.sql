@@ -1,5 +1,5 @@
 -- Dev/test fixtures only. Never load in production. Run: npm run seed:mock-users
-USE deanery_infra;
+
 
 INSERT INTO users (firebase_uid, name, email, role, department, phone) VALUES
 -- The Top Brass & Admins

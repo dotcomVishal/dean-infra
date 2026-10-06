@@ -6,17 +6,14 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import mysql from 'mysql2/promise';
+import { openConnection } from '../src/config/dbOptions.js';
 import { TICKETS_DIR } from '../src/config/paths.js';
 import { deleteTicketCascade } from '../src/services/ticketDeletion.js';
 
 const yes = process.argv.includes('--yes');
 const purgeUsers = process.argv.includes('--purge-users');
 
-const conn = await mysql.createConnection({
-  host: process.env.DB_HOST || 'localhost', port: Number(process.env.DB_PORT) || 3306,
-  user: process.env.DB_USER || 'root', password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || 'deanery_infra',
-});
+const conn = await openConnection(mysql);
 
 try {
   const [tickets] = await conn.query('SELECT id, title, status FROM tickets WHERE is_demo = TRUE ORDER BY id');

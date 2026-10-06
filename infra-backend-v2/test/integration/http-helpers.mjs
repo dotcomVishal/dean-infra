@@ -4,6 +4,7 @@
 // key is generated and the verifier is replaced: a bearer token is simply the
 // user's firebase_uid. Import this module BEFORE anything that pulls in app.js,
 // and set any RATE_LIMIT_* variable before importing it.
+import './guard.mjs';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';

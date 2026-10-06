@@ -2,6 +2,7 @@
 // `ci-` emails) in the otherwise-unused `Administration` department, and delete
 // them afterwards, so the tests neither depend on scripts/seed-staff.mjs nor
 // disturb real data if run against a dev database.
+import './guard.mjs';
 import { randomUUID } from 'crypto';
 import pool from '../../src/config/db.js';
 

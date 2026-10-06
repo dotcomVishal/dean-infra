@@ -21,7 +21,10 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: ci-throwaway
-          MYSQL_DATABASE: deanery_infra
+          MYSQL_DATABASE: infraseva_ci
+          MYSQL_USER: infraseva_ci_user
+          MYSQL_PASSWORD: ci-throwaway
+          TZ: Asia/Kolkata
         ports:
           - 3306:3306
         options: >-
@@ -38,9 +41,9 @@ jobs:
       NODE_ENV: test
       DB_HOST: 127.0.0.1
       DB_PORT: 3306
-      DB_USER: root
+      DB_USER: infraseva_ci_user
       DB_PASSWORD: ci-throwaway
-      DB_NAME: deanery_infra
+      DB_NAME: infraseva_ci
 
     steps:
       - uses: actions/checkout@v4

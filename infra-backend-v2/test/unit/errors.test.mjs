@@ -10,8 +10,8 @@ import { WorkflowError } from '../../src/config/workflow.js';
 import { logger, errorFields } from '../../src/utils/logger.js';
 
 const SQL_ERROR = Object.assign(
-  new Error("Table 'deanery_infra.tickets' doesn't exist"),
-  { code: 'ER_NO_SUCH_TABLE', errno: 1146, sqlState: '42S02', sqlMessage: "Table 'deanery_infra.tickets' doesn't exist" });
+  new Error("Table 'infraseva.mnt_tickets' doesn't exist"),
+  { code: 'ER_NO_SUCH_TABLE', errno: 1146, sqlState: '42S02', sqlMessage: "Table 'infraseva.mnt_tickets' doesn't exist" });
 const FIREBASE_ERROR = Object.assign(
   new Error('Firebase ID token has expired. Get a fresh ID token from your client app'),
   { code: 'auth/id-token-expired' });
@@ -39,7 +39,7 @@ test('async handler throwing a SQL error -> generic 500 + request id, no SQL tex
     assert.equal(body.requestId, res.headers.get('x-request-id'));
     assert.match(body.requestId, /^[0-9a-f-]{36}$/);
     const raw = JSON.stringify(body);
-    for (const leak of ['deanery_infra', 'ER_NO_SUCH_TABLE', '42S02', 'tickets']) {
+    for (const leak of ['infraseva', 'ER_NO_SUCH_TABLE', '42S02', 'mnt_tickets']) {
       assert.ok(!raw.includes(leak), `response leaked ${leak}`);
     }
   });

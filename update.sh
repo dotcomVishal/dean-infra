@@ -6,17 +6,18 @@
 #      cd ~/dean-infra && chmod +x ./update.sh && ./update.sh
 #  Also safe to run by hand. Idempotent: running it twice is harmless.
 #
-#  Steps: lock -> preflight -> sync code -> back up DB -> build + start ->
-#         wait for healthy -> smoke test -> prune.
+#  Steps: lock -> preflight -> sync code -> build -> migrate -> schema check ->
+#         start -> wait for healthy -> smoke test -> prune.
+#  The database is the shared college MySQL (DB_* in .env); it is backed up by the
+#  college, not here. Migrate and schema check run before the running containers
+#  are replaced: an unreachable database, a failing migration or an unexpected
+#  schema stops the deploy while the previous containers are still serving.
 #  Any failure exits non-zero (so the GitHub job goes red) and prints the
-#  container logs. Schema changes need no step here: the backend applies
-#  migrations/*.sql itself on boot (src/config/migrate.js).
+#  container logs.
 #
 #  Environment overrides:
 #    DEPLOY_BRANCH   branch to deploy            (default: tazer)
 #    HEALTH_TIMEOUT  seconds to wait for healthy (default: 180)
-#    BACKUP_KEEP     DB dumps to keep            (default: 7)
-#    SKIP_BACKUP=1   skip the pre-deploy DB dump
 # ============================================================
 set -euo pipefail
 
@@ -24,7 +25,6 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 BRANCH="${DEPLOY_BRANCH:-tazer}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
-BACKUP_KEEP="${BACKUP_KEEP:-7}"
 PROXY_URL="http://127.0.0.1:8085/api/health"
 
 log()  { printf '\n==> %s\n' "$*"; }
@@ -44,10 +44,10 @@ command -v curl >/dev/null || fail "curl is not installed"
 [ -f .env ] || fail ".env is missing. Create it from .env.example (secrets are never in git)."
 [ -f infra-backend-v2/serviceAccountKey.json ] \
   || fail "infra-backend-v2/serviceAccountKey.json is missing (Firebase Admin key, see README)."
-for var in DB_ROOT_PASSWORD DB_PASSWORD; do
+for var in DB_HOST DB_NAME DB_USER DB_PASSWORD; do
   grep -Eq "^${var}=.+" .env || fail "${var} is empty in .env (docker-compose.yml refuses to start without it)."
 done
-mkdir -p infra-backend-v2/uploads backups
+mkdir -p infra-backend-v2/uploads
 
 # 3. Sync code. The server checkout is deploy-only, so it is made to match origin exactly.
 #    Secrets (.env, key files), uploads/ and backups/ are untracked/ignored and are not touched.
@@ -64,41 +64,28 @@ echo "Deploying $(git rev-parse --short HEAD) (was ${PREVIOUS})"
 
 docker compose config -q || fail "docker-compose.yml / .env does not validate"
 
-# 4. Back up the database before new code (and its migrations) touch it.
-if [ "${SKIP_BACKUP:-0}" != "1" ] && [ -n "$(docker compose ps -q --status running mysql 2>/dev/null)" ]; then
-  log "Backup database"
-  DUMP="backups/deanery_infra_$(date +%Y%m%d_%H%M%S).sql.gz"
-  TMP_DUMP="${DUMP}.tmp"
-  if docker compose exec -T mysql sh -c \
-    'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --no-tablespaces "$MYSQL_DATABASE"' \
-    | gzip > "$TMP_DUMP"; then
-    :
-  elif docker compose exec -T mysql sh -c \
-    'mysqldump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines --no-tablespaces "$MYSQL_DATABASE"' \
-    | gzip > "$TMP_DUMP"; then
-    echo "WARNING: root dump authentication failed; backup used MYSQL_USER instead"
-  else
-    rm -f "$TMP_DUMP" "$DUMP"
-    fail "database backup failed; deploy aborted, nothing was changed"
-  fi
-  mv "$TMP_DUMP" "$DUMP"
-  echo "Saved ${DUMP}"
-  # shellcheck disable=SC2012
-  ls -1t backups/deanery_infra_*.sql.gz 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | xargs -r rm -f --
-else
-  log "Backup skipped (first deploy, database not running, or SKIP_BACKUP=1)"
-fi
+# 4. Build, then migrate and check the schema BEFORE the running containers are replaced.
+log "Build"
+docker compose build
 
-# 5. Build and start. --remove-orphans drops containers of services deleted from the compose file.
-log "Build and start"
-docker compose up -d --build --remove-orphans
+log "Migrate database"
+docker compose run --rm --no-deps backend node scripts/migrate.mjs \
+  || fail "migration failed; the previous containers are still running. Previous commit was ${PREVIOUS}."
+
+log "Check schema"
+docker compose run --rm --no-deps backend node scripts/schema-fingerprint.mjs --check \
+  || fail "schema check failed; services were not restarted. Previous commit was ${PREVIOUS}."
+
+# 5. Start. --remove-orphans drops containers of services deleted from the compose file.
+log "Start"
+docker compose up -d --remove-orphans
 
 # 6. Wait until every service reports healthy.
 log "Wait for healthy (max ${HEALTH_TIMEOUT}s)"
 deadline=$((SECONDS + HEALTH_TIMEOUT))
 while :; do
   unhealthy=""
-  for svc in mysql backend frontend proxy; do
+  for svc in backend frontend proxy; do
     cid="$(docker compose ps -q "$svc")"
     state="$([ -n "$cid" ] && docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" || echo missing)"
     [ "$state" = "healthy" ] || [ "$state" = "running" ] || unhealthy="${unhealthy} ${svc}=${state}"

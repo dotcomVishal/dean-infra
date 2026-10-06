@@ -1,15 +1,21 @@
 import mysql from 'mysql2/promise';
 import logger, { errorFields } from '../utils/logger.js';
+import { buildConnectionOptions, SESSION_SQL } from './dbOptions.js';
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT) || 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || 'deanery_infra',
+const pool = mysql.createPool(buildConnectionOptions({
   waitForConnections: true,
-  connectionLimit: 15,
-  queueLimit: 0
+  connectionLimit: Number(process.env.DB_POOL_LIMIT) || 15,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  idleTimeout: 60000,
+}));
+
+// Fix the time zone and sql_mode on every new connection, before any other
+// statement (mysql2 runs commands on a connection in the order they are queued).
+pool.on('connection', (connection) => {
+  connection.query(SESSION_SQL, (error) => {
+    if (error) logger.error('database session setup failed', errorFields(error));
+  });
 });
 
 // Test connection on startup

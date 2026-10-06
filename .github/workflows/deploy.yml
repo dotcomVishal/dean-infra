@@ -26,5 +26,10 @@ jobs:
           script_stop: true
           script: |
             cd ~/dean-infra
+            # Sync first: update.sh updates itself while running, so a changed script
+            # would otherwise run in its old form on the first deploy.
+            git fetch --prune origin tazer
+            git checkout -q tazer
+            git reset --hard origin/tazer
             chmod +x ./update.sh
             ./update.sh

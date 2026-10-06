@@ -6,10 +6,18 @@
    ```bash
    cp .env.example .env
    ```
-2. Add Firebase admin key at repository root as `serviceAccountKey.json`.
-3. Start full stack:
+2. Add Firebase admin key as `infra-backend-v2/serviceAccountKey.json`.
+3. Create the schema, then start the full stack (the database is the shared college MySQL set in `DB_*`):
    ```bash
-   docker compose up -d --build
+   docker compose build
+   docker compose run --rm --no-deps backend node scripts/migrate.mjs
+   docker compose up -d
+   ```
+   For development, `docker-compose.dev.yml` adds a local MySQL that imitates the college database
+   (IST clock, database `infraseva`, account without global privileges):
+   ```bash
+   dc() { docker compose -f docker-compose.yml -f docker-compose.dev.yml "$@"; }
+   dc up -d --wait mysql && dc run --rm --no-deps backend node scripts/migrate.mjs && dc up -d --wait
    ```
 4. Verify services:
    ```bash
@@ -29,28 +37,29 @@ cd ~/dean-infra && ./update.sh
 What it does, in order, stopping with a non-zero exit at the first failure:
 
 1. Takes a lock (one deploy at a time).
-2. Preflight: `docker`, `docker compose`, `git`, `curl` present; `.env` has `DB_ROOT_PASSWORD` and `DB_PASSWORD`; `infra-backend-v2/serviceAccountKey.json` exists.
+2. Preflight: `docker`, `docker compose`, `git`, `curl` present; `.env` has `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`; `infra-backend-v2/serviceAccountKey.json` exists.
 3. `git fetch` and `git reset --hard origin/tazer`. The server checkout is deploy-only; edits to tracked files are discarded (and listed). `.env`, key files, `uploads/` and `backups/` are untracked and never touched.
-4. Dumps the database to `backups/deanery_infra_<timestamp>.sql.gz` (keeps the last 7). It tries root first, then falls back to `MYSQL_USER` if root auth has drifted on a persistent volume.
-5. `docker compose up -d --build --remove-orphans`. The backend applies new `migrations/*.sql` itself on boot.
-6. Waits up to 180 s for `mysql`, `backend`, `frontend` and `proxy` to be healthy; on timeout prints logs and fails.
-7. Smoke-tests `http://127.0.0.1:8085/api/health` through the proxy, then prunes dangling images.
+4. `docker compose build`, then runs the migration runner (`scripts/migrate.mjs`) and the schema check (`scripts/schema-fingerprint.mjs --check`) in throwaway containers. An unreachable database, a failing migration or an unexpected schema stops the deploy here, while the previous containers are still serving.
+5. `docker compose up -d --remove-orphans`.
+6. Waits up to 180 s for `backend`, `frontend` and `proxy` to be healthy; on timeout prints logs and fails.
+7. Smoke-tests `http://127.0.0.1:8085/api/health` through the proxy (it also checks the database), then prunes dangling images.
 
-Overrides: `DEPLOY_BRANCH`, `HEALTH_TIMEOUT`, `BACKUP_KEEP`, `SKIP_BACKUP=1`.
+The database is the shared college MySQL and is backed up by the college, not by this script. Uploaded files live on the application server and are not covered by that backup.
 
-Rollback: `git reset --hard <previous sha>` (printed in the deploy log), then `./update.sh` with `DEPLOY_BRANCH` set to a branch at that sha, or restore a dump from `backups/` if a migration must be undone.
+Overrides: `DEPLOY_BRANCH`, `HEALTH_TIMEOUT`.
+
+Rollback: `git reset --hard <previous sha>` (printed in the deploy log), then `./update.sh` with `DEPLOY_BRANCH` set to a branch at that sha. A schema change in the shared database is never undone by rolling the code back: add a new numbered migration instead.
 
 ## Ports
 
 - `80/443` -> reverse proxy
 - `backend:5000` internal
 - `frontend:5173` internal
-- `mysql:3306` internal
 
 ## Notes
 
 - Uploaded files persist in `infra-backend-v2/uploads`.
-- MySQL data persists in the `mysql_data` named volume.
+- Database: the shared college MySQL (`infraseva`). Module tables are prefixed `mnt_`, shared identity is `core_users`. See `Agent/analysis.md` for the naming rules.
 
 ## Demo login (stand-in for LDAP)
 

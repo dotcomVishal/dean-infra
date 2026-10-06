@@ -14,7 +14,12 @@ services:
       - "127.0.0.1:3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ci-throwaway
-      MYSQL_DATABASE: deanery_infra
+      MYSQL_DATABASE: infraseva_ci
+      # Same shape as production: a non-root account with rights on one database only,
+      # and a server clock in IST (the college server is IST; the code stores UTC).
+      MYSQL_USER: infraseva_ci_user
+      MYSQL_PASSWORD: ci-throwaway
+      TZ: Asia/Kolkata
     tmpfs:
       - /var/lib/mysql
     healthcheck:
