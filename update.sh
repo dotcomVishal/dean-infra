@@ -53,6 +53,7 @@ mkdir -p infra-backend-v2/uploads
 # in this script, whether or not .env also carries COMPOSE_FILE.
 if grep -Eq '^DB_HOST=mysql[[:space:]]*$' .env; then
   export COMPOSE_FILE="docker-compose.yml:docker-compose.dev.yml"
+  BUNDLED_DB=1
   grep -Eq '^DEV_DB_ROOT_PASSWORD=.+' .env || fail "DEV_DB_ROOT_PASSWORD is empty in .env (needed by the bundled MySQL)."
   echo "DB_HOST=mysql: using the bundled MySQL (docker-compose.dev.yml)"
 fi
@@ -78,9 +79,9 @@ docker compose build
 
 # A stack that includes docker-compose.dev.yml (COMPOSE_FILE in .env) has its own mysql service.
 # Start it first: the migration runs with --no-deps and would not.
-if docker compose config --services | grep -qx mysql; then
+if [ "${BUNDLED_DB:-0}" = "1" ]; then
   log "Start local MySQL"
-  docker compose up -d --wait mysql || fail "local MySQL did not become healthy"
+  docker compose up -d --wait mysql || { docker compose logs --tail=40 mysql || true; fail "local MySQL did not start or become healthy"; }
 fi
 
 log "Migrate database"
