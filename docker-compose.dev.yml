@@ -1,0 +1,47 @@
+# Development and rehearsal only. Adds a MySQL that imitates the college database:
+# MySQL 8.0, server clock in IST, database `infraseva`, an account with rights on that
+# database only, no schema loaded (the migration runner creates it).
+#
+#   dc() { docker compose -f docker-compose.yml -f docker-compose.dev.yml "$@"; }
+#   dc up -d --wait mysql
+#   dc run --rm --no-deps backend node scripts/migrate.mjs
+#   dc up -d --wait
+#
+# Set in .env: DB_HOST=mysql DB_NAME=infraseva DB_USER=infraseva_user DB_PASSWORD=<throwaway>
+#              DEV_DB_ROOT_PASSWORD=<throwaway>
+#
+# To run the whole stack (and update.sh) on this database, add one line to .env:
+#              COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+# To move to the college database later: delete that line and change the DB_* lines.
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dean-mysql-dev
+    ports:
+      - "127.0.0.1:3308:3306"
+    environment:
+      TZ: Asia/Kolkata
+      MYSQL_ROOT_PASSWORD: ${DEV_DB_ROOT_PASSWORD:?Set DEV_DB_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: infraseva
+      MYSQL_USER: infraseva_user
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - infraseva_dev_db:/var/lib/mysql
+    networks:
+      - infra-network
+    # TCP ping as root: the image's temporary init server listens on the socket only, so
+    # "healthy" means the real server is up and the app account exists.
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 300s   # first start initialises the data directory; a slow disk needs minutes
+
+  backend:
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  infraseva_dev_db:

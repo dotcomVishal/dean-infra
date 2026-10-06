@@ -1,0 +1,294 @@
+COLUMN core_schema_migrations 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN core_schema_migrations 002 filename varchar(255) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN core_schema_migrations 003 applied_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN core_users 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN core_users 002 firebase_uid varchar(128) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN core_users 003 name varchar(100) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN core_users 004 email varchar(100) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN core_users 005 phone varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN core_users 006 is_active tinyint(1) null=NO default=1 collation=- extra=
+COLUMN core_users 007 is_demo tinyint(1) null=NO default=0 collation=- extra=
+COLUMN core_users 008 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_attachments 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_attachments 002 ticket_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_attachments 003 report_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_attachments 004 file_url varchar(255) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_attachments 005 uploaded_by int null=NO default=NULL collation=- extra=
+COLUMN mnt_attachments 006 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_attachments 007 document_category enum('APPLICANT_EVIDENCE','JE_SITE_PHOTO','JE_ESTIMATE_DOC','CLERK_TENDER_DOC','FINANCE_SANCTION','AUTHORITY_REMARKS','DESK_DOC','WORK_DOC') null=NO default=APPLICANT_EVIDENCE collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_attachments 008 uploader_desk varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_attachments 009 audit_log_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_attachments 010 original_name varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_audit_logs 002 ticket_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_audit_logs 003 user_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_audit_logs 004 action enum('CREATED','ASSIGNED','REASSIGNED','REMINDER_SENT','SUBMITTED','FORWARDED','APPROVED','CHANGES_REQUESTED','REJECTED','TENDER_PUBLISHED','WORK_AWARDED','WORK_COMPLETED','WORK_REOPENED','BILL_RECORDED','BILL_UPDATED','CLOSED','OVERRIDE','PASSED','RETURNED','DENIED','TECH_EVALUATION','FIN_EVALUATION','TENDER_CANCELLED','RESOLVED','SENT_BACK') null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 005 remarks text null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 006 from_status varchar(40) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 007 to_status varchar(40) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 008 from_desk varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 009 to_desk varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 010 visibility enum('ALL','INTERNAL','AUTHORITY') null=NO default=ALL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_audit_logs 011 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_audit_logs 012 is_self_action tinyint(1) null=NO default=0 collation=- extra=
+COLUMN mnt_bills 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_bills 002 ticket_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_bills 003 bill_number varchar(100) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_bills 004 voucher_number varchar(100) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_bills 005 agency_name varchar(255) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_bills 006 bill_type enum('RA_BILL','FINAL_BILL','ADVANCE','SECURITY_REFUND') null=NO default=RA_BILL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_bills 007 gross_amount decimal(15,2) null=NO default=NULL collation=- extra=
+COLUMN mnt_bills 008 deductions decimal(15,2) null=YES default=0.00 collation=- extra=
+COLUMN mnt_bills 009 net_amount decimal(15,2) null=NO default=NULL collation=- extra=
+COLUMN mnt_bills 010 payment_status enum('PENDING','VERIFIED','DISBURSED','REJECTED') null=YES default=PENDING collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_bills 011 payment_date date null=YES default=NULL collation=- extra=
+COLUMN mnt_bills 012 payment_mode varchar(50) null=YES default=PFMS collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_bills 013 remarks text null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_bills 014 processed_by int null=NO default=NULL collation=- extra=
+COLUMN mnt_bills 015 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_deleted_tickets 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_deleted_tickets 002 ticket_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_deleted_tickets 003 deleted_by int null=YES default=NULL collation=- extra=
+COLUMN mnt_deleted_tickets 004 deleted_by_name varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_deleted_tickets 005 deleted_at timestamp null=NO default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_deleted_tickets 006 reason text null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_deleted_tickets 007 snapshot json null=NO default=NULL collation=- extra=
+COLUMN mnt_deleted_tickets 008 file_count int null=NO default=0 collation=- extra=
+COLUMN mnt_financial_limits 001 key varchar(50) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_financial_limits 002 max_amount decimal(15,2) null=NO default=NULL collation=- extra=
+COLUMN mnt_financial_limits 003 updated_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+COLUMN mnt_financial_limits 004 updated_by int null=YES default=NULL collation=- extra=
+COLUMN mnt_members 001 user_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_members 002 role enum('APPLICANT','JE','AE','SE','DEAN','DIRECTOR','SYSADMIN','CLERICAL','ACCOUNTANT') null=NO default=APPLICANT collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_members 003 department enum('Civil','Electrical','Horticulture','Administration','General') null=NO default=General collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_members 004 campus enum('NORTH','SOUTH','BOTH') null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_members 005 last_assigned_at datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_members 006 is_active tinyint(1) null=NO default=1 collation=- extra=
+COLUMN mnt_notifications 001 id bigint null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_notifications 002 ticket_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_notifications 003 to_user_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_notifications 004 kind enum('EMAIL','REMINDER','DIGEST') null=NO default=EMAIL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 005 audience enum('STAFF','APPLICANT') null=NO default=STAFF collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 006 desk varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 007 subject varchar(255) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 008 body text null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 009 body_html mediumtext null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 010 status enum('PENDING','SENT','FAILED','CANCELLED') null=NO default=PENDING collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 011 next_due_at datetime null=NO default=NULL collation=- extra=
+COLUMN mnt_notifications 012 anchor_at datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_notifications 013 reminder_no int null=NO default=0 collation=- extra=
+COLUMN mnt_notifications 014 stop_when_status_not_in varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 015 attempts int null=NO default=0 collation=- extra=
+COLUMN mnt_notifications 016 last_error varchar(500) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_notifications 017 locked_until datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_notifications 018 sent_at datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_notifications 019 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_notifications 020 dedupe_key varchar(100) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_reports 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_reports 002 ticket_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_reports 003 je_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_reports 004 version int null=NO default=1 collation=- extra=
+COLUMN mnt_reports 005 nature_of_work text null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_reports 006 estimated_amount decimal(15,2) null=NO default=NULL collation=- extra=
+COLUMN mnt_reports 007 remarks text null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_reports 008 answers_message_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_reports 009 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_schema_migrations 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_schema_migrations 002 filename varchar(255) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_schema_migrations 003 applied_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_tenders 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_tenders 002 ticket_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_tenders 003 nit_number varchar(100) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tenders 004 portal_type enum('GeM','CPP Portal','State Tender') null=NO default=GeM collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tenders 005 published_date date null=YES default=NULL collation=- extra=
+COLUMN mnt_tenders 006 bid_opening_date date null=YES default=NULL collation=- extra=
+COLUMN mnt_tenders 007 awarded_agency varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tenders 008 work_order_value decimal(15,2) null=YES default=NULL collation=- extra=
+COLUMN mnt_tenders 009 status enum('PUBLISHED','EVALUATION','TECHNICAL_EVALUATION','FINANCIAL_EVALUATION','AWARDED','CANCELLED') null=YES default=PUBLISHED collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tenders 010 remarks text null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tenders 011 created_by int null=NO default=NULL collation=- extra=
+COLUMN mnt_tenders 012 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_tenders 013 bid_end_date date null=YES default=NULL collation=- extra=
+COLUMN mnt_tenders 014 cancel_reason text null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_ticket_messages 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_ticket_messages 002 ticket_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_ticket_messages 003 audit_log_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_ticket_messages 004 author_user_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_ticket_messages 005 author_desk varchar(20) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_ticket_messages 006 to_user_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_ticket_messages 007 to_desk varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_ticket_messages 008 kind enum('CHANGE_REQUEST','REPLY','INTERNAL_REMARK','REJECTION_REASON','PUBLIC_NOTE') null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_ticket_messages 009 body text null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_ticket_messages 010 visible_from_rank tinyint unsigned null=NO default=NULL collation=- extra=
+COLUMN mnt_ticket_messages 011 in_reply_to int null=YES default=NULL collation=- extra=
+COLUMN mnt_ticket_messages 012 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_tickets 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_tickets 002 applicant_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_tickets 003 assigned_je_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 004 assigned_ae_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 005 assigned_se_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 006 current_desk_user_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 007 open_change_request_id int null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 008 status_changed_at datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 009 assigned_at datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 010 department enum('Civil','Electrical','Horticulture') null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 011 campus enum('NORTH','SOUTH') null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 012 building varchar(150) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 013 landmark varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 014 lat decimal(9,6) null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 015 lng decimal(9,6) null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 016 category varchar(50) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 017 contact_phone varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 018 priority enum('LOW','NORMAL','URGENT') null=NO default=NORMAL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 019 title varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 020 type enum('recurring','non-recurring') null=YES default=recurring collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 021 description text null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 022 location varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 023 status enum('UNASSIGNED','ASSIGNED_TO_JE','PENDING_AE_APPROVAL','PENDING_SE_APPROVAL','PENDING_DEAN_APPROVAL','PENDING_DIRECTOR_APPROVAL','APPROVED_FOR_TENDERING','TENDER_PUBLISHED','TECHNICAL_EVALUATION','FINANCIAL_EVALUATION','TENDER_CANCELLED','WORK_IN_PROGRESS','WORK_COMPLETED','RETURNED_TO_JE','DENIED','CLOSED') null=NO default=ASSIGNED_TO_JE collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 024 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_tickets 025 is_mock tinyint(1) null=NO default=0 collation=- extra=
+COLUMN mnt_tickets 026 resolved_from_status varchar(40) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_tickets 027 resolved_at datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_tickets 028 is_demo tinyint(1) null=NO default=0 collation=- extra=
+COLUMN mnt_user_availability 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_user_availability 002 user_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_user_availability 003 start_at datetime null=NO default=NULL collation=- extra=
+COLUMN mnt_user_availability 004 end_at datetime null=NO default=NULL collation=- extra=
+COLUMN mnt_user_availability 005 reason varchar(255) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_user_availability 006 created_by int null=NO default=NULL collation=- extra=
+COLUMN mnt_user_availability 007 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_user_scopes 001 id int null=NO default=NULL collation=- extra=auto_increment
+COLUMN mnt_user_scopes 002 user_id int null=NO default=NULL collation=- extra=
+COLUMN mnt_user_scopes 003 department enum('Civil','Electrical','Horticulture','Administration','General') null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_user_scopes 004 campus enum('NORTH','SOUTH','BOTH') null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_user_scopes 005 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+COLUMN mnt_users 001 id int null=NO default=0 collation=- extra=
+COLUMN mnt_users 002 firebase_uid varchar(128) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_users 003 name varchar(100) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_users 004 email varchar(100) null=NO default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_users 005 role varchar(10) null=NO default= collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_users 006 department varchar(14) null=NO default= collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_users 007 campus enum('NORTH','SOUTH','BOTH') null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_users 008 last_assigned_at datetime null=YES default=NULL collation=- extra=
+COLUMN mnt_users 009 phone varchar(20) null=YES default=NULL collation=utf8mb4_0900_ai_ci extra=
+COLUMN mnt_users 010 is_active int null=NO default=0 collation=- extra=
+COLUMN mnt_users 011 is_demo tinyint(1) null=NO default=0 collation=- extra=
+COLUMN mnt_users 012 created_at timestamp null=YES default=CURRENT_TIMESTAMP collation=- extra=DEFAULT_GENERATED
+FK fk_mnt_attachments_audit mnt_attachments.audit_log_id -> mnt_audit_logs.id on_delete=SET NULL on_update=NO ACTION pos=1
+FK fk_mnt_attachments_report mnt_attachments.report_id -> mnt_reports.id on_delete=SET NULL on_update=NO ACTION pos=1
+FK fk_mnt_attachments_ticket mnt_attachments.ticket_id -> mnt_tickets.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_attachments_uploader mnt_attachments.uploaded_by -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_audit_logs_ticket mnt_audit_logs.ticket_id -> mnt_tickets.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_audit_logs_user mnt_audit_logs.user_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_bills_processed_by mnt_bills.processed_by -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_bills_ticket mnt_bills.ticket_id -> mnt_tickets.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_members_user mnt_members.user_id -> core_users.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_notifications_ticket mnt_notifications.ticket_id -> mnt_tickets.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_notifications_to_user mnt_notifications.to_user_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_reports_answers_message mnt_reports.answers_message_id -> mnt_ticket_messages.id on_delete=SET NULL on_update=NO ACTION pos=1
+FK fk_mnt_reports_je mnt_reports.je_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_reports_ticket mnt_reports.ticket_id -> mnt_tickets.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_tenders_created_by mnt_tenders.created_by -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_tenders_ticket mnt_tenders.ticket_id -> mnt_tickets.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_ticket_messages_audit mnt_ticket_messages.audit_log_id -> mnt_audit_logs.id on_delete=SET NULL on_update=NO ACTION pos=1
+FK fk_mnt_ticket_messages_author mnt_ticket_messages.author_user_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_ticket_messages_in_reply_to mnt_ticket_messages.in_reply_to -> mnt_ticket_messages.id on_delete=SET NULL on_update=NO ACTION pos=1
+FK fk_mnt_ticket_messages_ticket mnt_ticket_messages.ticket_id -> mnt_tickets.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_ticket_messages_to_user mnt_ticket_messages.to_user_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_tickets_applicant mnt_tickets.applicant_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_tickets_assigned_ae mnt_tickets.assigned_ae_id -> core_users.id on_delete=SET NULL on_update=NO ACTION pos=1
+FK fk_mnt_tickets_assigned_je mnt_tickets.assigned_je_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_tickets_assigned_se mnt_tickets.assigned_se_id -> core_users.id on_delete=SET NULL on_update=NO ACTION pos=1
+FK fk_mnt_tickets_current_desk_user mnt_tickets.current_desk_user_id -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_user_availability_created_by mnt_user_availability.created_by -> core_users.id on_delete=NO ACTION on_update=NO ACTION pos=1
+FK fk_mnt_user_availability_user mnt_user_availability.user_id -> core_users.id on_delete=CASCADE on_update=NO ACTION pos=1
+FK fk_mnt_user_scopes_user mnt_user_scopes.user_id -> core_users.id on_delete=CASCADE on_update=NO ACTION pos=1
+INDEX core_schema_migrations PRIMARY 1 id unique=1
+INDEX core_schema_migrations filename 1 filename unique=1
+INDEX core_users PRIMARY 1 id unique=1
+INDEX core_users email 1 email unique=1
+INDEX core_users firebase_uid 1 firebase_uid unique=1
+INDEX mnt_attachments PRIMARY 1 id unique=1
+INDEX mnt_attachments fk_mnt_attachments_report 1 report_id unique=0
+INDEX mnt_attachments idx_attachments_audit 1 audit_log_id unique=0
+INDEX mnt_attachments idx_ticket 1 ticket_id unique=0
+INDEX mnt_attachments uploaded_by 1 uploaded_by unique=0
+INDEX mnt_audit_logs PRIMARY 1 id unique=1
+INDEX mnt_audit_logs idx_ticket_timeline 1 ticket_id unique=0
+INDEX mnt_audit_logs idx_ticket_timeline 2 created_at unique=0
+INDEX mnt_audit_logs user_id 1 user_id unique=0
+INDEX mnt_bills PRIMARY 1 id unique=1
+INDEX mnt_bills idx_ticket 1 ticket_id unique=0
+INDEX mnt_bills processed_by 1 processed_by unique=0
+INDEX mnt_deleted_tickets PRIMARY 1 id unique=1
+INDEX mnt_deleted_tickets idx_deleted_tickets_at 1 deleted_at unique=0
+INDEX mnt_deleted_tickets idx_deleted_tickets_ticket 1 ticket_id unique=0
+INDEX mnt_financial_limits PRIMARY 1 key unique=1
+INDEX mnt_members PRIMARY 1 user_id unique=1
+INDEX mnt_members idx_mnt_members_role_dept 1 role unique=0
+INDEX mnt_members idx_mnt_members_role_dept 2 department unique=0
+INDEX mnt_notifications PRIMARY 1 id unique=1
+INDEX mnt_notifications idx_notifications_due 1 status unique=0
+INDEX mnt_notifications idx_notifications_due 2 next_due_at unique=0
+INDEX mnt_notifications idx_notifications_ticket 1 ticket_id unique=0
+INDEX mnt_notifications idx_notifications_ticket 2 kind unique=0
+INDEX mnt_notifications idx_notifications_ticket 3 status unique=0
+INDEX mnt_notifications to_user_id 1 to_user_id unique=0
+INDEX mnt_notifications uq_notifications_dedupe 1 dedupe_key unique=1
+INDEX mnt_reports PRIMARY 1 id unique=1
+INDEX mnt_reports fk_mnt_reports_answers_message 1 answers_message_id unique=0
+INDEX mnt_reports idx_ticket 1 ticket_id unique=0
+INDEX mnt_reports je_id 1 je_id unique=0
+INDEX mnt_reports uq_report_ticket_version 1 ticket_id unique=1
+INDEX mnt_reports uq_report_ticket_version 2 version unique=1
+INDEX mnt_schema_migrations PRIMARY 1 id unique=1
+INDEX mnt_schema_migrations filename 1 filename unique=1
+INDEX mnt_tenders PRIMARY 1 id unique=1
+INDEX mnt_tenders created_by 1 created_by unique=0
+INDEX mnt_tenders idx_ticket 1 ticket_id unique=0
+INDEX mnt_ticket_messages PRIMARY 1 id unique=1
+INDEX mnt_ticket_messages author_user_id 1 author_user_id unique=0
+INDEX mnt_ticket_messages fk_mnt_ticket_messages_audit 1 audit_log_id unique=0
+INDEX mnt_ticket_messages idx_ticket_messages_ticket 1 ticket_id unique=0
+INDEX mnt_ticket_messages idx_ticket_messages_to_user 1 to_user_id unique=0
+INDEX mnt_ticket_messages in_reply_to 1 in_reply_to unique=0
+INDEX mnt_tickets PRIMARY 1 id unique=1
+INDEX mnt_tickets applicant_id 1 applicant_id unique=0
+INDEX mnt_tickets idx_assigned_ae 1 assigned_ae_id unique=0
+INDEX mnt_tickets idx_assigned_je 1 assigned_je_id unique=0
+INDEX mnt_tickets idx_assigned_se 1 assigned_se_id unique=0
+INDEX mnt_tickets idx_current_desk_user 1 current_desk_user_id unique=0
+INDEX mnt_tickets idx_is_demo 1 is_demo unique=0
+INDEX mnt_tickets idx_is_mock 1 is_mock unique=0
+INDEX mnt_tickets idx_status_dept_date 1 status unique=0
+INDEX mnt_tickets idx_status_dept_date 2 department unique=0
+INDEX mnt_tickets idx_status_dept_date 3 created_at unique=0
+INDEX mnt_user_availability PRIMARY 1 id unique=1
+INDEX mnt_user_availability created_by 1 created_by unique=0
+INDEX mnt_user_availability idx_availability_user_window 1 user_id unique=0
+INDEX mnt_user_availability idx_availability_user_window 2 start_at unique=0
+INDEX mnt_user_availability idx_availability_user_window 3 end_at unique=0
+INDEX mnt_user_scopes PRIMARY 1 id unique=1
+INDEX mnt_user_scopes idx_scope_dept_campus 1 department unique=0
+INDEX mnt_user_scopes idx_scope_dept_campus 2 campus unique=0
+INDEX mnt_user_scopes uq_user_scope 1 user_id unique=1
+INDEX mnt_user_scopes uq_user_scope 2 department unique=1
+INDEX mnt_user_scopes uq_user_scope 3 campus unique=1
+OBJECT core_schema_migrations BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT core_users BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_attachments BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_audit_logs BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_bills BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_deleted_tickets BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_financial_limits BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_members BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_notifications BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_reports BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_schema_migrations BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_tenders BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_ticket_messages BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_tickets BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_user_availability BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_user_scopes BASE TABLE engine=InnoDB collation=utf8mb4_0900_ai_ci
+OBJECT mnt_users VIEW engine=- collation=-
+VIEW mnt_users security=INVOKER select `u`.`id` AS `id`,`u`.`firebase_uid` AS `firebase_uid`,`u`.`name` AS `name`,`u`.`email` AS `email`,coalesce(`m`.`role`,'APPLICANT') AS `role`,coalesce(`m`.`department`,'General') AS `department`,`m`.`campus` AS `campus`,`m`.`last_assigned_at` AS `last_assigned_at`,`u`.`phone` AS `phone`,((0 <> `u`.`is_active`) and (0 <> coalesce(`m`.`is_active`,true))) AS `is_active`,`u`.`is_demo` AS `is_demo`,`u`.`created_at` AS `created_at` from (`core_users` `u` left join `mnt_members` `m` on((`m`.`user_id` = `u`.`id`)))

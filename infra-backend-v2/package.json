@@ -1,0 +1,44 @@
+{
+  "name": "infra-backend-v2",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "migrate": "node scripts/migrate.mjs",
+    "schema:check": "node scripts/schema-fingerprint.mjs --check",
+    "bootstrap:sysadmin": "node scripts/bootstrap-sysadmin.mjs",
+    "seed:staff": "node scripts/seed-staff.mjs",
+    "seed:mock-users": "node scripts/seed-mock-users.mjs",
+    "demo:reset": "node scripts/demo-reset.mjs",
+    "test": "NODE_ENV=test node --test 'test/unit/*.test.mjs' scripts/test-workflow.mjs scripts/test-visibility.mjs",
+    "test:unit": "NODE_ENV=test node --test 'test/unit/*.test.mjs' scripts/test-workflow.mjs scripts/test-visibility.mjs",
+    "test:integration": "NODE_ENV=test node scripts/prepare-test-db.mjs && NODE_ENV=test node --test --test-concurrency=1 'test/integration/*.test.mjs'",
+    "test:integration:local": "env DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER=infraseva_ci_user DB_PASSWORD=ci-throwaway DB_NAME=infraseva_ci npm run test:integration",
+    "test:e2e": "node scripts/test-endpoints-e2e.mjs",
+    "test:workflow": "node --test scripts/test-workflow.mjs",
+    "test:actions": "node scripts/test-actions.mjs",
+    "test:report": "node scripts/test-report.mjs",
+    "test:assignment": "node scripts/test-assignment.mjs",
+    "test:visibility": "node --test scripts/test-visibility.mjs",
+    "test:notifications": "node scripts/test-notifications.mjs",
+    "test:desk": "node scripts/test-desk.mjs",
+    "email:preview": "node scripts/preview-emails.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "firebase-admin": "^14.3.0",
+    "helmet": "^8.3.0",
+    "multer": "^2.3.0",
+    "mysql2": "^3.24.3",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^10.0.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
