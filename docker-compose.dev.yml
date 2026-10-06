@@ -35,8 +35,8 @@ services:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 20s
+      retries: 120
+      start_period: 300s   # first start initialises the data directory; a slow disk needs minutes
 
   backend:
     depends_on:

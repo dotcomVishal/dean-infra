@@ -81,7 +81,7 @@ docker compose build
 # Start it first: the migration runs with --no-deps and would not.
 if [ "${BUNDLED_DB:-0}" = "1" ]; then
   log "Start local MySQL"
-  docker compose up -d --wait mysql || { docker compose logs --tail=40 mysql || true; fail "local MySQL did not start or become healthy"; }
+  docker compose up -d --wait --wait-timeout 600 mysql || { docker compose logs --tail=40 mysql || true; fail "local MySQL did not start or become healthy"; }
 fi
 
 log "Migrate database"
