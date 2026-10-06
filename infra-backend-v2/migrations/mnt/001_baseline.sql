@@ -1,31 +1,13 @@
 -- ============================================================
--- Baseline schema for the maintenance module.
+-- Baseline schema for the maintenance module (prefix mnt_).
 -- Replaces schema.sql + legacy migrations 001-015 (kept in migrations/legacy/,
 -- never run). Generated from the tested schema, then reviewed.
 -- No USE, no database name: the connection decides the database.
 -- Tables are in dependency order; foreign key checks stay on.
+-- Shared identity lives in core_users (migrations/core).
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS users (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `firebase_uid` varchar(128) NOT NULL,
-  `name` varchar(100) NOT NULL,
-  `email` varchar(100) NOT NULL,
-  `role` enum('APPLICANT','JE','AE','SE','DEAN','DIRECTOR','SYSADMIN','CLERICAL','ACCOUNTANT') NOT NULL,
-  `department` enum('Civil','Electrical','Horticulture','Administration','General') NOT NULL,
-  `campus` enum('NORTH','SOUTH','BOTH') DEFAULT NULL,
-  `last_assigned_at` datetime DEFAULT NULL,
-  `phone` varchar(20) DEFAULT NULL,
-  `is_active` tinyint(1) DEFAULT '1',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `is_demo` tinyint(1) NOT NULL DEFAULT '0',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `firebase_uid` (`firebase_uid`),
-  UNIQUE KEY `email` (`email`),
-  KEY `idx_role_dept` (`role`,`department`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-CREATE TABLE IF NOT EXISTS tickets (
+CREATE TABLE IF NOT EXISTS mnt_tickets (
   `id` int NOT NULL AUTO_INCREMENT,
   `applicant_id` int NOT NULL,
   `assigned_je_id` int DEFAULT NULL,
@@ -63,14 +45,14 @@ CREATE TABLE IF NOT EXISTS tickets (
   KEY `idx_assigned_se` (`assigned_se_id`),
   KEY `idx_is_mock` (`is_mock`),
   KEY `idx_is_demo` (`is_demo`),
-  CONSTRAINT `fk_tickets_assigned_ae` FOREIGN KEY (`assigned_ae_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_tickets_assigned_se` FOREIGN KEY (`assigned_se_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_tickets_current_desk_user` FOREIGN KEY (`current_desk_user_id`) REFERENCES `users` (`id`),
-  CONSTRAINT `tickets_ibfk_1` FOREIGN KEY (`applicant_id`) REFERENCES `users` (`id`),
-  CONSTRAINT `tickets_ibfk_2` FOREIGN KEY (`assigned_je_id`) REFERENCES `users` (`id`)
+  CONSTRAINT `fk_mnt_tickets_assigned_ae` FOREIGN KEY (`assigned_ae_id`) REFERENCES `core_users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_mnt_tickets_assigned_se` FOREIGN KEY (`assigned_se_id`) REFERENCES `core_users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_mnt_tickets_current_desk_user` FOREIGN KEY (`current_desk_user_id`) REFERENCES `core_users` (`id`),
+  CONSTRAINT `fk_mnt_tickets_applicant` FOREIGN KEY (`applicant_id`) REFERENCES `core_users` (`id`),
+  CONSTRAINT `fk_mnt_tickets_assigned_je` FOREIGN KEY (`assigned_je_id`) REFERENCES `core_users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS audit_logs (
+CREATE TABLE IF NOT EXISTS mnt_audit_logs (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` int NOT NULL,
   `user_id` int NOT NULL,
@@ -86,11 +68,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   PRIMARY KEY (`id`),
   KEY `user_id` (`user_id`),
   KEY `idx_ticket_timeline` (`ticket_id`,`created_at`),
-  CONSTRAINT `audit_logs_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `audit_logs_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+  CONSTRAINT `fk_mnt_audit_logs_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `mnt_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mnt_audit_logs_user` FOREIGN KEY (`user_id`) REFERENCES `core_users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS ticket_messages (
+CREATE TABLE IF NOT EXISTS mnt_ticket_messages (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` int NOT NULL,
   `audit_log_id` int DEFAULT NULL,
@@ -108,15 +90,14 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
   KEY `in_reply_to` (`in_reply_to`),
   KEY `idx_ticket_messages_ticket` (`ticket_id`),
   KEY `idx_ticket_messages_to_user` (`to_user_id`),
-  KEY `fk_ticket_messages_audit` (`audit_log_id`),
-  CONSTRAINT `fk_ticket_messages_audit` FOREIGN KEY (`audit_log_id`) REFERENCES `audit_logs` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `ticket_messages_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `ticket_messages_ibfk_2` FOREIGN KEY (`author_user_id`) REFERENCES `users` (`id`),
-  CONSTRAINT `ticket_messages_ibfk_3` FOREIGN KEY (`to_user_id`) REFERENCES `users` (`id`),
-  CONSTRAINT `ticket_messages_ibfk_4` FOREIGN KEY (`in_reply_to`) REFERENCES `ticket_messages` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_mnt_ticket_messages_audit` FOREIGN KEY (`audit_log_id`) REFERENCES `mnt_audit_logs` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_mnt_ticket_messages_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `mnt_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mnt_ticket_messages_author` FOREIGN KEY (`author_user_id`) REFERENCES `core_users` (`id`),
+  CONSTRAINT `fk_mnt_ticket_messages_to_user` FOREIGN KEY (`to_user_id`) REFERENCES `core_users` (`id`),
+  CONSTRAINT `fk_mnt_ticket_messages_in_reply_to` FOREIGN KEY (`in_reply_to`) REFERENCES `mnt_ticket_messages` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS reports (
+CREATE TABLE IF NOT EXISTS mnt_reports (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` int NOT NULL,
   `je_id` int NOT NULL,
@@ -130,13 +111,12 @@ CREATE TABLE IF NOT EXISTS reports (
   UNIQUE KEY `uq_report_ticket_version` (`ticket_id`,`version`),
   KEY `je_id` (`je_id`),
   KEY `idx_ticket` (`ticket_id`),
-  KEY `fk_reports_answers_message` (`answers_message_id`),
-  CONSTRAINT `fk_reports_answers_message` FOREIGN KEY (`answers_message_id`) REFERENCES `ticket_messages` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `reports_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `reports_ibfk_2` FOREIGN KEY (`je_id`) REFERENCES `users` (`id`)
+  CONSTRAINT `fk_mnt_reports_answers_message` FOREIGN KEY (`answers_message_id`) REFERENCES `mnt_ticket_messages` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_mnt_reports_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `mnt_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mnt_reports_je` FOREIGN KEY (`je_id`) REFERENCES `core_users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS attachments (
+CREATE TABLE IF NOT EXISTS mnt_attachments (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` int NOT NULL,
   `report_id` int DEFAULT NULL,
@@ -150,15 +130,14 @@ CREATE TABLE IF NOT EXISTS attachments (
   PRIMARY KEY (`id`),
   KEY `uploaded_by` (`uploaded_by`),
   KEY `idx_ticket` (`ticket_id`),
-  KEY `fk_attachments_report` (`report_id`),
   KEY `idx_attachments_audit` (`audit_log_id`),
-  CONSTRAINT `attachments_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `attachments_ibfk_2` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`),
-  CONSTRAINT `fk_attachments_audit` FOREIGN KEY (`audit_log_id`) REFERENCES `audit_logs` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_attachments_report` FOREIGN KEY (`report_id`) REFERENCES `reports` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_mnt_attachments_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `mnt_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mnt_attachments_uploader` FOREIGN KEY (`uploaded_by`) REFERENCES `core_users` (`id`),
+  CONSTRAINT `fk_mnt_attachments_audit` FOREIGN KEY (`audit_log_id`) REFERENCES `mnt_audit_logs` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_mnt_attachments_report` FOREIGN KEY (`report_id`) REFERENCES `mnt_reports` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS tenders (
+CREATE TABLE IF NOT EXISTS mnt_tenders (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` int NOT NULL,
   `nit_number` varchar(100) DEFAULT NULL,
@@ -176,11 +155,11 @@ CREATE TABLE IF NOT EXISTS tenders (
   PRIMARY KEY (`id`),
   KEY `created_by` (`created_by`),
   KEY `idx_ticket` (`ticket_id`),
-  CONSTRAINT `tenders_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `tenders_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+  CONSTRAINT `fk_mnt_tenders_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `mnt_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mnt_tenders_created_by` FOREIGN KEY (`created_by`) REFERENCES `core_users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS bills (
+CREATE TABLE IF NOT EXISTS mnt_bills (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` int NOT NULL,
   `bill_number` varchar(100) NOT NULL,
@@ -199,11 +178,11 @@ CREATE TABLE IF NOT EXISTS bills (
   PRIMARY KEY (`id`),
   KEY `processed_by` (`processed_by`),
   KEY `idx_ticket` (`ticket_id`),
-  CONSTRAINT `bills_ibfk_2` FOREIGN KEY (`processed_by`) REFERENCES `users` (`id`),
-  CONSTRAINT `fk_bills_ticket_cascade` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_mnt_bills_processed_by` FOREIGN KEY (`processed_by`) REFERENCES `core_users` (`id`),
+  CONSTRAINT `fk_mnt_bills_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `mnt_tickets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS financial_limits (
+CREATE TABLE IF NOT EXISTS mnt_financial_limits (
   `key` varchar(50) NOT NULL,
   `max_amount` decimal(15,2) NOT NULL,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -211,7 +190,7 @@ CREATE TABLE IF NOT EXISTS financial_limits (
   PRIMARY KEY (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS user_scopes (
+CREATE TABLE IF NOT EXISTS mnt_user_scopes (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL,
   `department` enum('Civil','Electrical','Horticulture','Administration','General') NOT NULL,
@@ -220,10 +199,10 @@ CREATE TABLE IF NOT EXISTS user_scopes (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_user_scope` (`user_id`,`department`,`campus`),
   KEY `idx_scope_dept_campus` (`department`,`campus`),
-  CONSTRAINT `user_scopes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_mnt_user_scopes_user` FOREIGN KEY (`user_id`) REFERENCES `core_users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS user_availability (
+CREATE TABLE IF NOT EXISTS mnt_user_availability (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL,
   `start_at` datetime NOT NULL,
@@ -234,11 +213,11 @@ CREATE TABLE IF NOT EXISTS user_availability (
   PRIMARY KEY (`id`),
   KEY `created_by` (`created_by`),
   KEY `idx_availability_user_window` (`user_id`,`start_at`,`end_at`),
-  CONSTRAINT `user_availability_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `user_availability_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+  CONSTRAINT `fk_mnt_user_availability_user` FOREIGN KEY (`user_id`) REFERENCES `core_users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mnt_user_availability_created_by` FOREIGN KEY (`created_by`) REFERENCES `core_users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS notifications (
+CREATE TABLE IF NOT EXISTS mnt_notifications (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `ticket_id` int DEFAULT NULL,
   `to_user_id` int NOT NULL,
@@ -263,11 +242,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   KEY `to_user_id` (`to_user_id`),
   KEY `idx_notifications_due` (`status`,`next_due_at`),
   KEY `idx_notifications_ticket` (`ticket_id`,`kind`,`status`),
-  CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `notifications_ibfk_2` FOREIGN KEY (`to_user_id`) REFERENCES `users` (`id`)
+  CONSTRAINT `fk_mnt_notifications_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `mnt_tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_mnt_notifications_to_user` FOREIGN KEY (`to_user_id`) REFERENCES `core_users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS deleted_tickets (
+CREATE TABLE IF NOT EXISTS mnt_deleted_tickets (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` int NOT NULL,
   `deleted_by` int DEFAULT NULL,
@@ -281,8 +260,13 @@ CREATE TABLE IF NOT EXISTS deleted_tickets (
   KEY `idx_deleted_tickets_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- One-table view: the module reads its users through mnt_users (replaced in Phase D).
+CREATE OR REPLACE SQL SECURITY INVOKER VIEW mnt_users AS
+SELECT id, firebase_uid, name, email, role, department, campus, last_assigned_at, phone, is_active, is_demo, created_at
+  FROM core_users;
+
 -- Seed data ------------------------------------------------------------------
-INSERT IGNORE INTO financial_limits (`key`, max_amount) VALUES
+INSERT IGNORE INTO mnt_financial_limits (`key`, max_amount) VALUES
   ('SE_APPROVE', 50000.00),
   ('DEAN_APPROVE', 500000.00),
   ('DIRECT_AWARD', 10000.00),
@@ -291,23 +275,23 @@ INSERT IGNORE INTO financial_limits (`key`, max_amount) VALUES
 -- Single Dean / Director placeholders. Insert only when no active holder exists
 -- and the placeholder is absent. .invalid is reserved (RFC 2606): mail can
 -- never reach a real person.
-INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+INSERT INTO core_users (firebase_uid, name, email, role, department, is_active)
 SELECT 'placeholder_dean', 'Dean (placeholder)', 'dean@placeholder.invalid', 'DEAN', 'Administration', TRUE
   FROM DUAL
- WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'DEAN' AND is_active = TRUE)
-   AND NOT EXISTS (SELECT 1 FROM users WHERE email = 'dean@placeholder.invalid');
+ WHERE NOT EXISTS (SELECT 1 FROM mnt_users WHERE role = 'DEAN' AND is_active = TRUE)
+   AND NOT EXISTS (SELECT 1 FROM core_users WHERE email = 'dean@placeholder.invalid');
 
 -- The derived table x is required: MySQL forbids a subquery on the table being updated.
-UPDATE users SET is_active = TRUE
+UPDATE core_users SET is_active = TRUE
  WHERE email = 'dean@placeholder.invalid'
-   AND (SELECT c FROM (SELECT COUNT(*) AS c FROM users WHERE role = 'DEAN' AND is_active = TRUE) x) = 0;
+   AND (SELECT c FROM (SELECT COUNT(*) AS c FROM mnt_users WHERE role = 'DEAN' AND is_active = TRUE) x) = 0;
 
-INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+INSERT INTO core_users (firebase_uid, name, email, role, department, is_active)
 SELECT 'placeholder_director', 'Director (placeholder)', 'director@placeholder.invalid', 'DIRECTOR', 'Administration', TRUE
   FROM DUAL
- WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'DIRECTOR' AND is_active = TRUE)
-   AND NOT EXISTS (SELECT 1 FROM users WHERE email = 'director@placeholder.invalid');
+ WHERE NOT EXISTS (SELECT 1 FROM mnt_users WHERE role = 'DIRECTOR' AND is_active = TRUE)
+   AND NOT EXISTS (SELECT 1 FROM core_users WHERE email = 'director@placeholder.invalid');
 
-UPDATE users SET is_active = TRUE
+UPDATE core_users SET is_active = TRUE
  WHERE email = 'director@placeholder.invalid'
-   AND (SELECT c FROM (SELECT COUNT(*) AS c FROM users WHERE role = 'DIRECTOR' AND is_active = TRUE) x) = 0;
+   AND (SELECT c FROM (SELECT COUNT(*) AS c FROM mnt_users WHERE role = 'DIRECTOR' AND is_active = TRUE) x) = 0;

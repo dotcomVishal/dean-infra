@@ -69,7 +69,7 @@ export const createTicket = async (req, res) => {
     let jeCoversCampus = false;
     if (req.user.role === 'JE' && type === 'non-recurring' && req.user.department === department) {
       const [scope] = await connection.query(
-        "SELECT 1 FROM user_scopes WHERE user_id = ? AND campus IN (?, 'BOTH') LIMIT 1",
+        "SELECT 1 FROM mnt_user_scopes WHERE user_id = ? AND campus IN (?, 'BOTH') LIMIT 1",
         [req.user.id, campus]);
       jeCoversCampus = scope.length > 0;
     }
@@ -93,7 +93,7 @@ export const createTicket = async (req, res) => {
 
     // D2: no runtime DDL -- schema is owned by migrations only.
     const [ticketResult] = await connection.query(
-      `INSERT INTO tickets (
+      `INSERT INTO mnt_tickets (
          applicant_id, assigned_je_id, department, title, type, description, location,
          campus, landmark, lat, lng, priority, contact_phone,
          current_desk_user_id, assigned_ae_id, status
@@ -111,12 +111,12 @@ export const createTicket = async (req, res) => {
 
     // Flag a demo ticket before anything can queue mail. is_mock keeps it out of every real list, total and mail path.
     if (req.user.is_demo) {
-      await connection.query('UPDATE tickets SET is_mock = TRUE, is_demo = TRUE WHERE id = ?', [ticket_id]);
+      await connection.query('UPDATE mnt_tickets SET is_mock = TRUE, is_demo = TRUE WHERE id = ?', [ticket_id]);
     }
 
     // Insert creation audit logs
     const [createdLog] = await connection.query(
-      `INSERT INTO audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks) VALUES (?, ?, ?, ?)`,
       [ticket_id, applicant_id, 'CREATED', `Ticket raised: "${finalTitle}" (${type}, ${campus} campus)`]
     );
 
@@ -158,7 +158,7 @@ export const createTicket = async (req, res) => {
 
 
 const SCOPE_OR_DESK = `(t.current_desk_user_id = ? OR EXISTS (
-  SELECT 1 FROM user_scopes s
+  SELECT 1 FROM mnt_user_scopes s
    WHERE s.user_id = ? AND s.department = t.department AND (t.campus IS NULL OR s.campus IN (t.campus, 'BOTH'))))`;
 
 // PAGINATION & ROLE QUEUES: Get Authority Queue for AE, SE, DEAN, DIRECTOR, CLERICAL, ACCOUNTANT
@@ -179,19 +179,19 @@ export const getQueue = async (req, res) => {
            tn.nit_number, tn.portal_type, tn.awarded_agency, tn.work_order_value, tn.status as tender_status,
            tn.published_date, tn.bid_end_date,
            COALESCE(b.total_billed_amount, 0) as total_billed_amount, COALESCE(b.bills_count, 0) as bills_count
-    FROM tickets t
-    JOIN users u ON t.applicant_id = u.id
-    LEFT JOIN users hu ON hu.id = t.current_desk_user_id
+    FROM mnt_tickets t
+    JOIN mnt_users u ON t.applicant_id = u.id
+    LEFT JOIN mnt_users hu ON hu.id = t.current_desk_user_id
     LEFT JOIN ${LATEST_REPORT} r ON t.id = r.ticket_id
     LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
     LEFT JOIN (
-      SELECT tn1.* FROM tenders tn1
-      JOIN (SELECT ticket_id, MAX(id) as max_id FROM tenders GROUP BY ticket_id) tn2
+      SELECT tn1.* FROM mnt_tenders tn1
+      JOIN (SELECT ticket_id, MAX(id) as max_id FROM mnt_tenders GROUP BY ticket_id) tn2
       ON tn1.id = tn2.max_id
     ) tn ON t.id = tn.ticket_id
     LEFT JOIN (
       SELECT ticket_id, SUM(net_amount) as total_billed_amount, COUNT(id) as bills_count
-      FROM bills
+      FROM mnt_bills
       GROUP BY ticket_id
     ) b ON t.id = b.ticket_id
   `;
@@ -294,8 +294,8 @@ export const getQueue = async (req, res) => {
     // The page is capped, so say how many match in all: a list that stops at 50 must not look complete.
     const [[{ n: total }]] = await pool.query(
       `SELECT COUNT(*) AS n
-         FROM tickets t
-         JOIN users u ON t.applicant_id = u.id
+         FROM mnt_tickets t
+         JOIN mnt_users u ON t.applicant_id = u.id
          LEFT JOIN ${LATEST_REPORT} r ON t.id = r.ticket_id
          LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
         ${whereSql}`, filterParams);
@@ -517,7 +517,7 @@ const textOf = (v) => (typeof v === 'string' ? v.trim() : '');
 
 // Bills belong to approved work: refuse one on a ticket that is not post-approval.
 async function lockBillableTicket(connection, ticketId) {
-  const [rows] = await connection.query('SELECT id, status FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+  const [rows] = await connection.query('SELECT id, status FROM mnt_tickets WHERE id = ? FOR UPDATE', [ticketId]);
   if (rows.length === 0) throw new WorkflowError(`Ticket ${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
   if (!POST_APPROVAL.includes(rows[0].status)) {
     throw new WorkflowError('Bills can only be booked after approval.',
@@ -551,7 +551,7 @@ export const recordBill = async (req, res) => {
     await lockBillableTicket(connection, ticketId);
 
     const [result] = await connection.query(
-      `INSERT INTO bills (
+      `INSERT INTO mnt_bills (
         ticket_id, bill_number, voucher_number, agency_name, bill_type,
         gross_amount, deductions, net_amount, payment_status, payment_date,
         payment_mode, remarks, processed_by
@@ -599,17 +599,17 @@ export const updateBillPayment = async (req, res) => {
     }
 
     await connection.beginTransaction();
-    const [bills] = await connection.query('SELECT id, ticket_id, bill_number, payment_status FROM bills WHERE id = ? FOR UPDATE', [billId]);
+    const [bills] = await connection.query('SELECT id, ticket_id, bill_number, payment_status FROM mnt_bills WHERE id = ? FOR UPDATE', [billId]);
     if (bills.length === 0) throw new WorkflowError(`Bill ${billId} not found.`, { code: 'NOT_FOUND', status: 404 });
     const bill = bills[0];
     await lockBillableTicket(connection, bill.ticket_id);
 
-    await connection.query(`UPDATE bills SET ${updates.join(', ')} WHERE id = ?`, [...params, billId]);
+    await connection.query(`UPDATE mnt_bills SET ${updates.join(', ')} WHERE id = ?`, [...params, billId]);
     await insertAudit(connection, {
       ticketId: bill.ticket_id, userId: req.user.id, action: 'BILL_UPDATED',
       remarks: `[Finance & Accounts]: bill #${bill.bill_number} updated${status ? `, payment ${bill.payment_status} -> ${status}` : ''}`,
     });
-    const [updated] = await connection.query('SELECT * FROM bills WHERE id = ?', [billId]);
+    const [updated] = await connection.query('SELECT * FROM mnt_bills WHERE id = ?', [billId]);
     await connection.commit();
     res.json({ success: true, bill: updated[0] });
   } catch (error) {
@@ -626,7 +626,7 @@ export const getAccountantOverview = async (req, res) => {
     // 1. Total sanctioned amount on approved tickets: the award where there is one, else the JE's estimate
     const [sanctioned] = await pool.query(`
       SELECT COALESCE(SUM(${EFFECTIVE_AMOUNT}), 0) as total_sanctioned
-      FROM tickets t
+      FROM mnt_tickets t
       LEFT JOIN ${LATEST_REPORT} r ON r.ticket_id = t.id
       LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
       WHERE t.status IN (?)
@@ -636,7 +636,7 @@ export const getAccountantOverview = async (req, res) => {
     // 2. Total contract value awarded
     const [contracts] = await pool.query(`
       SELECT COALESCE(SUM(tn.work_order_value), 0) as total_contract_value
-      FROM tenders tn JOIN tickets t ON t.id = tn.ticket_id
+      FROM mnt_tenders tn JOIN mnt_tickets t ON t.id = tn.ticket_id
       WHERE tn.status = 'AWARDED' AND ${worldClause(req.user)}
     `);
 
@@ -646,7 +646,7 @@ export const getAccountantOverview = async (req, res) => {
         COALESCE(SUM(CASE WHEN b.payment_status = 'DISBURSED' THEN b.net_amount ELSE 0 END), 0) as total_disbursed,
         COALESCE(SUM(CASE WHEN b.payment_status = 'PENDING' THEN b.net_amount ELSE 0 END), 0) as total_pending_disbursement,
         COUNT(b.id) as total_bills_count
-      FROM bills b JOIN tickets t ON t.id = b.ticket_id
+      FROM mnt_bills b JOIN mnt_tickets t ON t.id = b.ticket_id
       WHERE ${worldClause(req.user)}
     `);
 
@@ -684,7 +684,7 @@ export const uploadAttachments = async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rows] = await connection.query('SELECT * FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+    const [rows] = await connection.query('SELECT * FROM mnt_tickets WHERE id = ? FOR UPDATE', [ticketId]);
     const ticket = rows[0];
     const viewer = ticket ? await loadViewer(connection, req.user, ticket) : null;
     const category = ticket ? uploadCategory(viewer, ticket) : null;
@@ -723,13 +723,13 @@ export const confirmCompletion = async (req, res) => {
     // Ownership in the SELECT: only the person who raised the ticket may answer.
     const [rows] = await connection.query(
       `SELECT id, status, resolved_from_status, assigned_je_id, open_change_request_id
-         FROM tickets WHERE id = ? AND applicant_id = ? FOR UPDATE`, [ticketId, req.user.id]);
+         FROM mnt_tickets WHERE id = ? AND applicant_id = ? FOR UPDATE`, [ticketId, req.user.id]);
     if (rows.length === 0) {
       throw new WorkflowError(`Ticket ${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
     }
     const ticket = rows[0];
     const fromStatus = ticket.status;
-    const [reportRows] = await connection.query('SELECT 1 FROM reports WHERE ticket_id = ? LIMIT 1', [ticketId]);
+    const [reportRows] = await connection.query('SELECT 1 FROM mnt_reports WHERE ticket_id = ? LIMIT 1', [ticketId]);
     const { status, logAction } = resolveCompletionCheck({
       currentStatus: fromStatus, accepted, remarks,
       resolvedFrom: ticket.resolved_from_status, hasReport: reportRows.length > 0,
@@ -741,7 +741,7 @@ export const confirmCompletion = async (req, res) => {
     if (accepted === true) openRequest = null;
     else if (openRequest != null && (await messageModel.getMessage(connection, openRequest))?.to_desk !== 'JE') openRequest = null;
     const [upd] = await connection.query(
-      `UPDATE tickets
+      `UPDATE mnt_tickets
           SET status = ?, status_changed_at = NOW(), open_change_request_id = ?
               ${accepted === true ? '' : ', current_desk_user_id = assigned_je_id, resolved_from_status = NULL, resolved_at = NULL'}
         WHERE id = ? AND status = ?`,

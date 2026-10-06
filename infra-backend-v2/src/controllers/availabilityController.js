@@ -35,8 +35,8 @@ const markLeaveSchema = z
 async function actorCoversTarget(connection, actorId, targetId) {
   const [rows] = await connection.query(
     `SELECT 1
-       FROM user_scopes actor_scope
-       JOIN user_scopes target_scope
+       FROM mnt_user_scopes actor_scope
+       JOIN mnt_user_scopes target_scope
          ON target_scope.department = actor_scope.department
         AND (target_scope.campus = actor_scope.campus
              OR actor_scope.campus = 'BOTH'
@@ -51,7 +51,7 @@ async function actorCoversTarget(connection, actorId, targetId) {
 /** A demo actor may only touch leave of demo accounts (never a real JE). */
 async function demoActorBlocked(req, targetUserId) {
   if (!req.user.is_demo || targetUserId === req.user.id) return false;
-  const [rows] = await pool.query('SELECT is_demo FROM users WHERE id = ?', [targetUserId]);
+  const [rows] = await pool.query('SELECT is_demo FROM mnt_users WHERE id = ?', [targetUserId]);
   return !rows[0]?.is_demo;
 }
 
@@ -82,7 +82,7 @@ export const markLeave = async (req, res) => {
           message: 'You may only mark your own leave.',
         });
       }
-      const [targetRows] = await pool.query('SELECT id, role, is_active FROM users WHERE id = ?', [targetUserId]);
+      const [targetRows] = await pool.query('SELECT id, role, is_active FROM mnt_users WHERE id = ?', [targetUserId]);
       if (targetRows.length === 0) {
         return res.status(404).json({ success: false, message: 'Target user not found.' });
       }
@@ -100,7 +100,7 @@ export const markLeave = async (req, res) => {
     }
 
     const [result] = await pool.query(
-      `INSERT INTO user_availability (user_id, start_at, end_at, reason, created_by) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO mnt_user_availability (user_id, start_at, end_at, reason, created_by) VALUES (?, ?, ?, ?, ?)`,
       [targetUserId, start_at, end_at, reason ?? null, actorId]
     );
 
@@ -126,7 +126,7 @@ export const removeLeave = async (req, res) => {
   }
 
   try {
-    const [rows] = await pool.query('SELECT id, user_id FROM user_availability WHERE id = ?', [leaveId]);
+    const [rows] = await pool.query('SELECT id, user_id FROM mnt_user_availability WHERE id = ?', [leaveId]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Leave entry not found.' });
     }
@@ -146,7 +146,7 @@ export const removeLeave = async (req, res) => {
       }
     }
 
-    await pool.query('DELETE FROM user_availability WHERE id = ?', [leaveId]);
+    await pool.query('DELETE FROM mnt_user_availability WHERE id = ?', [leaveId]);
     res.json({ success: true, message: 'Leave entry removed.' });
   } catch (error) {
     return sendServerError(req, res, error, 'removeLeave error');
@@ -174,7 +174,7 @@ export const listAvailability = async (req, res) => {
       }
       const [rows] = await pool.query(
         `SELECT id, user_id, start_at, end_at, reason, created_by, created_at
-           FROM user_availability WHERE user_id = ? ORDER BY start_at DESC`,
+           FROM mnt_user_availability WHERE user_id = ? ORDER BY start_at DESC`,
         [requestedUserId]
       );
       return res.json({ success: true, availability: rows });
@@ -186,18 +186,18 @@ export const listAvailability = async (req, res) => {
       const [rows] = actorRole === 'SYSADMIN'
         ? await pool.query(
             `SELECT a.id, a.user_id, u.name AS user_name, a.start_at, a.end_at, a.reason, a.created_by, a.created_at
-               FROM user_availability a JOIN users u ON u.id = a.user_id
+               FROM mnt_user_availability a JOIN mnt_users u ON u.id = a.user_id
               WHERE u.is_demo = ?
               ORDER BY a.start_at DESC`,
             [!!req.user.is_demo]
           )
         : await pool.query(
             `SELECT a.id, a.user_id, u.name AS user_name, a.start_at, a.end_at, a.reason, a.created_by, a.created_at
-               FROM user_availability a
-               JOIN users u ON u.id = a.user_id
+               FROM mnt_user_availability a
+               JOIN mnt_users u ON u.id = a.user_id
               WHERE u.role = 'JE' AND EXISTS (
-                SELECT 1 FROM user_scopes actor_scope
-                 JOIN user_scopes target_scope ON target_scope.department = actor_scope.department
+                SELECT 1 FROM mnt_user_scopes actor_scope
+                 JOIN mnt_user_scopes target_scope ON target_scope.department = actor_scope.department
                   AND (target_scope.campus = actor_scope.campus
                        OR actor_scope.campus = 'BOTH'
                        OR target_scope.campus = 'BOTH')
@@ -212,7 +212,7 @@ export const listAvailability = async (req, res) => {
     // Case 3: own leave (a JE, or AE/SE/SYSADMIN explicitly asking for self).
     const [rows] = await pool.query(
       `SELECT id, user_id, start_at, end_at, reason, created_by, created_at
-         FROM user_availability WHERE user_id = ? ORDER BY start_at DESC`,
+         FROM mnt_user_availability WHERE user_id = ? ORDER BY start_at DESC`,
       [actorId]
     );
     return res.json({ success: true, availability: rows });

@@ -1,7 +1,7 @@
 -- Dev/test fixtures only. Never load in production. Run: npm run seed:mock-users
 
 
-INSERT INTO users (firebase_uid, name, email, role, department, phone) VALUES
+INSERT INTO mnt_users (firebase_uid, name, email, role, department, phone) VALUES
 -- The Top Brass & Admins
 ('mock_uid_01', 'Dr. S. K. Mehta', 'director@campus.edu', 'DIRECTOR', 'Administration', '9876543001'),
 ('mock_uid_02', 'Prof. K. N. Rao', 'dean.infra@campus.edu', 'DEAN', 'Administration', '9876543002'),

@@ -78,11 +78,11 @@ export async function loadViewer(connection, user, ticket) {
   const facts = {};
   if (user.role === 'AE') {
     const [rows] = await connection.query(
-      'SELECT department, campus FROM user_scopes WHERE user_id = ?', [user.id]);
+      'SELECT department, campus FROM mnt_user_scopes WHERE user_id = ?', [user.id]);
     facts.scopes = rows;
   } else if (user.role === 'JE' && ticket.assigned_je_id !== user.id) {
     const [rows] = await connection.query(
-      'SELECT 1 FROM reports WHERE ticket_id = ? AND je_id = ? LIMIT 1', [ticket.id, user.id]);
+      'SELECT 1 FROM mnt_reports WHERE ticket_id = ? AND je_id = ? LIMIT 1', [ticket.id, user.id]);
     facts.filedReport = rows.length > 0;
   }
   return buildViewer(user, ticket, facts);

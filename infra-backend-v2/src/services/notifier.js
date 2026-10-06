@@ -43,7 +43,7 @@ async function loadTicketBrief(connection, ticketId) {
   const [rows] = await connection.query(
     `SELECT t.id, t.title, t.department, t.campus, t.landmark, t.status, t.applicant_id, t.assigned_je_id,
             t.assigned_ae_id, t.current_desk_user_id, t.is_mock
-       FROM tickets t WHERE t.id = ?`,
+       FROM mnt_tickets t WHERE t.id = ?`,
     [ticketId]
   );
   return rows[0] ?? null;
@@ -52,7 +52,7 @@ async function loadTicketBrief(connection, ticketId) {
 async function loadUser(connection, id) {
   if (id == null) return null;
   const [rows] = await connection.query(
-    'SELECT id, name, email, role FROM users WHERE id = ? AND is_active = TRUE', [id]);
+    'SELECT id, name, email, role FROM mnt_users WHERE id = ? AND is_active = TRUE', [id]);
   return rows[0] ?? null;
 }
 

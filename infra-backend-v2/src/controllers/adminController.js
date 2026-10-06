@@ -34,31 +34,31 @@ export const getAdminMetrics = async (req, res) => {
   try {
     // Ticket status counts
     const [statusCounts] = await pool.query(`
-      SELECT status, COUNT(*) as count FROM tickets WHERE ${tw0} GROUP BY status
+      SELECT status, COUNT(*) as count FROM mnt_tickets WHERE ${tw0} GROUP BY status
     `);
 
     // Department counts
     const [deptCounts] = await pool.query(`
-      SELECT department, COUNT(*) as count FROM tickets WHERE ${tw0} GROUP BY department
+      SELECT department, COUNT(*) as count FROM mnt_tickets WHERE ${tw0} GROUP BY department
     `);
 
     // Work type counts
     const [typeCounts] = await pool.query(`
-      SELECT type, COUNT(*) as count FROM tickets WHERE ${tw0} GROUP BY type
+      SELECT type, COUNT(*) as count FROM mnt_tickets WHERE ${tw0} GROUP BY type
     `);
 
     // User counts by role
     const [userRoleCounts] = await pool.query(`
       SELECT role, COUNT(*) as count, SUM(CASE WHEN is_active = TRUE THEN 1 ELSE 0 END) as active_count 
-      FROM users WHERE ${uw0} GROUP BY role
+      FROM mnt_users WHERE ${uw0} GROUP BY role
     `);
 
     // Financial estimates sum: all estimates vs approved
     const [allEstimates] = await pool.query(`
       SELECT COALESCE(SUM(r.estimated_amount), 0) as total_estimated_amount
-      FROM reports r
-      JOIN (SELECT ticket_id, MAX(id) as max_id FROM reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
-      JOIN tickets t ON t.id = r.ticket_id
+      FROM mnt_reports r
+      JOIN (SELECT ticket_id, MAX(id) as max_id FROM mnt_reports GROUP BY ticket_id) r_latest ON r.id = r_latest.max_id
+      JOIN mnt_tickets t ON t.id = r.ticket_id
       WHERE ${tw}
     `);
 
@@ -66,7 +66,7 @@ export const getAdminMetrics = async (req, res) => {
     const [financeSum] = await pool.query(`
       SELECT COALESCE(SUM(${EFFECTIVE_AMOUNT}), 0) as total_sanctioned_amount,
              COALESCE(SUM(aw.work_order_value), 0) as total_awarded_amount
-      FROM tickets t
+      FROM mnt_tickets t
       LEFT JOIN ${LATEST_REPORT} r ON r.ticket_id = t.id
       LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
       WHERE t.status IN (?)
@@ -76,16 +76,16 @@ export const getAdminMetrics = async (req, res) => {
     // JE Workloads
     const [jeWorkloads] = await pool.query(`
       SELECT u.id, u.name as full_name, u.email, u.department, COUNT(t.id) as active_tickets_count
-      FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN (?) AND ${tw}
+      FROM mnt_users u
+      LEFT JOIN mnt_tickets t ON u.id = t.assigned_je_id AND t.status NOT IN (?) AND ${tw}
       WHERE u.role = 'JE' AND u.is_active = TRUE AND ${uw}
       GROUP BY u.id, u.name, u.email, u.department
       ORDER BY active_tickets_count DESC
     `, [TERMINAL]);
 
     // Total ticket count
-    const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM tickets WHERE ${tw0}`);
-    const [totalUsersRow] = await pool.query(`SELECT COUNT(*) as total FROM users WHERE ${uw0}`);
+    const [totalTicketsRow] = await pool.query(`SELECT COUNT(*) as total FROM mnt_tickets WHERE ${tw0}`);
+    const [totalUsersRow] = await pool.query(`SELECT COUNT(*) as total FROM mnt_users WHERE ${uw0}`);
 
     // Calculate stage groups
     let pendingInspection = 0;
@@ -109,7 +109,7 @@ export const getAdminMetrics = async (req, res) => {
 
     const deskHealth = req.user?.is_demo ? undefined : await checkSingleHolders(pool);
     const [[selfRow]] = await pool.query(`
-      SELECT COUNT(*) AS n FROM audit_logs a JOIN tickets t ON t.id = a.ticket_id
+      SELECT COUNT(*) AS n FROM mnt_audit_logs a JOIN mnt_tickets t ON t.id = a.ticket_id
        WHERE a.is_self_action = TRUE AND ${tw} AND a.created_at >= NOW() - INTERVAL 30 DAY
     `);
 
@@ -149,10 +149,10 @@ export const getAdminMetrics = async (req, res) => {
 
 // 2. Master Tickets Query. The same filter builder feeds the CSV export below.
 const ADMIN_TICKET_FROM = `
-    FROM tickets t
-    JOIN users u_app ON t.applicant_id = u_app.id
-    LEFT JOIN users u_je ON t.assigned_je_id = u_je.id
-    LEFT JOIN users u_hold ON t.current_desk_user_id = u_hold.id
+    FROM mnt_tickets t
+    JOIN mnt_users u_app ON t.applicant_id = u_app.id
+    LEFT JOIN mnt_users u_je ON t.assigned_je_id = u_je.id
+    LEFT JOIN mnt_users u_hold ON t.current_desk_user_id = u_hold.id
     LEFT JOIN ${LATEST_REPORT} r ON t.id = r.ticket_id
     LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id`;
 
@@ -178,7 +178,7 @@ export const getAllTickets = async (req, res) => {
          u_je.name as je_name, u_je.email as je_email,
          r.estimated_amount, r.nature_of_work, aw.work_order_value AS awarded_amount,
          ${EFFECTIVE_AMOUNT} AS effective_amount,
-         (SELECT COUNT(*) FROM attachments a WHERE a.ticket_id = t.id) as attachment_count
+         (SELECT COUNT(*) FROM mnt_attachments a WHERE a.ticket_id = t.id) as attachment_count
        ${ADMIN_TICKET_FROM} ${filter.whereSql}
        ORDER BY t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`,
       [...filter.params, limitNum, offset]);
@@ -257,9 +257,9 @@ export const getTicketMasterDetails = async (req, res) => {
         t.*,
         u_app.name as applicant_name, u_app.email as applicant_email, u_app.phone as applicant_phone,
         u_je.name as assigned_je_name, u_je.email as assigned_je_email, u_je.phone as assigned_je_phone
-      FROM tickets t
-      JOIN users u_app ON t.applicant_id = u_app.id
-      LEFT JOIN users u_je ON t.assigned_je_id = u_je.id
+      FROM mnt_tickets t
+      JOIN mnt_users u_app ON t.applicant_id = u_app.id
+      LEFT JOIN mnt_users u_je ON t.assigned_je_id = u_je.id
       WHERE t.id = ?
     `, [ticket_id]);
 
@@ -271,14 +271,14 @@ export const getTicketMasterDetails = async (req, res) => {
 
     // Fetch all attachments
     const [attachments] = await pool.query(
-      'SELECT a.*, u.name as uploader_name, u.role as uploader_role FROM attachments a JOIN users u ON a.uploaded_by = u.id WHERE a.ticket_id = ? ORDER BY a.created_at ASC',
+      'SELECT a.*, u.name as uploader_name, u.role as uploader_role FROM mnt_attachments a JOIN mnt_users u ON a.uploaded_by = u.id WHERE a.ticket_id = ? ORDER BY a.created_at ASC',
       [ticket_id]
     );
     ticketData.attachments = attachments;
 
     // Fetch all reports history
     const [reports] = await pool.query(
-      'SELECT r.*, u.name as je_name FROM reports r JOIN users u ON r.je_id = u.id WHERE r.ticket_id = ? ORDER BY r.created_at DESC',
+      'SELECT r.*, u.name as je_name FROM mnt_reports r JOIN mnt_users u ON r.je_id = u.id WHERE r.ticket_id = ? ORDER BY r.created_at DESC',
       [ticket_id]
     );
     ticketData.reports = reports;
@@ -286,8 +286,8 @@ export const getTicketMasterDetails = async (req, res) => {
     // Fetch master unredacted audit trail
     const [auditLogs] = await pool.query(
       `SELECT a.*, u.name as actor_name, u.email as actor_email, u.role as actor_role 
-       FROM audit_logs a 
-       JOIN users u ON a.user_id = u.id 
+       FROM mnt_audit_logs a 
+       JOIN mnt_users u ON a.user_id = u.id 
        WHERE a.ticket_id = ? 
        ORDER BY a.created_at ASC`,
       [ticket_id]
@@ -323,7 +323,7 @@ const badRequest = (message, code = 'BAD_REQUEST') => new WorkflowError(message,
 async function outsideScope(connection, user, ticket) {
   if (user.role !== 'JE' && user.role !== 'AE') return false;
   const [rows] = await connection.query(
-    `SELECT 1 FROM user_scopes s
+    `SELECT 1 FROM mnt_user_scopes s
       WHERE s.user_id = ? AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH')) LIMIT 1`,
     [user.id, ticket.department, ticket.campus ?? null, ticket.campus ?? null]);
   return rows.length === 0;
@@ -347,7 +347,7 @@ export const overrideTicketStatus = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [rows] = await connection.query('SELECT * FROM tickets WHERE id = ? FOR UPDATE', [ticket_id]);
+    const [rows] = await connection.query('SELECT * FROM mnt_tickets WHERE id = ? FOR UPDATE', [ticket_id]);
     if (rows.length === 0) {
       throw new WorkflowError(`Ticket #${ticket_id} not found.`, { code: 'NOT_FOUND', status: 404 });
     }
@@ -370,7 +370,7 @@ export const overrideTicketStatus = async (req, res) => {
     // dashboards would count an award with no value; "Resolved" remembers where it came from.
     if (statusChanged && finalStatus === STATUS.WORK_IN_PROGRESS) {
       const [[award]] = await connection.query(
-        "SELECT COUNT(*) AS n FROM tenders WHERE ticket_id = ? AND status = 'AWARDED' AND work_order_value > 0", [ticket_id]);
+        "SELECT COUNT(*) AS n FROM mnt_tenders WHERE ticket_id = ? AND status = 'AWARDED' AND work_order_value > 0", [ticket_id]);
       if (Number(award.n) === 0) {
         throw new WorkflowError(
           'Cannot force Awarded: no award amount is on file. Record the award through the JE first.',
@@ -385,7 +385,7 @@ export const overrideTicketStatus = async (req, res) => {
       }
       if (!Number.isInteger(userId) || userId <= 0) throw badRequest('user_id must be a positive integer.', 'INVALID_ASSIGNEE');
       const [users] = await connection.query(
-        'SELECT id, name, email, role, is_active FROM users WHERE id = ?', [userId]);
+        'SELECT id, name, email, role, is_active FROM mnt_users WHERE id = ?', [userId]);
       const u = users[0];
       if (!u || !u.is_active || u.role !== reassign.desk) {
         throw badRequest(`User ${userId} is not an active ${reassign.desk}.`, 'INVALID_ASSIGNEE');
@@ -450,7 +450,7 @@ export const overrideTicketStatus = async (req, res) => {
     const columns = Object.keys(set);
     if (columns.length > 0) {
       await connection.query(
-        `UPDATE tickets SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
+        `UPDATE mnt_tickets SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
         [...columns.map((c) => set[c]), ticket_id]);
     }
 
@@ -496,17 +496,17 @@ export const getStaff = async (req, res) => {
     return res.status(400).json({ success: false, message: `role must be one of ${REASSIGN_DESKS.join(', ')}.` });
   }
   const load = role === 'JE'
-    ? `(SELECT COUNT(*) FROM tickets t WHERE t.assigned_je_id = u.id AND t.status IN (?) AND t.is_mock = FALSE)`
-    : `(SELECT COUNT(*) FROM tickets t WHERE t.current_desk_user_id = u.id AND t.status NOT IN ('CLOSED','DENIED') AND t.is_mock = FALSE)`;
+    ? `(SELECT COUNT(*) FROM mnt_tickets t WHERE t.assigned_je_id = u.id AND t.status IN (?) AND t.is_mock = FALSE)`
+    : `(SELECT COUNT(*) FROM mnt_tickets t WHERE t.current_desk_user_id = u.id AND t.status NOT IN ('CLOSED','DENIED') AND t.is_mock = FALSE)`;
   const loadParams = role === 'JE' ? [OPEN_JE_STATUSES] : [];
   try {
     const [rows] = await pool.query(
       `SELECT u.id, u.name, u.email, u.department, u.campus, ${load} AS open_tickets,
-              EXISTS (SELECT 1 FROM user_scopes s
+              EXISTS (SELECT 1 FROM mnt_user_scopes s
                        WHERE s.user_id = u.id AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))) AS scope_match,
-              EXISTS (SELECT 1 FROM user_availability a
+              EXISTS (SELECT 1 FROM mnt_user_availability a
                        WHERE a.user_id = u.id AND NOW() BETWEEN a.start_at AND a.end_at) AS on_leave
-         FROM users u
+         FROM mnt_users u
         WHERE u.role = ? AND u.is_active = TRUE AND u.is_demo = FALSE
         ORDER BY scope_match DESC, on_leave ASC, open_tickets ASC, u.name ASC`,
       [...loadParams, department ?? null, campus ?? null, campus ?? null, role]
@@ -535,7 +535,7 @@ export const getAllUsers = async (req, res) => {
 
   let query = `
     SELECT id, firebase_uid, name, email, role, department, phone, is_active, created_at 
-    FROM users 
+    FROM mnt_users 
     WHERE ${userWorldClause(req.user, '')}
   `;
   const params = [];
@@ -575,19 +575,19 @@ const SINGLETON_ROLES = ['DEAN', 'DIRECTOR'];
 // (e.g. a Civil AE who also runs Horticulture). Then stale desk owners are healed.
 async function syncStaffRouting(connection, userId, scopes) {
   const [[u]] = await connection.query(
-    'SELECT id, role, department, campus, is_active, is_demo FROM users WHERE id = ?', [userId]);
+    'SELECT id, role, department, campus, is_active, is_demo FROM mnt_users WHERE id = ?', [userId]);
   if (SCOPED_ROLES.includes(u.role)) {
-    if (scopes) await connection.query('DELETE FROM user_scopes WHERE user_id = ?', [userId]);
+    if (scopes) await connection.query('DELETE FROM mnt_user_scopes WHERE user_id = ?', [userId]);
     const all = [...(u.campus ? [{ department: u.department, campus: u.campus }] : []), ...(scopes || [])];
     for (const sc of all) {
       await connection.query(
-        'INSERT IGNORE INTO user_scopes (user_id, department, campus) VALUES (?, ?, ?)',
+        'INSERT IGNORE INTO mnt_user_scopes (user_id, department, campus) VALUES (?, ?, ?)',
         [userId, sc.department, sc.campus]);
     }
   }
   // Dean/Director are singleton desks: a real account replaces the dummy seed.
   if (SINGLETON_ROLES.includes(u.role) && u.is_active && !u.is_demo) {
-    await connection.query('UPDATE users SET is_active = FALSE WHERE role = ? AND id <> ? AND is_demo = FALSE', [u.role, userId]);
+    await connection.query('UPDATE mnt_users SET is_active = FALSE WHERE role = ? AND id <> ? AND is_demo = FALSE', [u.role, userId]);
   }
   await reconcileDeskOwners(connection);
 }
@@ -632,14 +632,14 @@ export const createUser = async (req, res) => {
   try {
     await connection.beginTransaction();
     const [result] = await connection.query(
-      `INSERT INTO users (firebase_uid, name, email, role, department, campus, phone, is_active)
+      `INSERT INTO mnt_users (firebase_uid, name, email, role, department, campus, phone, is_active)
        VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)`,
       [generatedUid, name.trim(), email.trim().toLowerCase(), role, department, campus || null, phone || null]
     );
     await syncStaffRouting(connection, result.insertId, scopes);
     await connection.commit();
 
-    const [createdUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
+    const [createdUsers] = await pool.query('SELECT * FROM mnt_users WHERE id = ?', [result.insertId]);
     const warnings = await deskWarnings([role]);
     res.json({ success: true, user: createdUsers[0], ...(warnings.length ? { warnings } : {}) });
   } catch (error) {
@@ -658,7 +658,7 @@ export const updateUser = async (req, res) => {
 
   const connection = await pool.getConnection();
   try {
-    const [target] = await connection.query('SELECT is_demo FROM users WHERE id = ?', [id]);
+    const [target] = await connection.query('SELECT is_demo FROM mnt_users WHERE id = ?', [id]);
     if (target[0]?.is_demo) {
       return res.status(403).json({ success: false, message: 'Demo accounts are managed by the server.' });
     }
@@ -674,7 +674,7 @@ export const updateUser = async (req, res) => {
     }
 
     if (role === 'JE' && !department) {
-      const [existing] = await pool.query('SELECT department FROM users WHERE id = ?', [id]);
+      const [existing] = await pool.query('SELECT department FROM mnt_users WHERE id = ?', [id]);
       if (existing.length > 0 && !['Civil', 'Electrical', 'Horticulture'].includes(existing[0].department)) {
         return res.status(400).json({ 
           success: false, 
@@ -698,15 +698,15 @@ export const updateUser = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No fields provided for update.' });
     }
 
-    const [before] = await connection.query('SELECT role FROM users WHERE id = ?', [id]);
+    const [before] = await connection.query('SELECT role FROM mnt_users WHERE id = ?', [id]);
     await connection.beginTransaction();
     if (updates.length > 0) {
-      await connection.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, [...params, id]);
+      await connection.query(`UPDATE mnt_users SET ${updates.join(', ')} WHERE id = ?`, [...params, id]);
     }
     await syncStaffRouting(connection, id, scopes);
     await connection.commit();
 
-    const [updatedUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+    const [updatedUsers] = await pool.query('SELECT * FROM mnt_users WHERE id = ?', [id]);
     const warnings = await deskWarnings([before[0]?.role, updatedUsers[0]?.role]);
     res.json({ success: true, user: updatedUsers[0], ...(warnings.length ? { warnings } : {}) });
   } catch (error) {
@@ -727,9 +727,9 @@ export const getMasterAuditLogs = async (req, res) => {
       a.*,
       t.title as ticket_title, t.department as ticket_department, t.status as ticket_status,
       u.name as actor_name, u.email as actor_email, u.role as actor_role
-    FROM audit_logs a
-    JOIN tickets t ON a.ticket_id = t.id
-    JOIN users u ON a.user_id = u.id
+    FROM mnt_audit_logs a
+    JOIN mnt_tickets t ON a.ticket_id = t.id
+    JOIN mnt_users u ON a.user_id = u.id
     WHERE 1=1
   `;
   const params = [];
@@ -758,8 +758,8 @@ export const getActiveJes = async (req, res) => {
   try {
     const [jes] = await pool.query(`
       SELECT u.id, u.name, u.email, u.department, COUNT(t.id) as active_tickets
-      FROM users u
-      LEFT JOIN tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED') AND t.is_mock = FALSE
+      FROM mnt_users u
+      LEFT JOIN mnt_tickets t ON u.id = t.assigned_je_id AND t.status NOT IN ('CLOSED', 'DENIED') AND t.is_mock = FALSE
       WHERE u.role = 'JE' AND u.is_active = TRUE AND u.is_demo = FALSE
       GROUP BY u.id, u.name, u.email, u.department
       ORDER BY u.department, u.name
@@ -784,7 +784,7 @@ const removeTicketFiles = (ticketId) => {
 
 // Locks a ticket and refuses anything that is not a test ticket.
 async function lockMockTicket(connection, ticketId) {
-  const [rows] = await connection.query('SELECT id, is_mock, is_demo FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+  const [rows] = await connection.query('SELECT id, is_mock, is_demo FROM mnt_tickets WHERE id = ? FOR UPDATE', [ticketId]);
   if (rows.length === 0) throw new WorkflowError(`Ticket #${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
   if (!rows[0].is_mock || rows[0].is_demo) { // demo tickets belong to the demo world, not to this page
     throw new WorkflowError('Only test tickets can be changed here.', { code: 'NOT_A_TEST_TICKET', status: 403 });
@@ -793,7 +793,7 @@ async function lockMockTicket(connection, ticketId) {
 
 async function insertStubReport(connection, ticketId, adminId, estimate) {
   await connection.query(
-    `INSERT INTO reports (ticket_id, je_id, version, nature_of_work, estimated_amount, remarks)
+    `INSERT INTO mnt_reports (ticket_id, je_id, version, nature_of_work, estimated_amount, remarks)
      VALUES (?, ?, 1, 'Test report', ?, NULL)`,
     [ticketId, adminId, estimate]);
 }
@@ -805,7 +805,7 @@ const testAudit = (connection, ticketId, adminId, remarks) => insertAudit(connec
 export const listTestTickets = async (req, res) => {
   try {
     const [tickets] = await pool.query(
-      `SELECT id, title, department, campus, status, created_at FROM tickets WHERE is_mock = TRUE AND is_demo = FALSE ORDER BY id DESC LIMIT 50`);
+      `SELECT id, title, department, campus, status, created_at FROM mnt_tickets WHERE is_mock = TRUE AND is_demo = FALSE ORDER BY id DESC LIMIT 50`);
     res.json({ success: true, tickets });
   } catch (error) {
     return sendServerError(req, res, error, 'listTestTickets error');
@@ -834,7 +834,7 @@ export const createTestTicket = async (req, res) => {
   try {
     await connection.beginTransaction();
     const [result] = await connection.query(
-      `INSERT INTO tickets (applicant_id, assigned_je_id, current_desk_user_id, department, title, type, description,
+      `INSERT INTO mnt_tickets (applicant_id, assigned_je_id, current_desk_user_id, department, title, type, description,
          campus, landmark, priority, contact_phone, status, is_mock)
        VALUES (?, ?, ?, ?, 'Test ticket', 'recurring', 'Test ticket for workflow checks.', ?, 'Test', 'NORMAL',
          '0000000', 'ASSIGNED_TO_JE', TRUE)`,
@@ -861,13 +861,13 @@ export const resetTestTicket = async (req, res) => {
     await connection.beginTransaction();
     await lockMockTicket(connection, ticketId);
     const [[stub]] = await connection.query(
-      'SELECT estimated_amount FROM reports WHERE ticket_id = ? AND version = 1 AND nature_of_work = ?', [ticketId, 'Test report']);
+      'SELECT estimated_amount FROM mnt_reports WHERE ticket_id = ? AND version = 1 AND nature_of_work = ?', [ticketId, 'Test report']);
     // Order matters: reports point at messages, messages point at audit rows.
     for (const table of CHILD_TABLES) {
-      await connection.query(`DELETE FROM ${table} WHERE ticket_id = ?`, [ticketId]);
+      await connection.query(`DELETE FROM mnt_${table} WHERE ticket_id = ?`, [ticketId]);
     }
     await connection.query(
-      `UPDATE tickets SET status = 'ASSIGNED_TO_JE', assigned_je_id = ?, assigned_ae_id = NULL, assigned_se_id = NULL,
+      `UPDATE mnt_tickets SET status = 'ASSIGNED_TO_JE', assigned_je_id = ?, assigned_ae_id = NULL, assigned_se_id = NULL,
               current_desk_user_id = ?, open_change_request_id = NULL, status_changed_at = NOW() WHERE id = ?`,
       [adminId, adminId, ticketId]);
     if (stub) await insertStubReport(connection, ticketId, adminId, stub.estimated_amount);
@@ -910,7 +910,7 @@ export const previewDigest = async (req, res) => {
     return res.status(400).json({ success: false, code: 'BAD_USER_ID', message: 'user_id must be a positive integer.' });
   }
   try {
-    const [rows] = await pool.query('SELECT id, name, email, role FROM users WHERE id = ?', [userId]);
+    const [rows] = await pool.query('SELECT id, name, email, role FROM mnt_users WHERE id = ?', [userId]);
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
     const mail = await previewDigestFor(pool, rows[0]);
     res.json({ success: true, empty: mail === null, ...(mail ?? {}) });
@@ -935,7 +935,7 @@ export const getDeletionPreview = async (req, res) => {
     return res.status(400).json({ success: false, code: 'BAD_TICKET_ID', message: 'ticket_id must be a positive integer.' });
   }
   try {
-    const [rows] = await pool.query('SELECT id FROM tickets WHERE id = ?', [ticketId]);
+    const [rows] = await pool.query('SELECT id FROM mnt_tickets WHERE id = ?', [ticketId]);
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'Ticket not found.' });
     res.json({ success: true, ticket_ref: ticketRef(ticketId), ...(await deletionPreview(pool, ticketId)) });
   } catch (error) {
@@ -965,7 +965,7 @@ export const deleteTicket = async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rows] = await connection.query('SELECT * FROM tickets WHERE id = ? FOR UPDATE', [ticketId]);
+    const [rows] = await connection.query('SELECT * FROM mnt_tickets WHERE id = ? FOR UPDATE', [ticketId]);
     if (rows.length === 0) throw new WorkflowError(`Ticket #${ticketId} not found.`, { code: 'NOT_FOUND', status: 404 });
 
     const preview = await deletionPreview(connection, ticketId);
@@ -977,7 +977,7 @@ export const deleteTicket = async (req, res) => {
 
     const snapshot = await buildSnapshot(connection, rows[0]);
     await connection.query(
-      `INSERT INTO deleted_tickets (ticket_id, deleted_by, deleted_by_name, reason, snapshot, file_count)
+      `INSERT INTO mnt_deleted_tickets (ticket_id, deleted_by, deleted_by_name, reason, snapshot, file_count)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [ticketId, req.user.id, req.user.name, reason, JSON.stringify(snapshot), snapshot.file_names.length]);
 
@@ -1004,7 +1004,7 @@ export const listDeletedTickets = async (req, res) => {
               JSON_UNQUOTE(JSON_EXTRACT(snapshot, '$.ticket.status')) AS status,
               JSON_EXTRACT(snapshot, '$.estimate') AS estimate,
               JSON_EXTRACT(snapshot, '$.award_amount') AS award_amount
-         FROM deleted_tickets ORDER BY id DESC LIMIT 200`);
+         FROM mnt_deleted_tickets ORDER BY id DESC LIMIT 200`);
     res.json({ success: true, deleted: rows });
   } catch (error) {
     return sendServerError(req, res, error, 'listDeletedTickets error');

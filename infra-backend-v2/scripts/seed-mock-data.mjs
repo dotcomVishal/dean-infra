@@ -481,7 +481,7 @@ export async function seedMockTickets() {
 
   try {
     // 1. Fetch user mapping
-    const [users] = await connection.query('SELECT id, name, role, department FROM users');
+    const [users] = await connection.query('SELECT id, name, role, department FROM mnt_users');
     
     const getUserId = (role, dept = null) => {
       let candidate = users.find(u => u.role === role && (!dept || u.department === dept));
@@ -515,7 +515,7 @@ export async function seedMockTickets() {
 
       // 2. Insert Ticket
       const [ticketResult] = await connection.query(
-        `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status, created_at)
+        `INSERT INTO mnt_tickets (applicant_id, assigned_je_id, department, title, type, description, location, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW() - INTERVAL ? DAY)`,
         [
           applicantId,
@@ -553,21 +553,21 @@ export async function seedMockTickets() {
       const applicantFileUrl = `/uploads/tickets/${ticketId}/applicant_evidence/${applicantFileName}`;
 
       await connection.query(
-        `INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
+        `INSERT INTO mnt_attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
          VALUES (?, ?, ?, 'APPLICANT_EVIDENCE', NOW() - INTERVAL 10 DAY)`,
         [ticketId, applicantFileUrl, applicantId]
       );
 
       // Audit log: Ticket Created
       await connection.query(
-        `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+        `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
          VALUES (?, ?, 'CREATED', 'Ticket registered on Deanery of Infrastructure portal with geo-tagged photographic evidence.', NOW() - INTERVAL 10 DAY)`,
         [ticketId, applicantId]
       );
 
       // Audit log: Auto Assigned to JE
       await connection.query(
-        `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+        `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
          VALUES (?, ?, 'ASSIGNED', 'Auto-assigned to ${item.department} Junior Engineer based on institutional jurisdictional division.', NOW() - INTERVAL 9 DAY)`,
         [ticketId, assignedJe]
       );
@@ -584,25 +584,25 @@ export async function seedMockTickets() {
         const estimateDocUrl = `/uploads/tickets/${ticketId}/je_reports/estimate_docs/${estimateDocName}`;
 
         await connection.query(
-          `INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
+          `INSERT INTO mnt_attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
            VALUES (?, ?, ?, 'JE_SITE_PHOTO', NOW() - INTERVAL 8 DAY)`,
           [ticketId, sitePhotoUrl, assignedJe]
         );
 
         await connection.query(
-          `INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
+          `INSERT INTO mnt_attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
            VALUES (?, ?, ?, 'JE_ESTIMATE_DOC', NOW() - INTERVAL 8 DAY)`,
           [ticketId, estimateDocUrl, assignedJe]
         );
 
         await connection.query(
-          `INSERT INTO reports (ticket_id, je_id, nature_of_work, estimated_amount, created_at)
+          `INSERT INTO mnt_reports (ticket_id, je_id, nature_of_work, estimated_amount, created_at)
            VALUES (?, ?, ?, ?, NOW() - INTERVAL 8 DAY)`,
           [ticketId, assignedJe, item.nature_of_work || 'CPWD technical inspection completed.', item.estimated_amount || 25000.00]
         );
 
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'SUBMITTED', 'On-site technical inspection completed. DSR rate analysis and photographic logs uploaded. Estimated Amount: ₹${item.estimated_amount || 25000}.', NOW() - INTERVAL 8 DAY)`,
           [ticketId, assignedJe]
         );
@@ -611,7 +611,7 @@ export async function seedMockTickets() {
       // 5. Handling Stage Transitions & Audit Trails
       if (item.stage === 'se_review' || item.stage === 'dean_review' || item.stage === 'director_review' || item.stage === 'sanctioned' || item.stage === 'tendered' || item.stage === 'in_progress' || item.stage === 'closed') {
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'PASSED', 'Technical estimate verified by Assistant Engineer (AE). Financial requirement exceeds ₹25,000 threshold, automatically forwarded to Superintending Engineer (SE).', NOW() - INTERVAL 7 DAY)`,
           [ticketId, aeId]
         );
@@ -619,7 +619,7 @@ export async function seedMockTickets() {
 
       if (item.stage === 'dean_review' || item.stage === 'director_review' || item.stage === 'sanctioned' || item.stage === 'tendered' || item.stage === 'in_progress' || item.stage === 'closed') {
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'PASSED', 'Reviewed and endorsed by Superintending Engineer (SE). Escalated to Dean (Infrastructure) for sanction exceeding ₹50,000.', NOW() - INTERVAL 6 DAY)`,
           [ticketId, seId]
         );
@@ -627,7 +627,7 @@ export async function seedMockTickets() {
 
       if (item.stage === 'director_review' || (item.stage === 'sanctioned' && item.estimated_amount > 200000)) {
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'PASSED', 'Executive appraisal completed by Dean (Infrastructure). Forwarded to Director for high-value CapEx sanction exceeding ₹2,00,000.', NOW() - INTERVAL 5 DAY)`,
           [ticketId, deanId]
         );
@@ -636,7 +636,7 @@ export async function seedMockTickets() {
       if (item.stage === 'sanctioned' || item.stage === 'tendered' || item.stage === 'in_progress' || item.stage === 'closed') {
         const approvingAuthority = item.estimated_amount > 200000 ? directorId : item.estimated_amount > 50000 ? deanId : seId;
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'APPROVED', 'Administrative approval and financial expenditure sanction formally accorded. Ticket transmitted to Clerical Tender Desk for NIT publication.', NOW() - INTERVAL 5 DAY)`,
           [ticketId, approvingAuthority]
         );
@@ -650,7 +650,7 @@ export async function seedMockTickets() {
         const tenderStatus = item.stage === 'tendered' ? 'PUBLISHED' : 'AWARDED';
 
         await connection.query(
-          `INSERT INTO tenders (ticket_id, nit_number, portal_type, published_date, bid_opening_date, awarded_agency, work_order_value, status, remarks, created_by, created_at)
+          `INSERT INTO mnt_tenders (ticket_id, nit_number, portal_type, published_date, bid_opening_date, awarded_agency, work_order_value, status, remarks, created_by, created_at)
            VALUES (?, ?, ?, NOW() - INTERVAL 4 DAY, NOW() - INTERVAL 1 DAY, ?, ?, ?, 'Published under standard institutional e-procurement guidelines.', ?, NOW() - INTERVAL 4 DAY)`,
           [
             ticketId,
@@ -668,20 +668,20 @@ export async function seedMockTickets() {
         const tenderDocUrl = `/uploads/tickets/${ticketId}/tenders/${tenderDocName}`;
 
         await connection.query(
-          `INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
+          `INSERT INTO mnt_attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
            VALUES (?, ?, ?, 'CLERK_TENDER_DOC', NOW() - INTERVAL 4 DAY)`,
           [ticketId, tenderDocUrl, clericalId]
         );
 
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'APPROVED', 'Notice Inviting Tender (NIT) published on ${portal} under reference #${nitNum}.', NOW() - INTERVAL 4 DAY)`,
           [ticketId, clericalId]
         );
 
         if (item.stage !== 'tendered') {
           await connection.query(
-            `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+            `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
              VALUES (?, ?, 'APPROVED', 'Competitive evaluation concluded. Contract awarded to ${agency} at agreed value ₹${(item.estimated_amount * 0.96).toFixed(2)}. Work Order dispatched.', NOW() - INTERVAL 3 DAY)`,
             [ticketId, clericalId]
           );
@@ -700,7 +700,7 @@ export async function seedMockTickets() {
         const paymentStatus = isClosed ? 'DISBURSED' : 'VERIFIED';
 
         await connection.query(
-          `INSERT INTO bills (ticket_id, bill_number, voucher_number, agency_name, bill_type, gross_amount, deductions, net_amount, payment_status, payment_date, payment_mode, remarks, processed_by, created_at)
+          `INSERT INTO mnt_bills (ticket_id, bill_number, voucher_number, agency_name, bill_type, gross_amount, deductions, net_amount, payment_status, payment_date, payment_mode, remarks, processed_by, created_at)
            VALUES (?, ?, ?, 'Authorized Contracting Vendor', ?, ?, ?, ?, ?, ?, 'PFMS', 'Verified against site measurement book (MB) and quality checks.', ?, NOW() - INTERVAL 2 DAY)`,
           [
             ticketId,
@@ -721,20 +721,20 @@ export async function seedMockTickets() {
         const billDocUrl = `/uploads/tickets/${ticketId}/bills/${billDocName}`;
 
         await connection.query(
-          `INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
+          `INSERT INTO mnt_attachments (ticket_id, file_url, uploaded_by, document_category, created_at)
            VALUES (?, ?, ?, 'FINANCE_SANCTION', NOW() - INTERVAL 2 DAY)`,
           [ticketId, billDocUrl, accountantId]
         );
 
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'APPROVED', '${billType} #${billNum} of Net Amount ₹${net} committed to ledger by Accounts Desk.', NOW() - INTERVAL 2 DAY)`,
           [ticketId, accountantId]
         );
 
         if (isClosed) {
           await connection.query(
-            `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+            `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
              VALUES (?, ?, 'APPROVED', 'PFMS Electronic Transfer executed under Voucher #${vchNum}. All contractual works inspected and certified complete. Ticket permanently CLOSED.', NOW() - INTERVAL 1 DAY)`,
             [ticketId, accountantId]
           );
@@ -744,13 +744,13 @@ export async function seedMockTickets() {
       // 8. Handling Returned or Denied Tickets
       if (item.stage === 'returned') {
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'RETURNED', 'Returned to Junior Engineer: Schedule of rates must conform strictly to DSR 2023 with local market price justification for specialized components.', NOW() - INTERVAL 3 DAY)`,
           [ticketId, aeId]
         );
       } else if (item.stage === 'denied') {
         await connection.query(
-          `INSERT INTO audit_logs (ticket_id, user_id, action, remarks, created_at)
+          `INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, created_at)
            VALUES (?, ?, 'DENIED', 'Proposal denied by Deanery Executive Committee: Does not conform to approved master campus plan and ecological conservation guidelines.', NOW() - INTERVAL 2 DAY)`,
           [ticketId, deanId]
         );

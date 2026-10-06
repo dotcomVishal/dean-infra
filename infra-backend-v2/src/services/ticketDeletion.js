@@ -21,11 +21,11 @@ export const TRASH_KEEP_DAYS = 30;
 export async function deletionPreview(connection, ticketId) {
   const counts = {};
   for (const table of CHILD_TABLES) {
-    const [[row]] = await connection.query(`SELECT COUNT(*) AS n FROM ${table} WHERE ticket_id = ?`, [ticketId]);
+    const [[row]] = await connection.query(`SELECT COUNT(*) AS n FROM mnt_${table} WHERE ticket_id = ?`, [ticketId]);
     counts[table] = Number(row.n);
   }
   const [[award]] = await connection.query(
-    "SELECT COUNT(*) AS n FROM tenders WHERE ticket_id = ? AND status = 'AWARDED'", [ticketId]);
+    "SELECT COUNT(*) AS n FROM mnt_tenders WHERE ticket_id = ? AND status = 'AWARDED'", [ticketId]);
   return { counts, has_bills: counts.bills > 0, has_award: Number(award.n) > 0, financial: counts.bills > 0 || Number(award.n) > 0 };
 }
 
@@ -34,13 +34,13 @@ export async function buildSnapshot(connection, ticket) {
   const preview = await deletionPreview(connection, ticket.id);
   const [[amounts]] = await connection.query(
     `SELECT r.estimated_amount, aw.work_order_value AS award_amount
-       FROM tickets t
+       FROM mnt_tickets t
        LEFT JOIN ${LATEST_REPORT} r ON r.ticket_id = t.id
        LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
       WHERE t.id = ?`, [ticket.id]);
   const [[billTotals]] = await connection.query(
-    'SELECT COALESCE(SUM(gross_amount), 0) AS gross, COALESCE(SUM(net_amount), 0) AS net FROM bills WHERE ticket_id = ?', [ticket.id]);
-  const [files] = await connection.query('SELECT file_url FROM attachments WHERE ticket_id = ? ORDER BY id', [ticket.id]);
+    'SELECT COALESCE(SUM(gross_amount), 0) AS gross, COALESCE(SUM(net_amount), 0) AS net FROM mnt_bills WHERE ticket_id = ?', [ticket.id]);
+  const [files] = await connection.query('SELECT file_url FROM mnt_attachments WHERE ticket_id = ? ORDER BY id', [ticket.id]);
   return {
     ticket,
     row_counts: preview.counts,
@@ -57,14 +57,14 @@ export async function buildSnapshot(connection, ticket) {
  */
 export async function deleteTicketCascade(connection, ticketId) {
   for (const table of CHILD_TABLES) {
-    await connection.query(`DELETE FROM ${table} WHERE ticket_id = ?`, [ticketId]);
+    await connection.query(`DELETE FROM mnt_${table} WHERE ticket_id = ?`, [ticketId]);
   }
-  await connection.query('DELETE FROM tickets WHERE id = ?', [ticketId]);
+  await connection.query('DELETE FROM mnt_tickets WHERE id = ?', [ticketId]);
   for (const table of CHILD_TABLES) {
-    const [[row]] = await connection.query(`SELECT COUNT(*) AS n FROM ${table} WHERE ticket_id = ?`, [ticketId]);
+    const [[row]] = await connection.query(`SELECT COUNT(*) AS n FROM mnt_${table} WHERE ticket_id = ?`, [ticketId]);
     if (Number(row.n) !== 0) throw new Error(`deleteTicketCascade: ${row.n} row(s) remain in ${table} for ticket ${ticketId}`);
   }
-  const [[left]] = await connection.query('SELECT COUNT(*) AS n FROM tickets WHERE id = ?', [ticketId]);
+  const [[left]] = await connection.query('SELECT COUNT(*) AS n FROM mnt_tickets WHERE id = ?', [ticketId]);
   if (Number(left.n) !== 0) throw new Error(`deleteTicketCascade: ticket ${ticketId} still exists`);
 }
 

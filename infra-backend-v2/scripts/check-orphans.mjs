@@ -8,7 +8,7 @@ import { CHILD_TABLES } from '../src/services/ticketDeletion.js';
 let bad = 0;
 for (const table of CHILD_TABLES) {
   const [[row]] = await pool.query(
-    `SELECT COUNT(*) AS n FROM ${table} c LEFT JOIN tickets t ON t.id = c.ticket_id WHERE c.ticket_id IS NOT NULL AND t.id IS NULL`);
+    `SELECT COUNT(*) AS n FROM mnt_${table} c LEFT JOIN mnt_tickets t ON t.id = c.ticket_id WHERE c.ticket_id IS NOT NULL AND t.id IS NULL`);
   console.log(`${table.padEnd(16)} ${row.n}`);
   bad += Number(row.n);
 }

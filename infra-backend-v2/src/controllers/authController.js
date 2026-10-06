@@ -40,7 +40,7 @@ export const syncUser = async (req, res) => {
     }
 
     // 1. Look up user by firebase_uid
-    const [existingByUid] = await pool.query('SELECT * FROM users WHERE firebase_uid = ?', [uid]);
+    const [existingByUid] = await pool.query('SELECT * FROM mnt_users WHERE firebase_uid = ?', [uid]);
 
     let user;
 
@@ -48,31 +48,31 @@ export const syncUser = async (req, res) => {
       user = existingByUid[0];
       // Keep name up to date if available
       if (name && user.name !== name) {
-        await pool.query('UPDATE users SET name = ? WHERE id = ?', [name, user.id]);
+        await pool.query('UPDATE mnt_users SET name = ? WHERE id = ?', [name, user.id]);
         user.name = name;
       }
     } else {
       // 2. Check if account already exists with this email (e.g. pre-seeded admin/officer/engineer)
-      const [existingByEmail] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+      const [existingByEmail] = await pool.query('SELECT * FROM mnt_users WHERE email = ?', [email]);
 
       if (existingByEmail.length > 0) {
         // Link firebase_uid to the existing account
         await pool.query(
-          'UPDATE users SET firebase_uid = ?, name = COALESCE(?, name) WHERE id = ?',
+          'UPDATE mnt_users SET firebase_uid = ?, name = COALESCE(?, name) WHERE id = ?',
           [uid, name || null, existingByEmail[0].id]
         );
-        const [updatedUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [existingByEmail[0].id]);
+        const [updatedUsers] = await pool.query('SELECT * FROM mnt_users WHERE id = ?', [existingByEmail[0].id]);
         user = updatedUsers[0];
       } else {
         // 3. Any Google account: auto-provision as APPLICANT (any domain allowed)
         const displayName = name || email.split('@')[0];
         const [result] = await pool.query(
-          `INSERT INTO users (firebase_uid, name, email, role, department, is_active) 
+          `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active) 
            VALUES (?, ?, ?, 'APPLICANT', 'General', TRUE)`,
           [uid, displayName, email]
         );
         
-        const [newUsers] = await pool.query('SELECT * FROM users WHERE id = ?', [result.insertId]);
+        const [newUsers] = await pool.query('SELECT * FROM mnt_users WHERE id = ?', [result.insertId]);
         user = newUsers[0];
       }
     }
@@ -107,7 +107,7 @@ export const demoLdapLogin = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Wrong LDAP username or password.' });
     }
     const [rows] = await pool.query(
-      'SELECT id, name, email, role, department, is_active, is_demo FROM users WHERE firebase_uid = ? AND is_demo = TRUE',
+      'SELECT id, name, email, role, department, is_active, is_demo FROM mnt_users WHERE firebase_uid = ? AND is_demo = TRUE',
       [account.firebase_uid]);
     const user = rows[0];
     if (!user || !user.is_active) {

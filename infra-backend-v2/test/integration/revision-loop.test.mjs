@@ -17,8 +17,8 @@ after(async () => {
   await pool.end();
 });
 
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
-const ticket = async (id) => (await pool.query('SELECT * FROM tickets WHERE id = ?', [id]))[0][0];
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
+const ticket = async (id) => (await pool.query('SELECT * FROM mnt_tickets WHERE id = ?', [id]))[0][0];
 const tempCount = () => (fs.existsSync(TEMP_DIR) ? fs.readdirSync(TEMP_DIR).length : 0);
 
 function reportForm({ remarks, amount = '12000', nature = 'Fix the leak' } = {}) {
@@ -37,7 +37,7 @@ test('three return / refile loops with files keep every version intact', async (
   const ae = await makeUser({ role: 'AE' });
   const id = await makeOpenTicket(applicant, je, 'ASSIGNED_TO_JE');
   ticketsToClean.push(id);
-  await pool.query('UPDATE tickets SET current_desk_user_id = ?, assigned_ae_id = ? WHERE id = ?', [je, ae, id]);
+  await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ?, assigned_ae_id = ? WHERE id = ?', [je, ae, id]);
   const [jeUid, aeUid] = [await uid(je), await uid(ae)];
 
   for (let loop = 1; loop <= 3; loop += 1) {
@@ -49,7 +49,7 @@ test('three return / refile loops with files keep every version intact', async (
     assert.equal((await ticket(id)).open_change_request_id, null, 'refile answers the open request');
 
     const [files] = await pool.query(
-      'SELECT document_category, report_id FROM attachments WHERE ticket_id = ? AND report_id = ?', [id, filed.body.report_id]);
+      'SELECT document_category, report_id FROM mnt_attachments WHERE ticket_id = ? AND report_id = ?', [id, filed.body.report_id]);
     assert.deepEqual(files.map((f) => f.document_category).sort(), ['JE_ESTIMATE_DOC', 'JE_SITE_PHOTO']);
 
     if (loop < 3) {
@@ -63,10 +63,10 @@ test('three return / refile loops with files keep every version intact', async (
     }
   }
 
-  const [versions] = await pool.query('SELECT version FROM reports WHERE ticket_id = ? ORDER BY version', [id]);
+  const [versions] = await pool.query('SELECT version FROM mnt_reports WHERE ticket_id = ? ORDER BY version', [id]);
   assert.deepEqual(versions.map((v) => v.version), [1, 2, 3]);
   const [perReport] = await pool.query(
-    'SELECT report_id, COUNT(*) n FROM attachments WHERE ticket_id = ? AND report_id IS NOT NULL GROUP BY report_id', [id]);
+    'SELECT report_id, COUNT(*) n FROM mnt_attachments WHERE ticket_id = ? AND report_id IS NOT NULL GROUP BY report_id', [id]);
   assert.equal(perReport.length, 3);
   assert.ok(perReport.every((r) => Number(r.n) === 2));
 
@@ -80,7 +80,7 @@ test('a refused refile leaves no file behind and the ticket where it was', async
   const ae = await makeUser({ role: 'AE' });
   const id = await makeOpenTicket(applicant, je, 'ASSIGNED_TO_JE');
   ticketsToClean.push(id);
-  await pool.query('UPDATE tickets SET current_desk_user_id = ?, assigned_ae_id = ? WHERE id = ?', [je, ae, id]);
+  await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ?, assigned_ae_id = ? WHERE id = ?', [je, ae, id]);
   const [jeUid, aeUid] = [await uid(je), await uid(ae)];
 
   assert.equal((await call(jeUid, 'POST', `/api/tickets/${id}/report`, reportForm())).status, 200);
@@ -94,7 +94,7 @@ test('a refused refile leaves no file behind and the ticket where it was', async
   assert.ok(noReply.body.requestId, 'error body carries the request id');
   assert.equal(tempCount(), before, 'temp files removed');
   assert.equal((await ticket(id)).status, 'RETURNED_TO_JE');
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) n FROM attachments WHERE ticket_id = ?', [id]);
+  const [[{ n }]] = await pool.query('SELECT COUNT(*) n FROM mnt_attachments WHERE ticket_id = ?', [id]);
   assert.equal(Number(n), 2, 'only version 1 files exist');
 
   // A second submit of an already-filed report is refused, not duplicated.
@@ -109,7 +109,7 @@ test('JE desk: loose upload refused, .docx with empty MIME accepted, details tel
   const ae = await makeUser({ role: 'AE' });
   const id = await makeOpenTicket(applicant, je, 'ASSIGNED_TO_JE');
   ticketsToClean.push(id);
-  await pool.query('UPDATE tickets SET current_desk_user_id = ?, assigned_ae_id = ? WHERE id = ?', [je, ae, id]);
+  await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ?, assigned_ae_id = ? WHERE id = ?', [je, ae, id]);
   const [jeUid, aeUid] = [await uid(je), await uid(ae)];
 
   // R1: the standalone upload card is not offered, and the API refuses it.

@@ -24,11 +24,11 @@ const fakeRes = () => {
   return res;
 };
 const civilScope = (userId, campus = 'NORTH') =>
-  pool.query("INSERT INTO user_scopes (user_id, department, campus) VALUES (?, 'Civil', ?)", [userId, campus]);
-const userRow = async (id) => (await pool.query('SELECT id, name, email, role FROM users WHERE id = ?', [id]))[0][0];
-const ticketRow = async (id) => (await pool.query('SELECT * FROM tickets WHERE id = ?', [id]))[0][0];
-const patch = (id, fields) => pool.query('UPDATE tickets SET ? WHERE id = ?', [fields, id]);
-const auditFor = async (id) => (await pool.query('SELECT * FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0];
+  pool.query("INSERT INTO mnt_user_scopes (user_id, department, campus) VALUES (?, 'Civil', ?)", [userId, campus]);
+const userRow = async (id) => (await pool.query('SELECT id, name, email, role FROM mnt_users WHERE id = ?', [id]))[0][0];
+const ticketRow = async (id) => (await pool.query('SELECT * FROM mnt_tickets WHERE id = ?', [id]))[0][0];
+const patch = (id, fields) => pool.query('UPDATE mnt_tickets SET ? WHERE id = ?', [fields, id]);
+const auditFor = async (id) => (await pool.query('SELECT * FROM mnt_audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0];
 const act = async (user, ticketId, body) => {
   const res = fakeRes();
   await performTicketAction({ user: { ...user }, params: { ticket_id: String(ticketId) }, body }, res);
@@ -62,7 +62,7 @@ test('inactive or wrong-role pin falls back to scope resolution', async () => {
   const scopeAe = await makeUser({ role: 'AE' }); await civilScope(scopeAe);
   const pinnedAe = await makeUser({ role: 'AE' });
   const id = await ticketAtAe({ applicant, ae: pinnedAe });
-  await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [pinnedAe]);
+  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [pinnedAe]);
   // Seeded staff in a dev DB may also cover Civil/NORTH: compare with the scope rule itself.
   const byScope = (await resolveAeForScope(pool, { department: 'Civil', campus: 'NORTH' })).id;
   assert.equal((await findDeskOwner(pool, await ticketRow(id), 'AE')).id, byScope);
@@ -220,7 +220,7 @@ test('override rejects bad input with 400 and changes nothing', async () => {
   const ae = await makeUser({ role: 'AE' });
   const se = await makeUser({ role: 'SE' });
   const inactive = await makeUser({ role: 'AE' });
-  await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [inactive]);
+  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [inactive]);
   const id = await ticketAtAe({ applicant, ae });
   const before = await ticketRow(id);
 
@@ -245,7 +245,7 @@ test('getStaff lists active users of one desk, scope match first', async () => {
   const other = await makeUser({ role: 'AE', name: 'CI other' });
   const match = await makeUser({ role: 'AE', name: 'CI match' }); await civilScope(match);
   const off = await makeUser({ role: 'AE' });
-  await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [off]);
+  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [off]);
   const res = fakeRes();
   await getStaff({ query: { role: 'AE', department: 'Civil', campus: 'NORTH' } }, res);
   const ids = res.body.staff.map((s) => s.id);
@@ -290,13 +290,13 @@ test('assignees: full for staff, only the JE desk and the current desk for a JE'
 // ---- single-holder health --------------------------------------------------------------------------------------------
 test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', async () => {
   await inRolledBackTx(async (c) => {
-    await c.query("UPDATE users SET is_active = FALSE WHERE role = 'DEAN'");
+    await c.query("UPDATE mnt_users SET is_active = FALSE WHERE role = 'DEAN'");
     let h = await checkSingleHolders(c);
     assert.equal(h.DEAN.count, 0);
     assert.equal(h.DEAN.ok, false);
 
     const add = (email) => c.query(
-      `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+      `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
        VALUES (?, 'CI Dean', ?, 'DEAN', 'Administration', TRUE)`, [randomUUID(), email]);
     await add('ph-ci@placeholder.invalid');
     h = await checkSingleHolders(c);
@@ -308,7 +308,7 @@ test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', asy
     assert.equal(h.DEAN.placeholder, false);
     assert.match(h.DEAN.message, /Deactivate all but one/);
 
-    await c.query("UPDATE users SET is_active = FALSE WHERE email = 'ph-ci@placeholder.invalid'");
+    await c.query("UPDATE mnt_users SET is_active = FALSE WHERE email = 'ph-ci@placeholder.invalid'");
     h = await checkSingleHolders(c);
     assert.deepEqual([h.DEAN.count, h.DEAN.ok, h.DEAN.message], [1, true, null]);
   });
@@ -318,21 +318,21 @@ test('checkSingleHolders reports 0, 1, 2 holders and the placeholder state', asy
 test('mail to a .invalid placeholder is cancelled, never sent or retried', async () => {
   const email = `ph-${randomUUID().slice(0, 6)}@placeholder.invalid`;
   const [u] = await pool.query(
-    `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+    `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
      VALUES (?, 'Placeholder', ?, 'DEAN', 'Administration', TRUE)`, [randomUUID(), email]);
   const [n] = await pool.query(
-    `INSERT INTO notifications (to_user_id, kind, subject, body, next_due_at) VALUES (?, 'EMAIL', 's', 'b', NOW() - INTERVAL 1 MINUTE)`,
+    `INSERT INTO mnt_notifications (to_user_id, kind, subject, body, next_due_at) VALUES (?, 'EMAIL', 's', 'b', NOW() - INTERVAL 1 MINUTE)`,
     [u.insertId]);
   try {
     const sent = [];
     const tally = await processDueNotifications({ send: async (m) => { sent.push(m); } });
     assert.deepEqual(sent, []);
     assert.ok(tally.cancelled >= 1);
-    const [[row]] = await pool.query('SELECT status, last_error, attempts FROM notifications WHERE id = ?', [n.insertId]);
+    const [[row]] = await pool.query('SELECT status, last_error, attempts FROM mnt_notifications WHERE id = ?', [n.insertId]);
     assert.deepEqual([row.status, row.last_error, row.attempts], ['CANCELLED', 'placeholder address', 0]);
   } finally {
-    await pool.query('DELETE FROM notifications WHERE to_user_id = ?', [u.insertId]);
-    await pool.query('DELETE FROM users WHERE id = ?', [u.insertId]);
+    await pool.query('DELETE FROM mnt_notifications WHERE to_user_id = ?', [u.insertId]);
+    await pool.query('DELETE FROM mnt_users WHERE id = ?', [u.insertId]);
   }
 });
 
@@ -342,14 +342,14 @@ test('a mock ticket sends no mail and is absent from queues, metrics and the aud
   const id = await makeOpenTicket(admin, admin, 'ASSIGNED_TO_JE');
   await patch(id, { is_mock: 1, current_desk_user_id: admin });
   await pool.query(
-    "INSERT INTO audit_logs (ticket_id, user_id, action, remarks, is_self_action) VALUES (?, ?, 'CREATED', 'mock', 1)", [id, admin]);
+    "INSERT INTO mnt_audit_logs (ticket_id, user_id, action, remarks, is_self_action) VALUES (?, ?, 'CREATED', 'mock', 1)", [id, admin]);
 
   const deskUser = await userRow(admin);
   await inRolledBackTx((c) => notifyTicketCreated(c, {
     ticketId: id,
     assignment: { status: 'ASSIGNED_TO_JE', assignedJeId: admin, currentDeskUserId: admin, deskUser },
   }));
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM notifications WHERE ticket_id = ?', [id]);
+  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM mnt_notifications WHERE ticket_id = ?', [id]);
   assert.equal(n, 0);
 
   const q = fakeRes();
@@ -358,7 +358,7 @@ test('a mock ticket sends no mail and is absent from queues, metrics and the aud
 
   const m = fakeRes();
   await getAdminMetrics({}, m);
-  const [[{ n_real }]] = await pool.query('SELECT COUNT(*) AS n_real FROM tickets WHERE is_mock = FALSE');
+  const [[{ n_real }]] = await pool.query('SELECT COUNT(*) AS n_real FROM mnt_tickets WHERE is_mock = FALSE');
   assert.equal(m.body.metrics.totalTickets, n_real);
   assert.ok(m.body.desk_health.DEAN);
 
@@ -375,7 +375,7 @@ test('self_only returns only flagged audit rows', async () => {
   const applicant = await makeUser({ role: 'APPLICANT' });
   const ae = await makeUser({ role: 'AE' });
   const id = await ticketAtAe({ applicant, ae });
-  await pool.query("INSERT INTO audit_logs (ticket_id, user_id, action, is_self_action) VALUES (?, ?, 'FORWARDED', 1), (?, ?, 'APPROVED', 0)",
+  await pool.query("INSERT INTO mnt_audit_logs (ticket_id, user_id, action, is_self_action) VALUES (?, ?, 'FORWARDED', 1), (?, ?, 'APPROVED', 0)",
     [id, ae, id, ae]);
   const res = fakeRes();
   await getMasterAuditLogs({ query: { ticket_id: String(id), self_only: '1' } }, res);
@@ -406,7 +406,7 @@ test('a JE raising a normal ticket goes through fair assignment: another JE gets
     const flagged = (await auditFor(out.ticket_id)).filter((a) => a.is_self_action);
     assert.equal(flagged.length, 0);
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 
@@ -419,7 +419,7 @@ test('a JE proposal (non-recurring, own department) is self-assigned and flagged
     const assigned = (await auditFor(out.ticket_id)).find((a) => a.action === 'ASSIGNED');
     assert.equal(assigned.is_self_action, 1);
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 
@@ -446,7 +446,7 @@ test('the chosen campus is routed and stored; location mirrors the landmark; cat
     assert.equal(t.building, null);
     assert.equal(out.status, 'ASSIGNED_TO_JE');
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 
@@ -463,7 +463,7 @@ test('an old client that still sends category and building is accepted and both 
     assert.equal(t.category, null);
     assert.equal(t.building, null);
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 
@@ -473,7 +473,7 @@ test('no JE available: UNASSIGNED at the AE, then the AE assigns', async () => {
   const ae = await makeUser({ role: 'AE' }); await civilScope(ae);
   // Seeded JEs in a dev database may also cover Civil/NORTH: put everyone who does on leave.
   const [others] = await pool.query(
-    "SELECT DISTINCT u.id FROM users u JOIN user_scopes s ON s.user_id = u.id WHERE u.role = 'JE' AND u.is_active = TRUE AND s.department = 'Civil' AND s.campus IN ('NORTH', 'BOTH')");
+    "SELECT DISTINCT u.id FROM mnt_users u JOIN mnt_user_scopes s ON s.user_id = u.id WHERE u.role = 'JE' AND u.is_active = TRUE AND s.department = 'Civil' AND s.campus IN ('NORTH', 'BOTH')");
   const undo = [];
   for (const o of others) undo.push(await putOnLeave(o.id, ae));
   // Resolved before raising: the new ticket itself changes the AEs' open counts.
@@ -488,7 +488,7 @@ test('no JE available: UNASSIGNED at the AE, then the AE assigns', async () => {
     const assigned = (await auditFor(out.ticket_id)).find((a) => a.action === 'ASSIGNED');
     assert.match(assigned.remarks, /no available JE for Civil\/NORTH/);
 
-    const [mail] = await pool.query('SELECT subject FROM notifications WHERE ticket_id = ?', [out.ticket_id]);
+    const [mail] = await pool.query('SELECT subject FROM mnt_notifications WHERE ticket_id = ?', [out.ticket_id]);
     assert.ok(mail.some((r) => /Needs a JE/.test(r.subject)), JSON.stringify(mail.map((r) => r.subject)));
 
     for (const fn of undo) await fn();
@@ -498,7 +498,7 @@ test('no JE available: UNASSIGNED at the AE, then the AE assigns', async () => {
     assert.equal((await ticketRow(out.ticket_id)).status, 'ASSIGNED_TO_JE');
   } finally {
     for (const fn of undo) await fn().catch(() => {});
-    if (out) await pool.query('DELETE FROM tickets WHERE id = ?', [out.ticket_id]);
+    if (out) await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [out.ticket_id]);
   }
 });
 

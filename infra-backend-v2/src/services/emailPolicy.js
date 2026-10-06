@@ -59,7 +59,7 @@ export const remindersAllowed = (role) => POLICY[role]?.reminders === true;
 
 async function roleOf(connection, user) {
   if (user.role) return user.role;
-  const [rows] = await connection.query('SELECT role FROM users WHERE id = ?', [user.id]);
+  const [rows] = await connection.query('SELECT role FROM mnt_users WHERE id = ?', [user.id]);
   return rows[0]?.role ?? null;
 }
 

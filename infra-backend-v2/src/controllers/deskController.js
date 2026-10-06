@@ -30,10 +30,10 @@ const ROW_SELECT = `
   SELECT t.id, t.title, t.department, t.campus, t.priority, t.status, t.created_at,
          COALESCE(t.status_changed_at, t.assigned_at, t.created_at) AS desk_since,
          t.open_change_request_id, t.current_desk_user_id, hu.name AS current_holder_name, r.estimated_amount
-    FROM tickets t
-    LEFT JOIN users hu ON hu.id = t.current_desk_user_id
-    LEFT JOIN reports r ON r.ticket_id = t.id
-     AND r.id = (SELECT MAX(r2.id) FROM reports r2 WHERE r2.ticket_id = t.id)`;
+    FROM mnt_tickets t
+    LEFT JOIN mnt_users hu ON hu.id = t.current_desk_user_id
+    LEFT JOIN mnt_reports r ON r.ticket_id = t.id
+     AND r.id = (SELECT MAX(r2.id) FROM mnt_reports r2 WHERE r2.ticket_id = t.id)`;
 
 export const getDeskBoard = async (req, res) => {
   const { id: userId, role } = req.user;
@@ -52,7 +52,7 @@ export const getDeskBoard = async (req, res) => {
       } else if (role === 'AE') {
         // Own desk, plus every UNASSIGNED ticket inside this AE's scope.
         owner = `(t.current_desk_user_id = ? OR (t.status = 'UNASSIGNED' AND EXISTS (
-                   SELECT 1 FROM user_scopes s
+                   SELECT 1 FROM mnt_user_scopes s
                     WHERE s.user_id = ? AND s.department = t.department COLLATE utf8mb4_unicode_ci
                       AND (t.campus IS NULL OR s.campus IN (t.campus COLLATE utf8mb4_unicode_ci, 'BOTH')))))`;
         // COLLATE: tickets and user_scopes were created with different default
@@ -78,7 +78,7 @@ export const getDeskBoard = async (req, res) => {
       const [watchRows] = await pool.query(
         `${ROW_SELECT}
           WHERE ${worldClause(req.user)} AND t.status NOT IN (?) AND t.applicant_id <> ?
-            AND EXISTS (SELECT 1 FROM audit_logs a
+            AND EXISTS (SELECT 1 FROM mnt_audit_logs a
                          WHERE a.ticket_id = t.id AND a.user_id = ? AND a.action <> 'REMINDER_SENT')
           ORDER BY desk_since DESC LIMIT 100`,
         [TERMINAL, userId, userId]
@@ -87,7 +87,7 @@ export const getDeskBoard = async (req, res) => {
     }
 
     const [mine] = await pool.query(
-      `SELECT * FROM tickets WHERE applicant_id = ? AND ${worldClause(req.user, '')} ORDER BY created_at DESC LIMIT 200`, [userId]);
+      `SELECT * FROM mnt_tickets WHERE applicant_id = ? AND ${worldClause(req.user, '')} ORDER BY created_at DESC LIMIT 200`, [userId]);
 
     // on_my_desk = I can act now (an AE in scope also SEES other AEs' UNASSIGNED tickets).
     const strip = ({ current_desk_user_id, ...rest }) => ({ ...rest, current_desk: deskForStatus(rest.status) });
@@ -121,22 +121,22 @@ export const getAssignableJes = async (req, res) => {
   }
   try {
     const [rows] = await pool.query(
-      'SELECT id, department, campus, status, current_desk_user_id FROM tickets WHERE id = ?', [ticketId]);
+      'SELECT id, department, campus, status, current_desk_user_id FROM mnt_tickets WHERE id = ?', [ticketId]);
     const t = rows[0];
     if (!t || t.status !== STATUS.UNASSIGNED || t.current_desk_user_id !== req.user.id) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
     const [jes] = await pool.query(
       `SELECT u.id, u.name,
-              (SELECT COUNT(*) FROM tickets x
+              (SELECT COUNT(*) FROM mnt_tickets x
                 WHERE x.assigned_je_id = u.id AND x.status IN ('ASSIGNED_TO_JE','RETURNED_TO_JE')) AS open_tickets,
-              EXISTS (SELECT 1 FROM user_availability a
+              EXISTS (SELECT 1 FROM mnt_user_availability a
                        WHERE a.user_id = u.id AND NOW() BETWEEN a.start_at AND a.end_at) AS on_leave,
-              EXISTS (SELECT 1 FROM user_scopes s
+              EXISTS (SELECT 1 FROM mnt_user_scopes s
                        WHERE s.user_id = u.id AND s.department = ? AND (? IS NULL OR s.campus IN (?, 'BOTH'))) AS same_campus
-         FROM users u
+         FROM mnt_users u
         WHERE u.role = 'JE' AND u.is_active = TRUE AND u.is_demo = FALSE
-          AND EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.department = ?)
+          AND EXISTS (SELECT 1 FROM mnt_user_scopes s WHERE s.user_id = u.id AND s.department = ?)
         ORDER BY on_leave ASC, same_campus DESC, open_tickets ASC, u.name ASC`,
       [t.department, t.campus ?? null, t.campus ?? null, t.department]
     );

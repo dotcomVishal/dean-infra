@@ -8,7 +8,7 @@ import { makeUser, makeOpenTicket, cleanup, pool } from './helpers.mjs';
 beforeEach(cleanup);
 after(async () => { await cleanup(); await stopServer(); await pool.end(); });
 
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
 const good = { bill_number: 'RA-1', agency_name: 'ABC Builders', gross_amount: '1000', deductions: '100', net_amount: '900' };
 
 async function setup(status = 'WORK_IN_PROGRESS') {
@@ -18,7 +18,7 @@ async function setup(status = 'WORK_IN_PROGRESS') {
   const id = await makeOpenTicket(applicant, je, status);
   return { id, token: await uid(accountant) };
 }
-const audit = async (id) => (await pool.query('SELECT action FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0].map((r) => r.action);
+const audit = async (id) => (await pool.query('SELECT action FROM mnt_audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0].map((r) => r.action);
 
 test('a valid bill is stored with an audit row; bad numbers are refused with nothing written', async () => {
   const { id, token } = await setup();
@@ -32,13 +32,13 @@ test('a valid bill is stored with an audit row; bad numbers are refused with not
     const r = await post(bad);
     assert.equal(r.status, 400, JSON.stringify(bad));
   }
-  assert.equal(Number((await pool.query('SELECT COUNT(*) n FROM bills WHERE ticket_id = ?', [id]))[0][0].n), 0);
+  assert.equal(Number((await pool.query('SELECT COUNT(*) n FROM mnt_bills WHERE ticket_id = ?', [id]))[0][0].n), 0);
   assert.deepEqual(await audit(id), []);
 
   const ok = await post({ ...good, gross_amount: '2500000000.75', net_amount: '2400000000.25' }); // above the old cap
   assert.equal(ok.status, 200, ok.text);
   assert.deepEqual(await audit(id), ['BILL_RECORDED']);
-  assert.equal(Number((await pool.query('SELECT gross_amount g FROM bills WHERE id = ?', [ok.body.bill_id]))[0][0].g), 2500000000.75);
+  assert.equal(Number((await pool.query('SELECT gross_amount g FROM mnt_bills WHERE id = ?', [ok.body.bill_id]))[0][0].g), 2500000000.75);
 });
 
 test('bills are refused on a ticket that is not approved yet, and on a missing ticket', async () => {
@@ -70,7 +70,7 @@ test('the queue says how many tickets match in all, and the page size is capped'
   const ids = [];
   for (let i = 0; i < 3; i += 1) {
     const id = await makeOpenTicket(applicant, je, 'APPROVED_FOR_TENDERING');
-    await pool.query("UPDATE tickets SET title = 'ci-queue-total' WHERE id = ?", [id]);
+    await pool.query("UPDATE mnt_tickets SET title = 'ci-queue-total' WHERE id = ?", [id]);
     ids.push(id);
   }
   const r = await call(await uid(admin), 'GET', '/api/tickets/queue?limit=2&search=ci-queue-total');

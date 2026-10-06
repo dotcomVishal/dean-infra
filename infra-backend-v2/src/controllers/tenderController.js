@@ -31,7 +31,7 @@ const badId = (res, files) => {
 /** Compare-and-swap of the status alone; the row is already locked and validated. */
 async function moveStatus(connection, { ticketId, from, to, extra = '', params = [] }) {
   const [r] = await connection.query(
-    `UPDATE tickets SET status = ?, status_changed_at = NOW() ${extra} WHERE id = ? AND status = ?`,
+    `UPDATE mnt_tickets SET status = ?, status_changed_at = NOW() ${extra} WHERE id = ? AND status = ?`,
     [to, ...params, ticketId, from]);
   if (r.affectedRows !== 1) throw conflict();
 }
@@ -70,11 +70,11 @@ export const applyTenderStage = async (req, res) => {
       const vals = [ticketId, t.nit_number, t.published_date, t.bid_end_date, 'PUBLISHED', t.remarks, req.user.id];
       if (t.portal_type) { cols.push('portal_type'); vals.push(t.portal_type); }
       const [ins] = await connection.query(
-        `INSERT INTO tenders (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, vals);
+        `INSERT INTO mnt_tenders (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, vals);
       tenderId = ins.insertId;
     } else {
       const [[latest]] = await connection.query(
-        'SELECT id FROM tenders WHERE ticket_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [ticketId]);
+        'SELECT id FROM mnt_tenders WHERE ticket_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [ticketId]);
       if (!latest) {
         throw new WorkflowError('No tender is recorded for this ticket. Publish one first.',
           { code: 'NO_TENDER', status: 409 });
@@ -85,7 +85,7 @@ export const applyTenderStage = async (req, res) => {
       for (const col of ['awarded_agency', 'work_order_value', 'cancel_reason']) {
         if (t[col] !== undefined) { sets.push(`${col} = ?`); params.push(t[col]); }
       }
-      await connection.query(`UPDATE tenders SET ${sets.join(', ')} WHERE id = ?`, [...params, tenderId]);
+      await connection.query(`UPDATE mnt_tenders SET ${sets.join(', ')} WHERE id = ?`, [...params, tenderId]);
     }
 
     await moveStatus(connection, { ticketId, from: ticket.status, to: step.toStatus });
@@ -128,7 +128,7 @@ export const resolveTicket = async (req, res) => {
       extra: ', current_desk_user_id = NULL, resolved_from_status = ?, resolved_at = NOW()', params: [out.resolvedFrom],
     });
     await connection.query(
-      "UPDATE notifications SET status = 'CANCELLED', locked_until = NULL WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'",
+      "UPDATE mnt_notifications SET status = 'CANCELLED', locked_until = NULL WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'",
       [ticketId]);
     await insertAudit(connection, {
       ticketId, userId: req.user.id, action: out.logAction,

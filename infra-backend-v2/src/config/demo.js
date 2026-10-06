@@ -50,12 +50,12 @@ export async function syncDemoAccounts(connection) {
       logger.warn('demo login stays off: DEMO_LDAP_PASSWORD must be at least 12 characters');
     }
     if (!demoEnabled()) {
-      await connection.query('UPDATE users SET is_active = FALSE WHERE is_demo = TRUE');
+      await connection.query('UPDATE mnt_users SET is_active = FALSE WHERE is_demo = TRUE');
       return false;
     }
     for (const a of DEMO_ACCOUNTS) {
       await connection.query(
-        `INSERT INTO users (firebase_uid, name, email, role, department, is_active, is_demo)
+        `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active, is_demo)
          VALUES (?, ?, ?, ?, ?, TRUE, TRUE)
          ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), role = VALUES(role),
            department = VALUES(department), is_active = TRUE, is_demo = TRUE`,
@@ -84,7 +84,7 @@ export const userWorldClause = (user, prefix = 'u.') =>
 /** The demo user of a role, by fixed firebase_uid. Does not filter on is_active (kept demo tickets must not move). */
 export async function findDemoUser(connection, role) {
   const [rows] = await connection.query(
-    `SELECT id, name, email, role FROM users WHERE firebase_uid = ? AND is_demo = TRUE`,
+    `SELECT id, name, email, role FROM mnt_users WHERE firebase_uid = ? AND is_demo = TRUE`,
     [`demo_${String(role).toLowerCase()}`]
   );
   return rows[0] ?? null;
@@ -93,7 +93,7 @@ export async function findDemoUser(connection, role) {
 /** True when every demo account has a row and is active (login is only offered then). */
 export async function demoAccountsReady(connection) {
   const [rows] = await connection.query(
-    'SELECT COUNT(*) AS n FROM users WHERE is_demo = TRUE AND is_active = TRUE AND firebase_uid IN (?)',
+    'SELECT COUNT(*) AS n FROM mnt_users WHERE is_demo = TRUE AND is_active = TRUE AND firebase_uid IN (?)',
     [[...DEMO_UIDS]]
   );
   return rows[0].n === DEMO_ACCOUNTS.length;

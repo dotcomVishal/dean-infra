@@ -1,7 +1,7 @@
 /** financial_limits as { KEY: number }. No hardcoded fallback: a missing row
  *  makes availableActions fail closed (LIMIT_NOT_CONFIGURED). */
 export async function loadLimits(connection) {
-  const [rows] = await connection.query('SELECT `key`, max_amount FROM financial_limits');
+  const [rows] = await connection.query('SELECT `key`, max_amount FROM mnt_financial_limits');
   return Object.fromEntries(rows.map((r) => [r.key, Number(r.max_amount)]));
 }
 
@@ -12,7 +12,7 @@ export const EDITABLE_LIMITS = Object.freeze(['SE_APPROVE', 'DEAN_APPROVE']);
 export async function readEditableLimits(connection) {
   const [rows] = await connection.query(
     `SELECT l.\`key\`, l.max_amount, l.updated_at, u.name AS updated_by_name
-       FROM financial_limits l LEFT JOIN users u ON u.id = l.updated_by
+       FROM mnt_financial_limits l LEFT JOIN mnt_users u ON u.id = l.updated_by
       WHERE l.\`key\` IN (?)`, [EDITABLE_LIMITS]);
   const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
   return Object.fromEntries(EDITABLE_LIMITS.map((key) => {
@@ -24,7 +24,7 @@ export async function readEditableLimits(connection) {
 /** Writes both rows. A missing row is created rather than left failing closed. Caller owns the transaction. */
 export async function saveLimits(connection, { SE_APPROVE, DEAN_APPROVE }, userId) {
   await connection.query(
-    `INSERT INTO financial_limits (\`key\`, max_amount, updated_by) VALUES ('SE_APPROVE', ?, ?), ('DEAN_APPROVE', ?, ?)
+    `INSERT INTO mnt_financial_limits (\`key\`, max_amount, updated_by) VALUES ('SE_APPROVE', ?, ?), ('DEAN_APPROVE', ?, ?)
      ON DUPLICATE KEY UPDATE max_amount = VALUES(max_amount), updated_by = VALUES(updated_by)`,
     [SE_APPROVE, userId, DEAN_APPROVE, userId]);
 }

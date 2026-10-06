@@ -27,7 +27,7 @@ test('valid stored owner is kept; deactivated one is replaced', async () => {
   const a = await makeUser({ role: 'AE', campus: 'NORTH', scopes: ['NORTH'] });
   const b = await makeUser({ role: 'AE', campus: 'NORTH', scopes: ['NORTH'] });
   assert.equal(await owner(tk(b)), b);
-  await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [b]);
+  await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id = ?', [b]);
   assert.equal(await owner(tk(b)), a);
 });
 
@@ -47,11 +47,11 @@ test('C3: second AE gets the ticket when the first is loaded', async () => {
   assert.equal((await resolveAeForScope(pool, scope)).id, a); // tie -> lowest id
   const applicant = await makeUser({ role: 'APPLICANT' });
   const [r] = await pool.query(
-    `INSERT INTO tickets (applicant_id, department, campus, description, status, current_desk_user_id)
+    `INSERT INTO mnt_tickets (applicant_id, department, campus, description, status, current_desk_user_id)
      VALUES (?, 'Civil', 'NORTH', 'ci load', 'UNASSIGNED', ?)`, [applicant, a]);
   try {
     assert.equal((await resolveAeForScope(pool, scope)).id, b);
   } finally {
-    await pool.query('DELETE FROM tickets WHERE id = ?', [r.insertId]);
+    await pool.query('DELETE FROM mnt_tickets WHERE id = ?', [r.insertId]);
   }
 });

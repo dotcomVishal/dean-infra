@@ -56,6 +56,9 @@ jobs:
 
       - run: npm ci
 
+      - name: "Naming contract: every table and view prefixed, no USE, no database name"
+        run: ./scripts/lint-sql-names.sh
+
       - name: "Unit tests (no DB): state machine, visibility, error masking, mailer"
         run: npm run test:unit
 

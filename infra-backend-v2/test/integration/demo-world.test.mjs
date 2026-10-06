@@ -25,10 +25,10 @@ auth.verifyIdToken = async (t) => (String(t).startsWith('demo_')
 const ticketIds = [];
 after(async () => {
   for (const id of ticketIds) fs.rmSync(path.join(TICKETS_DIR, String(id)), { recursive: true, force: true });
-  await pool.query("DELETE FROM tickets WHERE is_demo = TRUE");
-  await pool.query("DELETE FROM notifications WHERE to_user_id IN (SELECT id FROM users WHERE is_demo = TRUE)");
-  await pool.query("DELETE FROM user_availability WHERE user_id IN (SELECT id FROM users WHERE is_demo = TRUE) OR created_by IN (SELECT id FROM users WHERE is_demo = TRUE)");
-  await pool.query('DELETE FROM users WHERE is_demo = TRUE');
+  await pool.query("DELETE FROM mnt_tickets WHERE is_demo = TRUE");
+  await pool.query("DELETE FROM mnt_notifications WHERE to_user_id IN (SELECT id FROM mnt_users WHERE is_demo = TRUE)");
+  await pool.query("DELETE FROM mnt_user_availability WHERE user_id IN (SELECT id FROM mnt_users WHERE is_demo = TRUE) OR created_by IN (SELECT id FROM mnt_users WHERE is_demo = TRUE)");
+  await pool.query('DELETE FROM mnt_users WHERE is_demo = TRUE');
   await cleanup();
   await stopServer();
   await pool.end();
@@ -37,7 +37,7 @@ after(async () => {
 const turnOn = async () => { process.env.DEMO_LDAP_ENABLED = 'true'; await syncDemoAccounts(pool); };
 const turnOff = async () => { delete process.env.DEMO_LDAP_ENABLED; await syncDemoAccounts(pool); };
 const T = (role) => `demo_${role}`;
-const row = async (id) => (await pool.query('SELECT * FROM tickets WHERE id = ?', [id]))[0][0];
+const row = async (id) => (await pool.query('SELECT * FROM mnt_tickets WHERE id = ?', [id]))[0][0];
 const ldap = (body) => fetch(`${baseUrl}/api/auth/ldap`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
@@ -47,10 +47,10 @@ const form = (fields, ...files) => {
   files.forEach((f) => fd.append('files', f));
   return fd;
 };
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
 const holderIsDemo = async (id) => {
   const [[r]] = await pool.query(
-    'SELECT u.is_demo AS d FROM tickets t JOIN users u ON u.id = t.current_desk_user_id WHERE t.id = ?', [id]);
+    'SELECT u.is_demo AS d FROM mnt_tickets t JOIN mnt_users u ON u.id = t.current_desk_user_id WHERE t.id = ?', [id]);
   return !!r?.d;
 };
 const raise = async () => {
@@ -66,7 +66,7 @@ test('1. switch off: ldap is 503, a demo token is 401, no demo row is active', a
   await turnOff();
   assert.equal((await ldap({ username: 'demo.je', password: 'correct horse battery' })).status, 503);
   assert.equal((await call(T('applicant'), 'GET', '/api/tickets/applicant')).status, 401);
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM users WHERE is_demo = TRUE AND is_active = TRUE');
+  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM mnt_users WHERE is_demo = TRUE AND is_active = TRUE');
   assert.equal(Number(n), 0);
 });
 
@@ -101,7 +101,7 @@ test('3. a Google token never resolves to a demo row', async () => {
   // A Google token whose uid happens to be a demo uid, and one whose e-mail is a demo e-mail.
   const uidOnly = await call('demo_je_google', 'GET', '/api/tickets/applicant');
   assert.equal(uidOnly.status, 401); // not a ci- token: rejected by the stub
-  const [[je]] = await pool.query("SELECT firebase_uid FROM users WHERE firebase_uid = 'demo_je'");
+  const [[je]] = await pool.query("SELECT firebase_uid FROM mnt_users WHERE firebase_uid = 'demo_je'");
   assert.ok(je);
   auth.verifyIdToken = async (t) => (t === 'g-demo-uid'
     ? { uid: 'demo_je', email: 'x@test.local', email_verified: true, firebase: { sign_in_provider: 'google.com' } }
@@ -111,7 +111,7 @@ test('3. a Google token never resolves to a demo row', async () => {
   try {
     assert.equal((await call('g-demo-uid', 'GET', '/api/tickets/applicant')).status, 403);
     assert.equal((await call('g-demo-mail', 'GET', '/api/tickets/applicant')).status, 403);
-    const [[{ n }]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE firebase_uid = 'g-other'");
+    const [[{ n }]] = await pool.query("SELECT COUNT(*) AS n FROM mnt_users WHERE firebase_uid = 'g-other'");
     assert.equal(Number(n), 0);
   } finally {
     auth.verifyIdToken = async (t) => (String(t).startsWith('demo_') ? { uid: t, firebase: { sign_in_provider: 'custom' } } : googleStub(t));
@@ -131,7 +131,7 @@ test('4. a demo ticket is mock + demo, sits with the demo JE, and queues no mail
   assert.equal(t.status, 'ASSIGNED_TO_JE');
   assert.equal(await uid(t.assigned_je_id), 'demo_je');
   assert.equal(await holderIsDemo(id), true);
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM notifications WHERE ticket_id = ?', [id]);
+  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM mnt_notifications WHERE ticket_id = ?', [id]);
   assert.equal(Number(n), 0);
 });
 
@@ -173,7 +173,7 @@ test('5. full walk, every desk is a demo account at every step', async () => {
   await step('resolve', await call(T('je'), 'POST', `/api/tickets/${id}/resolve`, { note: 'Finished' }), 'WORK_COMPLETED');
   await step('confirm', await call(T('applicant'), 'POST', `/api/tickets/${id}/confirm-completion`, { accepted: true }), 'CLOSED');
 
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM notifications WHERE ticket_id = ?', [id]);
+  const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM mnt_notifications WHERE ticket_id = ?', [id]);
   assert.equal(Number(n), 0, 'no mail queued for a demo ticket');
 });
 
@@ -184,9 +184,9 @@ test('6. a demo account cannot reach real tickets, attachments or bills', async 
   const accountant = await makeUser({ role: 'ACCOUNTANT' });
   const real = await makeOpenTicket(applicant, je, 'PENDING_DEAN_APPROVAL');
   const [att] = await pool.query(
-    "INSERT INTO attachments (ticket_id, file_url, uploaded_by) VALUES (?, '/uploads/tickets/x/y.pdf', ?)", [real, applicant]);
+    "INSERT INTO mnt_attachments (ticket_id, file_url, uploaded_by) VALUES (?, '/uploads/tickets/x/y.pdf', ?)", [real, applicant]);
   const [bill] = await pool.query(
-    "INSERT INTO bills (ticket_id, bill_number, agency_name, gross_amount, net_amount, processed_by, payment_status) VALUES (?, 'REAL-1', 'Real Co', 777777, 777777, ?, 'PENDING')",
+    "INSERT INTO mnt_bills (ticket_id, bill_number, agency_name, gross_amount, net_amount, processed_by, payment_status) VALUES (?, 'REAL-1', 'Real Co', 777777, 777777, ?, 'PENDING')",
     [real, accountant]);
 
   for (const role of ['dean', 'applicant', 'je', 'sysadmin', 'accountant']) {
@@ -215,7 +215,7 @@ test('7. real users never see a demo ticket', async () => {
   const dean = await makeUser({ role: 'DEAN' });
   const ae = await makeUser({ role: 'AE', campus: 'NORTH' });
   const applicant = await makeUser({ role: 'APPLICANT' });
-  await pool.query("UPDATE tickets SET status = 'PENDING_DEAN_APPROVAL' WHERE id = ?", [id]);
+  await pool.query("UPDATE mnt_tickets SET status = 'PENDING_DEAN_APPROVAL' WHERE id = ?", [id]);
   for (const user of [dean, ae, applicant]) {
     const token = await uid(user);
     assert.equal((await call(token, 'GET', `/api/tickets/${id}/details`)).status, 403);
@@ -226,7 +226,7 @@ test('7. real users never see a demo ticket', async () => {
   const desk = await call(await uid(dean), 'GET', '/api/tickets/desk');
   assert.ok(![...desk.body.my_desk, ...desk.body.watching].some((t) => t.id === id));
   const accountant = await makeUser({ role: 'ACCOUNTANT' });
-  await pool.query("UPDATE tickets SET status = 'WORK_IN_PROGRESS' WHERE id = ?", [id]);
+  await pool.query("UPDATE mnt_tickets SET status = 'WORK_IN_PROGRESS' WHERE id = ?", [id]);
   assert.equal((await call(await uid(accountant), 'GET', `/api/tickets/${id}/bills`)).status, 403);
   // Real Sysadmin may open it (admin console), a real X-Test-Role may not.
   const sys = await makeUser({ role: 'SYSADMIN' });
@@ -239,7 +239,7 @@ test('8. routing never picks a demo account, even when no real holder is active'
   await turnOn();
   const t = { id: 0, status: 'PENDING_SE_APPROVAL', department: 'Civil', campus: 'NORTH', applicant_id: 1, is_mock: 0, is_demo: 0 };
   await inRolledBackTx(async (conn) => {
-    await conn.query("UPDATE users SET is_active = FALSE WHERE is_demo = FALSE AND role IN ('AE','SE','DEAN','DIRECTOR','SYSADMIN')");
+    await conn.query("UPDATE mnt_users SET is_active = FALSE WHERE is_demo = FALSE AND role IN ('AE','SE','DEAN','DIRECTOR','SYSADMIN')");
     for (const desk of ['AE', 'SE', 'DEAN', 'DIRECTOR']) {
       assert.equal(await findDeskOwner(conn, t, desk), null, desk);
     }
@@ -253,7 +253,7 @@ test('9. saving a real Dean keeps the demo Dean active; editing a demo account i
   const dean = await makeUser({ role: 'DEAN' });
   const saved = await call(sys, 'PATCH', `/api/admin/users/${dean}`, { is_active: true });
   assert.equal(saved.status, 200, saved.text);
-  const [[demoDean]] = await pool.query("SELECT id, is_active FROM users WHERE firebase_uid = 'demo_dean'");
+  const [[demoDean]] = await pool.query("SELECT id, is_active FROM mnt_users WHERE firebase_uid = 'demo_dean'");
   assert.equal(demoDean.is_active, 1);
   assert.equal((await call(sys, 'PATCH', `/api/admin/users/${demoDean.id}`, { is_active: false })).status, 403);
   const list = await call(sys, 'GET', '/api/admin/users');
@@ -303,9 +303,9 @@ test('12. demo Sysadmin: read-only, demo rows only, no act-as', async () => {
   assert.equal(metrics.status, 200, metrics.text);
   assert.ok(metrics.body.metrics.totalTickets >= 1);
   assert.equal(metrics.body.desk_health, undefined);
-  const [[{ demoTotal }]] = await pool.query('SELECT COUNT(*) AS demoTotal FROM tickets WHERE is_demo = TRUE');
+  const [[{ demoTotal }]] = await pool.query('SELECT COUNT(*) AS demoTotal FROM mnt_tickets WHERE is_demo = TRUE');
   assert.equal(Number(metrics.body.metrics.totalTickets), Number(demoTotal));
-  const [[{ demoUsers }]] = await pool.query('SELECT COUNT(*) AS demoUsers FROM users WHERE is_demo = TRUE');
+  const [[{ demoUsers }]] = await pool.query('SELECT COUNT(*) AS demoUsers FROM mnt_users WHERE is_demo = TRUE');
   assert.equal(Number(metrics.body.metrics.totalUsers), Number(demoUsers));
 
   const list = await call(sys, 'GET', '/api/admin/tickets?include_mock=1');

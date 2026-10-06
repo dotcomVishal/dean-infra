@@ -17,9 +17,9 @@ after(async () => {
   await pool.end();
 });
 
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
-const row = async (id) => (await pool.query('SELECT * FROM tickets WHERE id = ?', [id]))[0][0];
-const tenders = async (id) => (await pool.query('SELECT * FROM tenders WHERE ticket_id = ? ORDER BY id', [id]))[0];
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
+const row = async (id) => (await pool.query('SELECT * FROM mnt_tickets WHERE id = ?', [id]))[0][0];
+const tenders = async (id) => (await pool.query('SELECT * FROM mnt_tenders WHERE ticket_id = ? ORDER BY id', [id]))[0];
 const form = (fields, ...files) => {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);
@@ -35,7 +35,7 @@ async function approvedTicket(status = 'APPROVED_FOR_TENDERING', estimate = 100)
   ticketsToClean.push(id);
   if (estimate != null) {
     await pool.query(
-      "INSERT INTO reports (ticket_id, je_id, version, nature_of_work, estimated_amount) VALUES (?, ?, 1, 'ci work', ?)", [id, je, estimate]);
+      "INSERT INTO mnt_reports (ticket_id, je_id, version, nature_of_work, estimated_amount) VALUES (?, ?, 1, 'ci work', ?)", [id, je, estimate]);
   }
   return { id, applicant, je, tokens: { je: await uid(je), applicant: await uid(applicant) } };
 }
@@ -55,7 +55,7 @@ test('full walk: publish, technical, financial, award with files; every refusal 
   const [t1] = await tenders(id);
   assert.equal(t1.status, 'PUBLISHED');
   assert.equal(String(t1.bid_end_date).slice(0, 10) !== '', true);
-  const [files] = await pool.query('SELECT uploader_desk, document_category, audit_log_id FROM attachments WHERE ticket_id = ?', [id]);
+  const [files] = await pool.query('SELECT uploader_desk, document_category, audit_log_id FROM mnt_attachments WHERE ticket_id = ?', [id]);
   assert.deepEqual(files.map((f) => [f.uploader_desk, f.document_category]), [['JE', 'CLERK_TENDER_DOC']]);
   assert.ok(files[0].audit_log_id);
 
@@ -83,7 +83,7 @@ test('full walk: publish, technical, financial, award with files; every refusal 
   const actions = (await call(tokens.je, 'GET', `/api/tickets/${id}/details`)).body.ticket.available_actions.actions.map((a) => a.action);
   assert.deepEqual(actions, ['RESOLVE']);
 
-  const log = (await pool.query('SELECT action FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0].map((r) => r.action);
+  const log = (await pool.query('SELECT action FROM mnt_audit_logs WHERE ticket_id = ? ORDER BY id', [id]))[0].map((r) => r.action);
   assert.deepEqual(log, ['TENDER_PUBLISHED', 'TECH_EVALUATION', 'FIN_EVALUATION', 'WORK_AWARDED']);
   void je;
 });
@@ -162,10 +162,10 @@ test('resolve at an open stage, then the applicant sends it back: lands where it
 
 test('resolved before approval and sent back: the JE inspection desk, JE reminded again', async () => {
   const { id, je, tokens } = await approvedTicket('ASSIGNED_TO_JE', null);
-  await pool.query('UPDATE tickets SET current_desk_user_id = ? WHERE id = ?', [je, id]);
+  await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ? WHERE id = ?', [je, id]);
   const r = await call(tokens.je, 'POST', `/api/tickets/${id}/resolve`, { note: 'Not needed after all' });
   assert.equal(r.status, 200, r.text);
-  const early = (await pool.query("SELECT remarks, visibility FROM audit_logs WHERE ticket_id = ? AND action = 'RESOLVED'", [id]))[0][0];
+  const early = (await pool.query("SELECT remarks, visibility FROM mnt_audit_logs WHERE ticket_id = ? AND action = 'RESOLVED'", [id]))[0][0];
   assert.match(early.remarks, /^\[OVERRIDE\]/);
   assert.equal(early.visibility, 'INTERNAL');
 
@@ -173,7 +173,7 @@ test('resolved before approval and sent back: the JE inspection desk, JE reminde
   assert.equal(back.status, 200, back.text);
   const t = await row(id);
   assert.deepEqual([t.status, t.current_desk_user_id], ['ASSIGNED_TO_JE', je]);
-  const live = (await pool.query("SELECT desk, to_user_id FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id]))[0];
+  const live = (await pool.query("SELECT desk, to_user_id FROM mnt_notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id]))[0];
   assert.deepEqual(live.map((x) => [x.desk, x.to_user_id]), [['JE', je]]);
 });
 

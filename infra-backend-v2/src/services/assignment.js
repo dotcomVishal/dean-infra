@@ -46,19 +46,19 @@ export async function pickAvailableJe(connection, { department, campus, applican
   // snapshot used only to order the claim attempts below.
   const [candidates] = await connection.query(
     `SELECT u.id
-       FROM users u
+       FROM mnt_users u
       WHERE u.role = 'JE' AND u.is_active = TRUE AND u.is_demo = FALSE
         AND EXISTS (
-          SELECT 1 FROM user_scopes s
+          SELECT 1 FROM mnt_user_scopes s
            WHERE s.user_id = u.id AND s.department = ? AND s.campus IN (?, 'BOTH')
         )
         AND NOT EXISTS (
-          SELECT 1 FROM user_availability a
+          SELECT 1 FROM mnt_user_availability a
            WHERE a.user_id = u.id AND NOW() BETWEEN a.start_at AND a.end_at
         )
       ORDER BY (u.id = ?) ASC,
         (
-          SELECT COUNT(*) FROM tickets t
+          SELECT COUNT(*) FROM mnt_tickets t
            WHERE t.assigned_je_id = u.id AND t.status IN (?) AND t.is_mock = FALSE
         ) ASC,
         u.last_assigned_at ASC,
@@ -72,7 +72,7 @@ export async function pickAvailableJe(connection, { department, campus, applican
   // JE instead of waiting.
   for (const candidate of candidates) {
     const [locked] = await connection.query(
-      `SELECT id, name, email FROM users WHERE id = ? FOR UPDATE SKIP LOCKED`,
+      `SELECT id, name, email FROM mnt_users WHERE id = ? FOR UPDATE SKIP LOCKED`,
       [candidate.id]
     );
     if (locked.length > 0) return locked[0];
@@ -94,7 +94,7 @@ export async function assignTicket(
 ) {
   const je = await pickAvailableJe(connection, { department, campus, applicantId });
   if (je) {
-    await connection.query('UPDATE users SET last_assigned_at = NOW() WHERE id = ?', [je.id]);
+    await connection.query('UPDATE mnt_users SET last_assigned_at = NOW() WHERE id = ?', [je.id]);
     return { status: 'ASSIGNED_TO_JE', assignedJeId: je.id, currentDeskUserId: je.id, deskUser: je };
   }
 

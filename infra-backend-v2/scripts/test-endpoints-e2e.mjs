@@ -40,7 +40,7 @@ async function runTests() {
       SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH 
       FROM information_schema.COLUMNS 
       WHERE TABLE_SCHEMA = DATABASE() 
-        AND TABLE_NAME = 'tickets' 
+        AND TABLE_NAME = 'mnt_tickets' 
         AND COLUMN_NAME = 'title'
     `);
     assert(titleCheck.length > 0, 'Column "title" exists in tickets table');
@@ -48,13 +48,13 @@ async function runTests() {
 
     const [tendersCheck] = await connection.query(`
       SELECT TABLE_NAME FROM information_schema.TABLES 
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenders'
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mnt_tenders'
     `);
     assert(tendersCheck.length > 0, 'Table "tenders" exists');
 
     const [billsCheck] = await connection.query(`
       SELECT TABLE_NAME FROM information_schema.TABLES 
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bills'
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mnt_bills'
     `);
     assert(billsCheck.length > 0, 'Table "bills" exists');
 
@@ -64,12 +64,12 @@ async function runTests() {
     console.log('\n--- 2. Setting Up Test Actors ---');
     // Ensure test JE exists
     const [jeUsers] = await connection.query(`
-      SELECT id, name, email FROM users WHERE role = 'JE' AND department = 'Civil' LIMIT 1
+      SELECT id, name, email FROM mnt_users WHERE role = 'JE' AND department = 'Civil' LIMIT 1
     `);
     let jeId;
     if (jeUsers.length === 0) {
       const [insertJe] = await connection.query(`
-        INSERT INTO users (firebase_uid, name, email, role, department) 
+        INSERT INTO mnt_users (firebase_uid, name, email, role, department) 
         VALUES ('mock_je_civil_uid', 'Test JE Civil', 'test.je.civil@example.com', 'JE', 'Civil')
       `);
       jeId = insertJe.insertId;
@@ -80,12 +80,12 @@ async function runTests() {
 
     // Ensure test Applicant exists
     const [appUsers] = await connection.query(`
-      SELECT id, name, email FROM users WHERE role = 'APPLICANT' LIMIT 1
+      SELECT id, name, email FROM mnt_users WHERE role = 'APPLICANT' LIMIT 1
     `);
     let applicantId;
     if (appUsers.length === 0) {
       const [insertApp] = await connection.query(`
-        INSERT INTO users (firebase_uid, name, email, role, department) 
+        INSERT INTO mnt_users (firebase_uid, name, email, role, department) 
         VALUES ('mock_app_uid', 'Test Applicant User', 'applicant.test@gmail.com', 'APPLICANT', 'General')
       `);
       applicantId = insertApp.insertId;
@@ -104,7 +104,7 @@ async function runTests() {
 
     // Insert ticket with title
     const [ticketInsert] = await connection.query(
-      `INSERT INTO tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
+      `INSERT INTO mnt_tickets (applicant_id, assigned_je_id, department, title, type, description, location, status) 
        VALUES (?, ?, 'Civil', ?, 'recurring', ?, ?, 'ASSIGNED_TO_JE')`,
       [applicantId, jeId, testTitle, testDesc, testLocation]
     );
@@ -113,7 +113,7 @@ async function runTests() {
 
     // Verify ticket in database has exact title
     const [savedTicket] = await connection.query(
-      'SELECT id, title, department, description, location, status FROM tickets WHERE id = ?',
+      'SELECT id, title, department, description, location, status FROM mnt_tickets WHERE id = ?',
       [testTicketId]
     );
     assert(savedTicket.length === 1, 'Ticket successfully fetched from MySQL');
@@ -139,12 +139,12 @@ async function runTests() {
 
     // Insert attachment record
     await connection.query(
-      'INSERT INTO attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
+      'INSERT INTO mnt_attachments (ticket_id, file_url, uploaded_by, document_category) VALUES (?, ?, ?, ?)',
       [testTicketId, movedFileUrl, applicantId, 'APPLICANT_EVIDENCE']
     );
 
     const [attachments] = await connection.query(
-      'SELECT * FROM attachments WHERE ticket_id = ?',
+      'SELECT * FROM mnt_attachments WHERE ticket_id = ?',
       [testTicketId]
     );
     assert(attachments.length > 0, 'Attachment record saved in DB');
@@ -158,7 +158,7 @@ async function runTests() {
     const natureOfWork = 'Waterproofing bitumen sheet overlay, crack sealing and drainage slope correction.';
 
     await connection.query(
-      'INSERT INTO reports (ticket_id, je_id, nature_of_work, estimated_amount) VALUES (?, ?, ?, ?)',
+      'INSERT INTO mnt_reports (ticket_id, je_id, nature_of_work, estimated_amount) VALUES (?, ?, ?, ?)',
       [testTicketId, jeId, natureOfWork, estimatedAmount]
     );
 
@@ -171,7 +171,7 @@ async function runTests() {
     });
     assert(jeTransition.toStatus === STATUS.PENDING_AE_APPROVAL, 'Workflow state transitioned to PENDING_AE_APPROVAL');
 
-    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [jeTransition.toStatus, testTicketId]);
+    await connection.query('UPDATE mnt_tickets SET status = ? WHERE id = ?', [jeTransition.toStatus, testTicketId]);
 
     // ----------------------------------------------------
     // TEST 5: Authority Review & Auto-Escalation Ladder
@@ -188,7 +188,7 @@ async function runTests() {
     const aeTransition = resolveAction({ user: aeUser, ticket: atAe, limits: LIMITS, action: 'FORWARD' });
     assert(aeTransition.toStatus === STATUS.PENDING_SE_APPROVAL, 'AE FORWARD moves the ticket to PENDING_SE_APPROVAL');
 
-    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [aeTransition.toStatus, testTicketId]);
+    await connection.query('UPDATE mnt_tickets SET status = ? WHERE id = ?', [aeTransition.toStatus, testTicketId]);
 
     // SE approves Rs. 45,000 (limit Rs. 50,000 -> within limit -> sanctioned)
     const seUser = { id: 502, role: ROLE.SE };
@@ -198,7 +198,7 @@ async function runTests() {
     const seAbove = availableActions(seUser, { ...atSe, estimate: 60000 }, LIMITS).actions.find(a => a.action === 'APPROVE');
     assert(seAbove.enabled === false && seAbove.code === 'ABOVE_LIMIT', 'SE APPROVE disabled above 50k (forces FORWARD)');
 
-    await connection.query('UPDATE tickets SET status = ? WHERE id = ?', [seTransition.toStatus, testTicketId]);
+    await connection.query('UPDATE mnt_tickets SET status = ? WHERE id = ?', [seTransition.toStatus, testTicketId]);
 
     // ----------------------------------------------------
     // TEST 6: Clerical GeM/CPP Tender Desk
@@ -207,7 +207,7 @@ async function runTests() {
     const nitNumber = `NIT/IITM/INFRA/2026/${testTicketId}`;
 
     const [tenderInsert] = await connection.query(`
-      INSERT INTO tenders (
+      INSERT INTO mnt_tenders (
         ticket_id, nit_number, portal_type, published_date, bid_opening_date, 
         status, remarks, created_by
       ) VALUES (?, ?, 'GeM', CURDATE(), DATE_ADD(CURDATE(), INTERVAL 14 DAY), 'PUBLISHED', 'E2E Test Tender', ?)
@@ -216,23 +216,23 @@ async function runTests() {
     assert(tenderId > 0, `Tender published on GeM with NIT: ${nitNumber}`);
 
     // Update ticket status to TENDER_PUBLISHED
-    await connection.query("UPDATE tickets SET status = 'TENDER_PUBLISHED' WHERE id = ?", [testTicketId]);
+    await connection.query("UPDATE mnt_tickets SET status = 'TENDER_PUBLISHED' WHERE id = ?", [testTicketId]);
 
     // Award tender to vendor
     const awardedAgency = 'M/s Himachal Construction Ltd';
     const workOrderValue = 42500.00;
 
     await connection.query(`
-      UPDATE tenders SET 
+      UPDATE mnt_tenders SET 
         status = 'AWARDED',
         awarded_agency = ?,
         work_order_value = ?
       WHERE id = ?
     `, [awardedAgency, workOrderValue, tenderId]);
 
-    await connection.query("UPDATE tickets SET status = 'WORK_IN_PROGRESS' WHERE id = ?", [testTicketId]);
+    await connection.query("UPDATE mnt_tickets SET status = 'WORK_IN_PROGRESS' WHERE id = ?", [testTicketId]);
 
-    const [updatedTicket] = await connection.query('SELECT status FROM tickets WHERE id = ?', [testTicketId]);
+    const [updatedTicket] = await connection.query('SELECT status FROM mnt_tickets WHERE id = ?', [testTicketId]);
     assert(updatedTicket[0].status === 'WORK_IN_PROGRESS', 'Ticket milestone transitioned to WORK_IN_PROGRESS');
 
     // ----------------------------------------------------
@@ -245,7 +245,7 @@ async function runTests() {
     const netAmount = grossAmount - deductions;
 
     const [billInsert] = await connection.query(`
-      INSERT INTO bills (
+      INSERT INTO mnt_bills (
         ticket_id, bill_number, bill_type, agency_name,
         gross_amount, deductions, net_amount,
         payment_mode, payment_status, remarks, processed_by
@@ -258,20 +258,20 @@ async function runTests() {
     // Disburse via PFMS
     const pfmsVoucher = `PFMS/VCH/2026/${testTicketId}`;
     await connection.query(`
-      UPDATE bills SET 
+      UPDATE mnt_bills SET 
         payment_status = 'DISBURSED',
         voucher_number = ?,
         payment_date = CURDATE()
       WHERE id = ?
     `, [pfmsVoucher, billId]);
 
-    const [disbursedBill] = await connection.query('SELECT payment_status, voucher_number FROM bills WHERE id = ?', [billId]);
+    const [disbursedBill] = await connection.query('SELECT payment_status, voucher_number FROM mnt_bills WHERE id = ?', [billId]);
     assert(disbursedBill[0].payment_status === 'DISBURSED', 'Bill marked as DISBURSED');
     assert(disbursedBill[0].voucher_number === pfmsVoucher, `PFMS Voucher recorded: ${pfmsVoucher}`);
 
     // Close out ticket
-    await connection.query("UPDATE tickets SET status = 'CLOSED' WHERE id = ?", [testTicketId]);
-    const [closedTicket] = await connection.query('SELECT status FROM tickets WHERE id = ?', [testTicketId]);
+    await connection.query("UPDATE mnt_tickets SET status = 'CLOSED' WHERE id = ?", [testTicketId]);
+    const [closedTicket] = await connection.query('SELECT status FROM mnt_tickets WHERE id = ?', [testTicketId]);
     assert(closedTicket[0].status === 'CLOSED', 'Ticket workflow completed and successfully CLOSED');
 
     console.log('\n======================================================');
@@ -285,7 +285,7 @@ async function runTests() {
     if (connection) {
       // Clean up test ticket and dependencies
       if (testTicketId) {
-        await connection.query('DELETE FROM tickets WHERE id = ?', [testTicketId]).catch(() => {});
+        await connection.query('DELETE FROM mnt_tickets WHERE id = ?', [testTicketId]).catch(() => {});
       }
       connection.release();
     }

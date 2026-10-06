@@ -54,12 +54,12 @@ async function apply(req, res, next, mockLookupSql, id) {
 
 /** router.param('ticket_id', ...) handler. */
 export const testRoleForTicketParam = (req, res, next, ticketId) =>
-  apply(req, res, next, 'SELECT (is_mock AND NOT is_demo) AS is_mock FROM tickets WHERE id = ?', ticketId);
+  apply(req, res, next, 'SELECT (is_mock AND NOT is_demo) AS is_mock FROM mnt_tickets WHERE id = ?', ticketId);
 
 /** router.param('id', ...) handler for /api/attachments/:id (the ticket comes from the attachment). */
 export const testRoleForAttachmentParam = (req, res, next, attachmentId) =>
   apply(req, res, next,
-    'SELECT (t.is_mock AND NOT t.is_demo) AS is_mock FROM attachments a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
+    'SELECT (t.is_mock AND NOT t.is_demo) AS is_mock FROM mnt_attachments a JOIN mnt_tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
 
 /** Router-level guard: the header is only meaningful under /:ticket_id/... */
 export const rejectStrayTestRole = (req, res, next) => {

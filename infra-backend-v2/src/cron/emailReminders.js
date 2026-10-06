@@ -32,7 +32,7 @@ const backoffMs = (attempts) => Math.min(5 * 60 * 1000 * 2 ** (attempts - 1), 6 
 async function loadTicket(connection, ticketId) {
   const [rows] = await connection.query(
     `SELECT id, title, status, department, campus, applicant_id, assigned_je_id, current_desk_user_id
-       FROM tickets WHERE id = ?`, [ticketId]);
+       FROM mnt_tickets WHERE id = ?`, [ticketId]);
   return rows[0] ?? null;
 }
 

@@ -8,14 +8,14 @@ import { makeUser, makeOpenTicket, cleanup, pool } from './helpers.mjs';
 const SEEDED = { SE_APPROVE: 50000, DEAN_APPROVE: 500000 };
 
 const stored = async () => Object.fromEntries(
-  (await pool.query("SELECT `key`, max_amount FROM financial_limits WHERE `key` IN ('SE_APPROVE','DEAN_APPROVE')"))[0]
+  (await pool.query("SELECT `key`, max_amount FROM mnt_financial_limits WHERE `key` IN ('SE_APPROVE','DEAN_APPROVE')"))[0]
     .map((r) => [r.key, Number(r.max_amount)]));
 const restore = async () => {
   await pool.query(
-    `INSERT INTO financial_limits (\`key\`, max_amount) VALUES ('SE_APPROVE', ?), ('DEAN_APPROVE', ?)
+    `INSERT INTO mnt_financial_limits (\`key\`, max_amount) VALUES ('SE_APPROVE', ?), ('DEAN_APPROVE', ?)
      ON DUPLICATE KEY UPDATE max_amount = VALUES(max_amount), updated_by = NULL`, [SEEDED.SE_APPROVE, SEEDED.DEAN_APPROVE]);
 };
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
 
 beforeEach(async () => { await restore(); await cleanup(); });
 after(async () => {
@@ -75,8 +75,8 @@ test('raising the SE limit lets the SE approve an estimate that used to pass up'
   const je = await makeUser({ role: 'JE' });
   const se = await makeUser({ role: 'SE' });
   const id = await makeOpenTicket(applicant, je, 'PENDING_SE_APPROVAL');
-  await pool.query('UPDATE tickets SET current_desk_user_id = ?, assigned_se_id = ? WHERE id = ?', [se, se, id]);
-  await pool.query("INSERT INTO reports (ticket_id, je_id, version, nature_of_work, estimated_amount) VALUES (?, ?, 1, 'ci work', 60000)", [id, je]);
+  await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ?, assigned_se_id = ? WHERE id = ?', [se, se, id]);
+  await pool.query("INSERT INTO mnt_reports (ticket_id, je_id, version, nature_of_work, estimated_amount) VALUES (?, ?, 1, 'ci work', 60000)", [id, je]);
 
   const approve = async () => (await call(await uid(se), 'GET', `/api/tickets/${id}/details`))
     .body.ticket.available_actions.actions.find((a) => a.action === 'APPROVE');

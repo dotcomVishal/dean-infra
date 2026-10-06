@@ -38,29 +38,29 @@ async function columnType(table, column) {
 
 async function survey(table, column) {
   // Table/column are hardcoded literals below -- never interpolate user input.
-  const sql = table === 'tickets'
-    ? 'SELECT status AS value, COUNT(*) AS count FROM tickets GROUP BY status'
-    : 'SELECT action AS value, COUNT(*) AS count FROM audit_logs GROUP BY action';
+  const sql = table === 'mnt_tickets'
+    ? 'SELECT status AS value, COUNT(*) AS count FROM mnt_tickets GROUP BY status'
+    : 'SELECT action AS value, COUNT(*) AS count FROM mnt_audit_logs GROUP BY action';
   const [rows] = await pool.query(sql);
   return rows.map(r => ({ value: r.value, count: Number(r.count) }));
 }
 
 try {
-  const statusType = await columnType('tickets', 'status');
+  const statusType = await columnType('mnt_tickets', 'status');
   if (statusType === null) {
-    console.log('\nNo `tickets` table found in this database.');
+    console.log('\nNo `mnt_tickets` table found in this database.');
     console.log('Nothing to migrate -- just load schema.sql fresh (Step 6d).\n');
     process.exit(0);
   }
 
-  const sRes = audit(await survey('tickets', 'status'), Object.values(STATUS));
-  console.log(render('tickets.status', statusType, sRes));
+  const sRes = audit(await survey('mnt_tickets', 'status'), Object.values(STATUS));
+  console.log(render('mnt_tickets.status', statusType, sRes));
   console.log(isEnum(statusType) ? '  -> already an ENUM' : '  -> still VARCHAR: the DB accepts ANY string (finding S1)');
 
-  const actionType = await columnType('audit_logs', 'action');
+  const actionType = await columnType('mnt_audit_logs', 'action');
   if (actionType !== null) {
-    const aRes = audit(await survey('audit_logs', 'action'), Object.values(LOG_ACTION));
-    console.log(render('audit_logs.action', actionType, aRes));
+    const aRes = audit(await survey('mnt_audit_logs', 'action'), Object.values(LOG_ACTION));
+    console.log(render('mnt_audit_logs.action', actionType, aRes));
   }
 
   const blocking = sRes.illegal.length;

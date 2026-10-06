@@ -11,6 +11,7 @@ const MIGRATIONS_ROOT = path.join(__dirname, '../../migrations');
 // core set (shared identity) runs before the module set. A module creates,
 // alters and drops only objects with its own prefix.
 export const MIGRATION_SETS = [
+  { dir: 'core', table: 'core_schema_migrations' },
   { dir: 'mnt', table: 'mnt_schema_migrations' },
 ];
 

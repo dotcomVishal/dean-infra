@@ -31,9 +31,9 @@ export const downloadAttachment = async (req, res) => {
       `SELECT a.id, a.file_url, a.document_category, a.uploaded_by, a.uploader_desk, u.role AS uploader_role,
               t.id AS ticket_id, t.applicant_id, t.assigned_je_id, t.assigned_ae_id, t.current_desk_user_id,
               t.department, t.campus, t.status, t.is_demo
-         FROM attachments a
-         JOIN tickets t ON t.id = a.ticket_id
-         LEFT JOIN users u ON u.id = a.uploaded_by
+         FROM mnt_attachments a
+         JOIN mnt_tickets t ON t.id = a.ticket_id
+         LEFT JOIN mnt_users u ON u.id = a.uploaded_by
         WHERE a.id = ?`,
       [id]
     );

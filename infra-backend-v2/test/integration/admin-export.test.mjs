@@ -8,7 +8,7 @@ import { makeUser, cleanup, pool } from './helpers.mjs';
 beforeEach(cleanup);
 after(async () => { await cleanup(); await stopServer(); await pool.end(); });
 
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
 
 async function seed() {
   const applicant = await makeUser({ role: 'APPLICANT', name: 'Export Applicant' });
@@ -16,7 +16,7 @@ async function seed() {
   const admin = await makeUser({ role: 'SYSADMIN' });
   const mk = async (fields) => {
     const [r] = await pool.query(
-      `INSERT INTO tickets (applicant_id, assigned_je_id, department, campus, title, description, landmark, location, status, priority, created_at)
+      `INSERT INTO mnt_tickets (applicant_id, assigned_je_id, department, campus, title, description, landmark, location, status, priority, created_at)
        VALUES (?, ?, ?, ?, ?, 'ci description, with comma', 'Near gate', 'Near gate', ?, ?, ?)`,
       [applicant, je, fields.department, fields.campus, fields.title, fields.status, fields.priority ?? 'NORMAL', fields.created]);
     return r.insertId;
@@ -27,10 +27,10 @@ async function seed() {
     c: await mk({ department: 'Electrical', campus: 'NORTH', title: '=cmd|calc', status: 'DENIED', created: '2026-03-12 10:00:00' }),
     d: await mk({ department: 'Electrical', campus: 'SOUTH', title: 'ci-export delta', status: 'CLOSED', created: '2026-03-12 20:00:00' }),
   };
-  await pool.query('UPDATE tickets SET is_mock = FALSE WHERE id IN (?)', [Object.values(ids)]);
+  await pool.query('UPDATE mnt_tickets SET is_mock = FALSE WHERE id IN (?)', [Object.values(ids)]);
   return { ids, tokens: { admin: await uid(admin), je: await uid(je), applicant: await uid(applicant) } };
 }
-const cleanTickets = (ids) => pool.query('DELETE FROM tickets WHERE id IN (?)', [Object.values(ids)]);
+const cleanTickets = (ids) => pool.query('DELETE FROM mnt_tickets WHERE id IN (?)', [Object.values(ids)]);
 const qs = (o) => new URLSearchParams(o).toString();
 const parseCsv = (text) => text.replace(/^﻿/, '').trim().split(/\r\n/);
 
@@ -92,9 +92,9 @@ test('priority can be set through the override form; a bad value is refused', as
   try {
     const set = (priority) => call(tokens.admin, 'POST', `/api/admin/tickets/${ids.a}/override`, { priority, remarks: 'ci priority' });
     assert.equal((await set('URGENT')).status, 200);
-    assert.equal((await pool.query('SELECT priority FROM tickets WHERE id = ?', [ids.a]))[0][0].priority, 'URGENT');
+    assert.equal((await pool.query('SELECT priority FROM mnt_tickets WHERE id = ?', [ids.a]))[0][0].priority, 'URGENT');
     assert.equal((await set('HIGHEST')).status, 400);
-    const [[log]] = await pool.query("SELECT remarks FROM audit_logs WHERE ticket_id = ? AND action = 'OVERRIDE' ORDER BY id DESC LIMIT 1", [ids.a]);
+    const [[log]] = await pool.query("SELECT remarks FROM mnt_audit_logs WHERE ticket_id = ? AND action = 'OVERRIDE' ORDER BY id DESC LIMIT 1", [ids.a]);
     assert.match(log.remarks, /Priority changed from NORMAL to URGENT/);
   } finally { await cleanTickets(ids); }
 });

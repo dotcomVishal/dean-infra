@@ -96,7 +96,7 @@ async function seedRoster(connection) {
     const firebaseUid = `seed_staff_${slug}`;
 
     const [result] = await connection.query(
-      `INSERT IGNORE INTO users (firebase_uid, name, email, role, department, campus, phone)
+      `INSERT IGNORE INTO mnt_users (firebase_uid, name, email, role, department, campus, phone)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [firebaseUid, person.name, email, person.role, person.department, person.campus, person.phone]
     );
@@ -120,20 +120,20 @@ async function seedRoster(connection) {
 // the roster/authority seeding.
 async function seedScopes(connection) {
   const [primary] = await connection.query(
-    `INSERT IGNORE INTO user_scopes (user_id, department, campus)
-     SELECT id, department, campus FROM users
+    `INSERT IGNORE INTO mnt_user_scopes (user_id, department, campus)
+     SELECT id, department, campus FROM mnt_users
       WHERE role IN ('JE', 'AE', 'SE') AND campus IS NOT NULL`
   );
 
   let extraInserted = 0;
   for (const scope of EXTRA_AE_SCOPES) {
-    const [userRows] = await connection.query('SELECT id FROM users WHERE email = ?', [scope.email]);
+    const [userRows] = await connection.query('SELECT id FROM mnt_users WHERE email = ?', [scope.email]);
     if (userRows.length === 0) {
       console.log(`  ! ${scope.email} not found, skipping extra scope (${scope.department}, ${scope.campus})`);
       continue;
     }
     const [result] = await connection.query(
-      `INSERT IGNORE INTO user_scopes (user_id, department, campus) VALUES (?, ?, ?)`,
+      `INSERT IGNORE INTO mnt_user_scopes (user_id, department, campus) VALUES (?, ?, ?)`,
       [userRows[0].id, scope.department, scope.campus]
     );
     if (result.affectedRows > 0) {
@@ -146,7 +146,7 @@ async function seedScopes(connection) {
 }
 
 async function seedDummyAuthority(connection, authority) {
-  const [existing] = await connection.query('SELECT id, name, email FROM users WHERE role = ?', [authority.role]);
+  const [existing] = await connection.query('SELECT id, name, email FROM mnt_users WHERE role = ?', [authority.role]);
 
   if (existing.length > 0) {
     console.log(`  = ${authority.role} already has an account (${existing[0].email}), leaving it alone`);
@@ -157,7 +157,7 @@ async function seedDummyAuthority(connection, authority) {
   const firebaseUid = `seed_staff_${slug}`;
 
   await connection.query(
-    `INSERT INTO users (firebase_uid, name, email, role, department, campus, phone)
+    `INSERT INTO mnt_users (firebase_uid, name, email, role, department, campus, phone)
      VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     [firebaseUid, authority.name, authority.email, authority.role, authority.department, authority.phone]
   );

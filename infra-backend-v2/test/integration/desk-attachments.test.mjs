@@ -12,14 +12,14 @@ const ticketsToClean = [];
 let deactivated = [];
 beforeEach(cleanup);
 after(async () => {
-  if (deactivated.length) await pool.query('UPDATE users SET is_active = TRUE WHERE id IN (?)', [deactivated]);
+  if (deactivated.length) await pool.query('UPDATE mnt_users SET is_active = TRUE WHERE id IN (?)', [deactivated]);
   for (const id of ticketsToClean) fs.rmSync(path.join(TICKETS_DIR, String(id)), { recursive: true, force: true });
   await cleanup();
   await stopServer();
   await pool.end();
 });
 
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
 const tempCount = () => (fs.existsSync(TEMP_DIR) ? fs.readdirSync(TEMP_DIR).length : 0);
 const move = (fields, ...files) => {
   const fd = new FormData();
@@ -33,9 +33,9 @@ async function soleHolders() {
   const dean = await makeUser({ role: 'DEAN' });
   const director = await makeUser({ role: 'DIRECTOR' });
   const [others] = await pool.query(
-    "SELECT id FROM users WHERE role IN ('DEAN','DIRECTOR') AND is_active = TRUE AND id NOT IN (?, ?)", [dean, director]);
+    "SELECT id FROM mnt_users WHERE role IN ('DEAN','DIRECTOR') AND is_active = TRUE AND id NOT IN (?, ?)", [dean, director]);
   deactivated = others.map((r) => r.id);
-  if (deactivated.length) await pool.query('UPDATE users SET is_active = FALSE WHERE id IN (?)', [deactivated]);
+  if (deactivated.length) await pool.query('UPDATE mnt_users SET is_active = FALSE WHERE id IN (?)', [deactivated]);
   return { dean, director };
 }
 
@@ -47,7 +47,7 @@ test('each desk attaches a file going up and coming back; rows carry desk and mo
   const { dean, director } = await soleHolders();
   const id = await makeOpenTicket(applicant, je, 'PENDING_AE_APPROVAL');
   ticketsToClean.push(id);
-  await pool.query('UPDATE tickets SET current_desk_user_id = ?, assigned_ae_id = ?, assigned_se_id = ? WHERE id = ?', [ae, ae, se, id]);
+  await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ?, assigned_ae_id = ?, assigned_se_id = ? WHERE id = ?', [ae, ae, se, id]);
   const u = { ae: await uid(ae), se: await uid(se), dean: await uid(dean), director: await uid(director), je: await uid(je), applicant: await uid(applicant) };
 
   const act = (who, fields, ...files) => call(u[who], 'POST', `/api/tickets/${id}/actions`, move(fields, ...files));
@@ -64,7 +64,7 @@ test('each desk attaches a file going up and coming back; rows carry desk and mo
 
   const [rows] = await pool.query(
     `SELECT a.uploader_desk, a.original_name, a.document_category, a.audit_log_id, l.action, l.from_desk, l.to_desk
-       FROM attachments a JOIN audit_logs l ON l.id = a.audit_log_id WHERE a.ticket_id = ? ORDER BY a.id`, [id]);
+       FROM mnt_attachments a JOIN mnt_audit_logs l ON l.id = a.audit_log_id WHERE a.ticket_id = ? ORDER BY a.id`, [id]);
   assert.deepEqual(rows.map((r) => r.uploader_desk), ['AE', 'SE', 'DEAN', 'DIRECTOR', 'DEAN', 'SE', 'AE']);
   assert.ok(rows.every((r) => r.document_category === 'DESK_DOC'));
   assert.deepEqual(rows.map((r) => r.action), ['FORWARDED', 'FORWARDED', 'FORWARDED', 'CHANGES_REQUESTED', 'CHANGES_REQUESTED', 'CHANGES_REQUESTED', 'CHANGES_REQUESTED']);
@@ -98,7 +98,7 @@ test('restricted files stay with the desk and above; a refused action leaves not
   const other = await makeUser({ role: 'AE' });
   const id = await makeOpenTicket(applicant, je, 'PENDING_AE_APPROVAL');
   ticketsToClean.push(id);
-  await pool.query('UPDATE tickets SET current_desk_user_id = ?, assigned_ae_id = ?, assigned_se_id = ? WHERE id = ?', [ae, ae, se, id]);
+  await pool.query('UPDATE mnt_tickets SET current_desk_user_id = ?, assigned_ae_id = ?, assigned_se_id = ? WHERE id = ?', [ae, ae, se, id]);
   const [aeUid, seUid, jeUid, otherUid] = [await uid(ae), await uid(se), await uid(je), await uid(other)];
 
   // Not this person's desk: 403, no row, no file, no temp leftovers.
@@ -106,7 +106,7 @@ test('restricted files stay with the desk and above; a refused action leaves not
   const refused = await call(otherUid, 'POST', `/api/tickets/${id}/actions`, move({ action: 'FORWARD' }, samplePdf('x.pdf')));
   assert.equal(refused.status, 403);
   assert.equal(tempCount(), before);
-  assert.equal(Number((await pool.query('SELECT COUNT(*) n FROM attachments WHERE ticket_id = ?', [id]))[0][0].n), 0);
+  assert.equal(Number((await pool.query('SELECT COUNT(*) n FROM mnt_attachments WHERE ticket_id = ?', [id]))[0][0].n), 0);
 
   // A failing move (reply missing is not it; bad action payload) cleans up too.
   const bad = await call(aeUid, 'POST', `/api/tickets/${id}/actions`, move({ action: 'REQUEST_CHANGES', to_desk: 'JE' }, samplePdf('y.pdf')));
@@ -122,7 +122,7 @@ test('restricted files stay with the desk and above; a refused action leaves not
   assert.equal(jeView.attachments.some((a) => a.file_name === 'secret.pdf'), false);
 
   // ASSIGN_JE takes no files.
-  await pool.query("UPDATE tickets SET status = 'UNASSIGNED', current_desk_user_id = ? WHERE id = ?", [ae, id]);
+  await pool.query("UPDATE mnt_tickets SET status = 'UNASSIGNED', current_desk_user_id = ? WHERE id = ?", [ae, id]);
   const assign = await call(aeUid, 'POST', `/api/tickets/${id}/actions`, move({ action: 'ASSIGN_JE', assignee_id: String(je) }, samplePdf('z.pdf')));
   assert.equal(assign.status, 400);
 });

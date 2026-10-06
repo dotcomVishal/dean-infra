@@ -8,7 +8,7 @@ import { makeUser, cleanup, pool } from './helpers.mjs';
 beforeEach(cleanup);
 after(async () => { await cleanup(); await stopServer(); await pool.end(); });
 
-const uid = async (id) => (await pool.query('SELECT firebase_uid FROM users WHERE id = ?', [id]))[0][0].firebase_uid;
+const uid = async (id) => (await pool.query('SELECT firebase_uid FROM mnt_users WHERE id = ?', [id]))[0][0].firebase_uid;
 
 test('limit is per signed-in user, not per address', async () => {
   const a = await uid(await makeUser({ role: 'APPLICANT' }));

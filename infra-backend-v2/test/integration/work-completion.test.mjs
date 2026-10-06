@@ -22,9 +22,9 @@ async function call(handler, { user, ticketId, body = {}, files }) {
   await handler({ user, params: { ticket_id: String(ticketId) }, body, files, headers: {}, get: () => undefined }, res);
   return out;
 }
-const statusOf = async (id) => (await pool.query('SELECT status FROM tickets WHERE id = ?', [id]))[0][0].status;
+const statusOf = async (id) => (await pool.query('SELECT status FROM mnt_tickets WHERE id = ?', [id]))[0][0].status;
 const liveReminders = async (id) => (await pool.query(
-  "SELECT desk, to_user_id, audience FROM notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id]))[0];
+  "SELECT desk, to_user_id, audience FROM mnt_notifications WHERE ticket_id = ? AND kind = 'REMINDER' AND status = 'PENDING'", [id]))[0];
 
 test('JE completes -> applicant mailed once; dispute reopens; confirm closes', async () => {
   const applicantId = await makeUser({ role: 'APPLICANT' });
@@ -55,7 +55,7 @@ test('JE completes -> applicant mailed once; dispute reopens; confirm closes', a
   assert.equal((await call(confirmCompletion, { user: applicant, ticketId: id, body: { accepted: false, remarks: 'Still leaks' } })).status, 200);
   assert.equal(await statusOf(id), 'WORK_IN_PROGRESS');
   // The JE hears the comment; the applicant is not mailed for the send-back.
-  const [toJe] = await pool.query("SELECT subject, body FROM notifications WHERE ticket_id = ? AND to_user_id = ? AND status = 'PENDING'", [id, jeId]);
+  const [toJe] = await pool.query("SELECT subject, body FROM mnt_notifications WHERE ticket_id = ? AND to_user_id = ? AND status = 'PENDING'", [id, jeId]);
   assert.equal(toJe.length, 1);
   assert.match(toJe[0].subject, /Sent back by the applicant/);
   assert.match(toJe[0].body, /Still leaks/);
@@ -64,10 +64,10 @@ test('JE completes -> applicant mailed once; dispute reopens; confirm closes', a
   assert.equal((await call(confirmCompletion, { user: applicant, ticketId: id, body: { accepted: true } })).status, 200);
   assert.equal(await statusOf(id), 'CLOSED');
   assert.equal((await liveReminders(id)).length, 0);
-  const [closed] = await pool.query("SELECT subject FROM notifications WHERE ticket_id = ? AND to_user_id = ? ORDER BY id DESC LIMIT 1", [id, applicantId]);
+  const [closed] = await pool.query("SELECT subject FROM mnt_notifications WHERE ticket_id = ? AND to_user_id = ? ORDER BY id DESC LIMIT 1", [id, applicantId]);
   assert.match(closed[0].subject, /: Closed$/);
 
-  const [log] = await pool.query('SELECT action FROM audit_logs WHERE ticket_id = ? ORDER BY id', [id]);
+  const [log] = await pool.query('SELECT action FROM mnt_audit_logs WHERE ticket_id = ? ORDER BY id', [id]);
   assert.deepEqual(log.map((r) => r.action), ['RESOLVED', 'SENT_BACK', 'RESOLVED', 'CLOSED']);
 });
 
@@ -94,7 +94,7 @@ test('uploads: category from the uploader; outsiders and closed tickets refused'
   assert.equal((await up({ id: applicantId, role: 'APPLICANT' })).body.category, 'APPLICANT_EVIDENCE');
   assert.equal((await up({ id: otherJe, role: 'JE' })).status, 403);
 
-  await pool.query("UPDATE tickets SET status = 'CLOSED' WHERE id = ?", [id]);
+  await pool.query("UPDATE mnt_tickets SET status = 'CLOSED' WHERE id = ?", [id]);
   assert.equal((await up({ id: seId, role: 'SE' })).status, 403);
 
   fs.rmSync(path.resolve('uploads/tickets', String(id)), { recursive: true, force: true });

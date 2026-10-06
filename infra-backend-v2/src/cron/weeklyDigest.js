@@ -27,7 +27,7 @@ const daysSince = (date, now) => Math.max(0, Math.floor((now - new Date(date)) /
 // COLLATE: tickets and user_scopes were created with different default collations on some
 // servers; comparing the columns bare raises ER_CANT_AGGREGATE_2COLLATIONS (same guard as deskController).
 const AE_SCOPE = `(t.current_desk_user_id = ? OR EXISTS (
-  SELECT 1 FROM user_scopes s
+  SELECT 1 FROM mnt_user_scopes s
    WHERE s.user_id = ? AND s.department = t.department COLLATE utf8mb4_unicode_ci
      AND (t.campus IS NULL OR s.campus IN (t.campus COLLATE utf8mb4_unicode_ci, 'BOTH'))))`;
 
@@ -41,12 +41,12 @@ export async function loadDigestData(connection, user, now = new Date()) {
   const since = new Date(now.getTime() - 7 * DAY);
   const rows = async (where, params, label, limit = 50) => {
     const [r] = await connection.query(
-      `SELECT t.id, ${SINCE_EXPR} AS since FROM tickets t
+      `SELECT t.id, ${SINCE_EXPR} AS since FROM mnt_tickets t
         WHERE t.is_mock = FALSE AND ${where} ORDER BY since ASC LIMIT ?`, [...params, limit]);
     return r.map((x) => ({ id: x.id, days: daysSince(x.since, now), label }));
   };
   const total = async (where, params) => weekCount(connection,
-    `SELECT COUNT(*) AS n FROM tickets t WHERE t.is_mock = FALSE AND ${where}`, params);
+    `SELECT COUNT(*) AS n FROM mnt_tickets t WHERE t.is_mock = FALSE AND ${where}`, params);
 
   switch (user.role) {
     case 'AE': {
@@ -80,7 +80,7 @@ export async function loadDigestData(connection, user, now = new Date()) {
       const status = user.role === 'SE' ? STATUS.PENDING_SE_APPROVAL : STATUS.PENDING_DEAN_APPROVAL;
       const w = 't.status = ? AND t.current_desk_user_id = ?';
       const decided = await weekCount(connection,
-        `SELECT COUNT(DISTINCT a.ticket_id) AS n FROM audit_logs a JOIN tickets t ON t.id = a.ticket_id
+        `SELECT COUNT(DISTINCT a.ticket_id) AS n FROM mnt_audit_logs a JOIN mnt_tickets t ON t.id = a.ticket_id
           WHERE t.is_mock = FALSE AND a.user_id = ? AND a.created_at >= ?
             AND a.action IN ('FORWARDED','APPROVED','REJECTED','CHANGES_REQUESTED')`, [user.id, since]);
       return {
@@ -90,7 +90,7 @@ export async function loadDigestData(connection, user, now = new Date()) {
     }
     case 'CLERICAL': {
       const n = (action) => weekCount(connection,
-        `SELECT COUNT(DISTINCT a.ticket_id) AS n FROM audit_logs a JOIN tickets t ON t.id = a.ticket_id
+        `SELECT COUNT(DISTINCT a.ticket_id) AS n FROM mnt_audit_logs a JOIN mnt_tickets t ON t.id = a.ticket_id
           WHERE t.is_mock = FALSE AND a.action = ? AND a.created_at >= ?`, [action, since]);
       return {
         counts: [
@@ -103,10 +103,10 @@ export async function loadDigestData(connection, user, now = new Date()) {
     }
     case 'ACCOUNTANT': {
       const awarded = await weekCount(connection,
-        `SELECT COUNT(DISTINCT a.ticket_id) AS n FROM audit_logs a JOIN tickets t ON t.id = a.ticket_id
+        `SELECT COUNT(DISTINCT a.ticket_id) AS n FROM mnt_audit_logs a JOIN mnt_tickets t ON t.id = a.ticket_id
           WHERE t.is_mock = FALSE AND a.action = 'WORK_AWARDED' AND a.created_at >= ?`, [since]);
       const pendingBills = await weekCount(connection,
-        `SELECT COUNT(*) AS n FROM bills b JOIN tickets t ON t.id = b.ticket_id
+        `SELECT COUNT(*) AS n FROM mnt_bills b JOIN mnt_tickets t ON t.id = b.ticket_id
           WHERE t.is_mock = FALSE AND b.payment_status = 'PENDING'`, []);
       return { counts: [['Tickets awarded this week', awarded], ['Bills pending', pendingBills]], oldest: [] };
     }
@@ -128,7 +128,7 @@ export async function previewDigestFor(connection, user, now = new Date()) {
 export async function queueWeeklyDigests({ now = new Date(), connection = pool } = {}) {
   const week = isoWeekKey(now);
   const [users] = await connection.query(
-    `SELECT id, name, email, role FROM users WHERE is_active = TRUE AND is_demo = FALSE AND role IN (?) AND email NOT LIKE '%.invalid'`,
+    `SELECT id, name, email, role FROM mnt_users WHERE is_active = TRUE AND is_demo = FALSE AND role IN (?) AND email NOT LIKE '%.invalid'`,
     [DIGEST_ROLES]);
   const out = { queued: 0, skipped: 0 };
   for (const user of users) {

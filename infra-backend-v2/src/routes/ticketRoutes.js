@@ -50,7 +50,7 @@ router.param('bill_id', demoBillParam);
 router.get('/applicant', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT * FROM tickets WHERE applicant_id = ? AND ${worldClause(req.user, '')} ORDER BY created_at DESC`,
+      `SELECT * FROM mnt_tickets WHERE applicant_id = ? AND ${worldClause(req.user, '')} ORDER BY created_at DESC`,
       [req.user.id]
     );
     // Applicant view: no assignee / desk-owner ids, stage in plain words (Q11).
@@ -127,8 +127,8 @@ router.get('/je/dashboard', requireRole(['JE']), async (req, res) => {
       `SELECT t.*, u.name as applicant_name, u.phone as applicant_phone, u.email as applicant_email,
               r.estimated_amount, r.nature_of_work, aw.work_order_value AS awarded_amount,
               ${EFFECTIVE_AMOUNT} AS effective_amount
-       FROM tickets t 
-       JOIN users u ON t.applicant_id = u.id 
+       FROM mnt_tickets t 
+       JOIN mnt_users u ON t.applicant_id = u.id 
        LEFT JOIN ${LATEST_REPORT} r ON t.id = r.ticket_id
        LEFT JOIN ${AWARDED_TENDER} aw ON aw.ticket_id = t.id
        WHERE t.assigned_je_id = ? 
@@ -156,7 +156,7 @@ router.get(
       const [ticketRows] = await pool.query(
         `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
                 is_mock, is_demo, current_desk_user_id
-           FROM tickets WHERE id = ?`,
+           FROM mnt_tickets WHERE id = ?`,
         [ticket_id]
       );
       if (ticketRows.length === 0) {
@@ -169,8 +169,8 @@ router.get(
 
       const [tenders] = await pool.query(
         `SELECT tn.*, u.name as publisher_name, u.role as publisher_role
-         FROM tenders tn
-         JOIN users u ON tn.created_by = u.id
+         FROM mnt_tenders tn
+         JOIN mnt_users u ON tn.created_by = u.id
          WHERE tn.ticket_id = ?
          ORDER BY tn.created_at DESC`,
         [ticket_id]
@@ -200,7 +200,7 @@ router.get(
       const [ticketRows] = await pool.query(
         `SELECT id, applicant_id, department, campus, status, assigned_je_id, assigned_ae_id, assigned_se_id,
                 is_mock, is_demo, current_desk_user_id
-           FROM tickets WHERE id = ?`,
+           FROM mnt_tickets WHERE id = ?`,
         [ticket_id]
       );
       if (ticketRows.length === 0) {
@@ -212,8 +212,8 @@ router.get(
       }
       const [bills] = await pool.query(
         `SELECT b.*, u.name as accountant_name 
-         FROM bills b 
-         JOIN users u ON b.processed_by = u.id 
+         FROM mnt_bills b 
+         JOIN mnt_users u ON b.processed_by = u.id 
          WHERE b.ticket_id = ? 
          ORDER BY b.created_at DESC`,
         [ticket_id]
@@ -248,7 +248,7 @@ router.get('/:ticket_id/details', async (req, res) => {
   try {
     const [tickets] = await pool.query(
       `SELECT t.*, u.name as applicant_name, u.email as applicant_email, u.phone as applicant_phone
-       FROM tickets t JOIN users u ON t.applicant_id = u.id WHERE t.id = ?`,
+       FROM mnt_tickets t JOIN mnt_users u ON t.applicant_id = u.id WHERE t.id = ?`,
       [ticket_id]
     );
     if (tickets.length === 0) {
@@ -267,25 +267,25 @@ router.get('/:ticket_id/details', async (req, res) => {
               a.uploader_desk, a.audit_log_id, a.original_name,
               u.role AS uploader_role, u.name AS uploader_name,
               al.action AS audit_action, al.from_desk AS audit_from_desk, al.to_desk AS audit_to_desk
-         FROM attachments a
-         LEFT JOIN users u ON u.id = a.uploaded_by
-         LEFT JOIN audit_logs al ON al.id = a.audit_log_id
+         FROM mnt_attachments a
+         LEFT JOIN mnt_users u ON u.id = a.uploaded_by
+         LEFT JOIN mnt_audit_logs al ON al.id = a.audit_log_id
         WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
       [ticket_id]
     );
     // Newest first. Every version is sent (small rows); the newest is the "current" report.
     const [reports] = await pool.query(
-      'SELECT * FROM reports WHERE ticket_id = ? ORDER BY version DESC', [ticket_id]);
+      'SELECT * FROM mnt_reports WHERE ticket_id = ? ORDER BY version DESC', [ticket_id]);
 
     let tenders = [];
     try {
-      [tenders] = await pool.query('SELECT * FROM tenders WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
+      [tenders] = await pool.query('SELECT * FROM mnt_tenders WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
     } catch (err) {
       if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
     }
     let bills = [];
     try {
-      [bills] = await pool.query('SELECT * FROM bills WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
+      [bills] = await pool.query('SELECT * FROM mnt_bills WHERE ticket_id = ? ORDER BY created_at DESC', [ticket_id]);
     } catch (err) {
       if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
     }
@@ -293,7 +293,7 @@ router.get('/:ticket_id/details', async (req, res) => {
     const [auditLogs] = await pool.query(
       `SELECT a.id, a.action, a.remarks, a.created_at, a.user_id, a.visibility, a.from_desk, a.to_desk, a.is_self_action,
               u.name as actor_name, u.role as actor_role
-         FROM audit_logs a JOIN users u ON a.user_id = u.id
+         FROM mnt_audit_logs a JOIN mnt_users u ON a.user_id = u.id
         WHERE a.ticket_id = ? ORDER BY a.created_at ASC, a.id ASC`,
       [ticket_id]
     );

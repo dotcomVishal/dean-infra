@@ -17,15 +17,15 @@ async function guard(req, res, next, sql, id) {
 }
 
 export const demoTicketParam = (req, res, next, ticketId) =>
-  guard(req, res, next, 'SELECT is_demo FROM tickets WHERE id = ?', ticketId);
+  guard(req, res, next, 'SELECT is_demo FROM mnt_tickets WHERE id = ?', ticketId);
 
 export const demoAttachmentParam = (req, res, next, attachmentId) =>
   guard(req, res, next,
-    'SELECT t.is_demo FROM attachments a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
+    'SELECT t.is_demo FROM mnt_attachments a JOIN mnt_tickets t ON t.id = a.ticket_id WHERE a.id = ?', attachmentId);
 
 export const demoBillParam = (req, res, next, billId) =>
   guard(req, res, next,
-    'SELECT t.is_demo FROM bills b JOIN tickets t ON t.id = b.ticket_id WHERE b.id = ?', billId);
+    'SELECT t.is_demo FROM mnt_bills b JOIN mnt_tickets t ON t.id = b.ticket_id WHERE b.id = ?', billId);
 
 // Layer F: the admin console for a demo account. Only the demo Sysadmin gets this far (requireRole),
 // and only for these GET routes. Every other route and method answers 403.

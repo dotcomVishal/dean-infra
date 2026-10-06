@@ -31,7 +31,7 @@ export const requireAuth = async (req, res, next) => {
       if (!demoEnabled() || !DEMO_UIDS.has(firebase_uid)) {
         return res.status(401).json({ success: false, message: 'Session expired. Sign in again.', requestId: req.id });
       }
-      [users] = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE firebase_uid = ? AND is_demo = TRUE`, [firebase_uid]);
+      [users] = await pool.query(`SELECT ${USER_COLUMNS} FROM mnt_users WHERE firebase_uid = ? AND is_demo = TRUE`, [firebase_uid]);
     } else {
       // S4: a Firebase account used to be linked to a pre-seeded account by
       // email alone, with no check on how that email was proven. If any
@@ -45,27 +45,27 @@ export const requireAuth = async (req, res, next) => {
       }
 
       // 2. Look up the user in our MySQL database using their unique Firebase UID
-      [users] = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE firebase_uid = ?`, [firebase_uid]);
+      [users] = await pool.query(`SELECT ${USER_COLUMNS} FROM mnt_users WHERE firebase_uid = ?`, [firebase_uid]);
 
       if (users.length === 0 && decodedToken.email) {
         // Check if user exists by email (pre-seeded account)
-        const [byEmail] = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE email = ?`, [decodedToken.email]);
+        const [byEmail] = await pool.query(`SELECT ${USER_COLUMNS} FROM mnt_users WHERE email = ?`, [decodedToken.email]);
 
         if (byEmail.length > 0) {
           // A Google account can never link to (and so become) a demo account.
           if (!byEmail[0].is_demo) {
-            await pool.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [firebase_uid, byEmail[0].id]);
+            await pool.query('UPDATE mnt_users SET firebase_uid = ? WHERE id = ?', [firebase_uid, byEmail[0].id]);
             users = byEmail;
           }
         } else {
           // Any google account: auto-provision as APPLICANT
           const displayName = decodedToken.name || decodedToken.email.split('@')[0];
           const [result] = await pool.query(
-            `INSERT INTO users (firebase_uid, name, email, role, department, is_active) 
+            `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active) 
              VALUES (?, ?, ?, 'APPLICANT', 'General', TRUE)`,
             [firebase_uid, displayName, decodedToken.email]
           );
-          const [created] = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [result.insertId]);
+          const [created] = await pool.query(`SELECT ${USER_COLUMNS} FROM mnt_users WHERE id = ?`, [result.insertId]);
           users = created;
         }
       }

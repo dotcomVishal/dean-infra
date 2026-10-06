@@ -22,22 +22,22 @@ async function enumValues(table, column) {
 }
 
 test('tickets.status ENUM holds every STATUS the machine can produce', async () => {
-  const db = await enumValues('tickets', 'status');
+  const db = await enumValues('mnt_tickets', 'status');
   assert.deepEqual(Object.values(STATUS).filter((s) => !db.includes(s)), []);
 });
 
 test('users.role ENUM holds every ROLE', async () => {
-  const db = await enumValues('users', 'role');
+  const db = await enumValues('mnt_users', 'role');
   assert.deepEqual(Object.values(ROLE).filter((r) => !db.includes(r)), []);
 });
 
 test('audit_logs.action ENUM holds every LOG_ACTION', async () => {
-  const db = await enumValues('audit_logs', 'action');
+  const db = await enumValues('mnt_audit_logs', 'action');
   assert.deepEqual(Object.values(LOG_ACTION).filter((a) => !db.includes(a)), []);
 });
 
 test('every desk in the approval chain is a valid role', async () => {
-  const roles = await enumValues('users', 'role');
+  const roles = await enumValues('mnt_users', 'role');
   assert.deepEqual(Object.keys(DESK_RANK).filter((d) => !roles.includes(d)), []);
 });
 
@@ -72,7 +72,7 @@ async function withTx(fn) {
 }
 
 const activeHolders = async (conn, role) => (await conn.query(
-  `SELECT email FROM users WHERE role = ? AND is_active = TRUE`, [role]))[0];
+  `SELECT email FROM mnt_users WHERE role = ? AND is_active = TRUE`, [role]))[0];
 
 test('running migrations again is a no-op', async () => {
   const [before] = await pool.query('SELECT COUNT(*) AS n FROM mnt_schema_migrations');
@@ -88,14 +88,14 @@ test('the baseline is safe to re-run after it was applied', async () => {
 
 test('baseline: new columns exist with the expected type and default', async () => {
   for (const c of ['assigned_ae_id', 'assigned_se_id']) {
-    const info = await columnInfo('tickets', c);
+    const info = await columnInfo('mnt_tickets', c);
     assert.ok(info, `tickets.${c} missing`);
     assert.equal(info.nullable, 'YES');
   }
-  const mock = await columnInfo('tickets', 'is_mock');
+  const mock = await columnInfo('mnt_tickets', 'is_mock');
   assert.equal(mock.def, '0');
   assert.equal(mock.nullable, 'NO');
-  const self = await columnInfo('audit_logs', 'is_self_action');
+  const self = await columnInfo('mnt_audit_logs', 'is_self_action');
   assert.equal(self.def, '0');
   assert.equal(self.nullable, 'NO');
 });
@@ -103,21 +103,21 @@ test('baseline: new columns exist with the expected type and default', async () 
 test('baseline: foreign keys and indexes exist', async () => {
   const [fks] = await pool.query(
     `SELECT CONSTRAINT_NAME AS n FROM information_schema.TABLE_CONSTRAINTS
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tickets' AND CONSTRAINT_TYPE = 'FOREIGN KEY'`);
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mnt_tickets' AND CONSTRAINT_TYPE = 'FOREIGN KEY'`);
   const [idx] = await pool.query(
     `SELECT DISTINCT INDEX_NAME AS n FROM information_schema.STATISTICS
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tickets'`);
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mnt_tickets'`);
   const fk = fks.map((r) => r.n);
   const ix = idx.map((r) => r.n);
-  for (const n of ['fk_tickets_assigned_ae', 'fk_tickets_assigned_se']) assert.ok(fk.includes(n), n);
+  for (const n of ['fk_mnt_tickets_assigned_ae', 'fk_mnt_tickets_assigned_se']) assert.ok(fk.includes(n), n);
   for (const n of ['idx_assigned_ae', 'idx_assigned_se', 'idx_is_mock']) assert.ok(ix.includes(n), n);
 });
 
 for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 'director@placeholder.invalid']]) {
   test(`baseline: no active ${role} -> exactly one placeholder, stable on re-run`, async () => {
     await withTx(async (conn) => {
-      await conn.query(`UPDATE users SET is_active = FALSE WHERE role = ?`, [role]);
-      await conn.query(`DELETE FROM users WHERE email = ?`, [email]);
+      await conn.query(`UPDATE mnt_users SET is_active = FALSE WHERE role = ?`, [role]);
+      await conn.query(`DELETE FROM mnt_users WHERE email = ?`, [email]);
       await conn.query(PLACEHOLDER_SQL);
       await conn.query(PLACEHOLDER_SQL);
       const holders = await activeHolders(conn, role);
@@ -127,13 +127,13 @@ for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 
 
   test(`baseline: real active ${role} -> no placeholder inserted`, async () => {
     await withTx(async (conn) => {
-      await conn.query(`DELETE FROM users WHERE email = ?`, [email]);
-      await conn.query(`UPDATE users SET is_active = FALSE WHERE role = ?`, [role]);
+      await conn.query(`DELETE FROM mnt_users WHERE email = ?`, [email]);
+      await conn.query(`UPDATE mnt_users SET is_active = FALSE WHERE role = ?`, [role]);
       await conn.query(
-        `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+        `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
          VALUES ('ci-real-holder', 'Real', 'ci-real-holder@test.local', ?, 'Administration', TRUE)`, [role]);
       await conn.query(PLACEHOLDER_SQL);
-      const [rows] = await conn.query('SELECT 1 FROM users WHERE email = ?', [email]);
+      const [rows] = await conn.query('SELECT 1 FROM mnt_users WHERE email = ?', [email]);
       assert.equal(rows.length, 0);
       assert.equal((await activeHolders(conn, role)).length, 1);
     });
@@ -141,10 +141,10 @@ for (const [role, email] of [['DEAN', 'dean@placeholder.invalid'], ['DIRECTOR', 
 
   test(`baseline: inactive ${role} placeholder is reactivated when no holder is active`, async () => {
     await withTx(async (conn) => {
-      await conn.query(`UPDATE users SET is_active = FALSE WHERE role = ?`, [role]);
-      await conn.query(`DELETE FROM users WHERE email = ?`, [email]);
+      await conn.query(`UPDATE mnt_users SET is_active = FALSE WHERE role = ?`, [role]);
+      await conn.query(`DELETE FROM mnt_users WHERE email = ?`, [email]);
       await conn.query(
-        `INSERT INTO users (firebase_uid, name, email, role, department, is_active)
+        `INSERT INTO mnt_users (firebase_uid, name, email, role, department, is_active)
          VALUES (?, 'old placeholder', ?, ?, 'Administration', FALSE)`, [`ci-ph-${role}`, email, role]);
       await conn.query(PLACEHOLDER_SQL);
       assert.deepEqual((await activeHolders(conn, role)).map((h) => h.email), [email]);

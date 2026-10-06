@@ -33,7 +33,7 @@ export async function attachFiles(connection, {
   for (const file of files ?? []) {
     const fileUrl = await moveFile(file, ticketId, folder);
     const [result] = await connection.query(
-      `INSERT INTO attachments
+      `INSERT INTO mnt_attachments
          (ticket_id, file_url, uploaded_by, document_category, report_id, uploader_desk, audit_log_id, original_name)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [ticketId, fileUrl, userId, category, reportId, desk, auditLogId, String(file.originalname ?? '').slice(0, 255) || null]
